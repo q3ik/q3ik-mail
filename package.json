@@ -1,0 +1,13 @@
+{
+  "name": "inbox-q3",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "deploy": "wrangler pages deploy apps/web/out"
+  }
+}
