@@ -89,9 +89,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # Build Next.js app (required before wrangler pages dev)
+      # Build for Cloudflare Pages — outputs to .vercel/output/static
       - name: Build web app
-        run: pnpm --filter @q3ik-mail/web build
+        run: pnpm --filter @q3ik-mail/web run build:cf
 
       # Seed local D1 with schema and fixture data
       - name: Initialize local D1 schema
@@ -105,11 +105,11 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter @q3ik-mail/web exec playwright install chromium --with-deps
 
-      # Start local server in background, wait for it
+      # Start local server in background, wait for port to be ready
       - name: Start wrangler pages dev
         run: |
-          pnpm --filter @q3ik-mail/web exec wrangler pages dev .next --port 3000 &
-          pnpm --filter @q3ik-mail/web exec wait-on http://localhost:3000 --timeout 60000
+          pnpm --filter @q3ik-mail/web exec wrangler pages dev .vercel/output/static --port 3000 &
+          pnpm --filter @q3ik-mail/web exec wait-on tcp:3000 --timeout 60000
 
       - name: Run Playwright E2E
         run: pnpm --filter @q3ik-mail/web e2e
