@@ -1,12 +1,13 @@
 import type { Email } from '@q3ik-mail/database';
 import DOMPurify from 'isomorphic-dompurify';
+import { ReplyIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Reply } from 'lucide-react';
+import type { ComposePayload } from '@/components/mail/compose-dialog';
 
 interface MailDisplayProps {
   thread: Email[];
-  onReply?: () => void;
+  onReply?: (payload: ComposePayload) => void;
 }
 
 export function MailDisplay({ thread, onReply }: MailDisplayProps) {
@@ -18,29 +19,22 @@ export function MailDisplay({ thread, onReply }: MailDisplayProps) {
     );
   }
 
+  const lastEmailId = thread[thread.length - 1].id;
+
   return (
     <div data-testid="mail-display" className="flex flex-col gap-4 p-4 overflow-auto h-full">
-      {thread.map((email, index) => (
+      {thread.map((email) => (
         <EmailCard
           key={email.id}
           email={email}
-          isLast={index === thread.length - 1}
-          onReply={onReply}
+          onReply={email.id === lastEmailId ? onReply : undefined}
         />
       ))}
     </div>
   );
 }
 
-function EmailCard({
-  email,
-  isLast,
-  onReply,
-}: {
-  email: Email;
-  isLast: boolean;
-  onReply?: () => void;
-}) {
+function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: ComposePayload) => void }) {
   const senderName = email.from_name ?? email.from_address;
   const date = new Date(email.created_at).toLocaleString();
 
@@ -58,11 +52,25 @@ function EmailCard({
           </span>
           <span className="text-xs text-muted-foreground">{email.from_address}</span>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-muted-foreground">{date}</span>
-          {isLast && onReply && (
-            <Button variant="outline" size="sm" onClick={onReply}>
-              <Reply className="h-3 w-3 mr-1" />
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
+          {onReply && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              onClick={() =>
+                onReply({
+                  to: email.from_address,
+                  subject: email.subject?.startsWith('Re: ')
+                    ? email.subject
+                    : `Re: ${email.subject ?? ''}`,
+                  replyToId: email.id,
+                  references: email.thread_id,
+                })
+              }
+            >
+              <ReplyIcon className="h-4 w-4 mr-1" />
               Reply
             </Button>
           )}

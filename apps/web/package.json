@@ -7,13 +7,15 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "next lint",
+    "lint": "eslint src",
     "test": "vitest run",
     "e2e": "playwright test"
   },
   "dependencies": {
     "@cloudflare/next-on-pages": "^1.13.12",
     "@q3ik-mail/database": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
@@ -34,14 +36,21 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250508.0",
+    "@eslint/eslintrc": "^3.3.1",
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.3.0",
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^22.15.18",
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19.1.4",
+    "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.5.0",
+    "eslint": "^9.27.0",
+    "eslint-config-next": "^15.3.2",
     "postcss": "^8.5.14",
     "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "wait-on": "^9.0.5",
     "wrangler": "^4.13.2"
   }
 }

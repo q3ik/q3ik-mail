@@ -1,48 +1,67 @@
-import { getRequestContext } from '@cloudflare/next-on-pages';
 import { Resend } from 'resend';
+import { NextRequest } from 'next/server';
+import { getRequestContext } from '@cloudflare/next-on-pages';
 
 export const runtime = 'edge';
 
-export async function POST(req: Request) {
+function buildEmailHeaders(
+  replyToId?: string,
+  references?: string
+): Record<string, string> | undefined {
+  if (!replyToId) return undefined;
+  // RFC 2822: References accumulates all ancestor Message-IDs in the thread.
+  // thread_id is the Message-ID of the first email in the thread, which is a
+  // valid starting point for References if we don't have a full chain yet.
+  const updatedReferences = references
+    ? `${references} ${replyToId}`
+    : replyToId;
+  return {
+    'In-Reply-To': replyToId,
+    References: updatedReferences,
+  };
+}
+
+export async function POST(req: NextRequest) {
   const { env } = getRequestContext();
-  const body = (await req.json()) as {
-    to: string;
-    subject: string;
-    content: string;
-    replyToMessageId?: string;
+  const resend = new Resend(env.RESEND_API_KEY);
+
+  let body: {
+    to?: string;
+    subject?: string;
+    content?: string;
+    replyToId?: string;
     references?: string;
   };
 
-  if (!body.to || !body.subject || !body.content) {
-    return Response.json(
-      { error: 'Missing required fields: to, subject, content' },
-      { status: 400 }
-    );
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const resend = new Resend(env.RESEND_API_KEY);
+  const { to, subject, content, replyToId, references } = body;
 
-  const headers: Record<string, string> = {};
-  if (body.replyToMessageId) {
-    headers['In-Reply-To'] = body.replyToMessageId;
-    headers['References'] = body.references
-      ? `${body.references} ${body.replyToMessageId}`
-      : body.replyToMessageId;
+  if (!to || !subject || !content) {
+    return Response.json({ error: 'Missing required fields: to, subject, content' }, { status: 400 });
   }
 
-  // TODO: replace with verified Resend sender domain
-  const { data, error } = await resend.emails.send({
-    from: 'q3ik-mail <mail@q3ik.com>',
-    to: [body.to],
-    subject: body.subject,
-    html: `<div>${body.content}</div>`,
-    headers: Object.keys(headers).length > 0 ? headers : undefined,
-  });
+  try {
+    const result = await resend.emails.send({
+      from: 'q3ik Mail <mail@q3ik.com>',
+      to: [to],
+      subject,
+      text: content,
+      headers: buildEmailHeaders(replyToId, references),
+    });
 
-  if (error) {
-    console.error('[send] Resend error:', error);
-    return Response.json({ error: error.message }, { status: 500 });
+    if (result.error) {
+      console.error('Resend API error:', result.error);
+      return Response.json({ error: result.error.message }, { status: 500 });
+    }
+
+    return Response.json({ id: result.data?.id }, { status: 200 });
+  } catch (error) {
+    console.error('Failed to send email:', error);
+    return Response.json({ error: 'Failed to send email' }, { status: 500 });
   }
-
-  return Response.json({ id: data?.id });
 }

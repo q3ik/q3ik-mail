@@ -4,7 +4,7 @@ import { Webhook } from 'svix';
 
 // Env interface — matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
-interface Env {
+export interface Env {
   DB: D1Database;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
@@ -77,6 +77,8 @@ export default Sentry.withSentry(
     const emailId = event.data.email_id;
 
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
+    // Use resend.emails.receiving.get() — NOT resend.emails.get()
+    // resend.emails.get() is for sent mail; receiving.get() is for inbound
     const resend = new Resend(env.RESEND_API_KEY);
     let receivedEmail: ReceivedEmail;
     try {
