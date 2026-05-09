@@ -1,7 +1,8 @@
 #:schema node_modules/wrangler/config-schema.json
-name = "fastforward-worker"
-main = "apps/worker/src/index.ts"
-compatibility_date = "2024-05-01"
+name = "q3ik-mail-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 # The D1 database binding
 [[d1_databases]]
