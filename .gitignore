@@ -12,10 +12,10 @@ worker-configuration.d.ts
 
 # pnpm state files (machine-local: absolute paths + timestamps)
 node_modules/.modules.yaml
-node_modules/.pnpm/
-
-# pnpm workspace state (machine-local, regenerated on install)
 node_modules/.pnpm-workspace-state-v1.json
+
+# pnpm virtual store (machine-generated, never commit)
+node_modules/.pnpm/
 
 # NOTE: pnpm-lock.yaml is intentionally NOT ignored — commit it for deterministic installs
 
@@ -43,3 +43,4 @@ dist/
 **/test-results/
 **/playwright-report/
 **/coverage/
+
