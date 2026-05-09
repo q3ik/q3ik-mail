@@ -14,7 +14,7 @@ interface Env {
 export default Sentry.withSentry(
   (env: Env) => ({
     dsn: env.SENTRY_DSN,
-    tracesSampleRate: 1.0,
+    tracesSampleRate: 0.2,
     environment: env.ENVIRONMENT ?? 'production',
   }),
   {
