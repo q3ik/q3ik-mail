@@ -1,6 +1,7 @@
 {
   "name": "inbox-q3",
   "private": true,
+  "packageManager": "pnpm@10.10.0",
   "workspaces": [
     "apps/*",
     "packages/*"
