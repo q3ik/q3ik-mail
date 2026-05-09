@@ -5,6 +5,7 @@ compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 # The D1 database binding
+# Run `npx wrangler d1 create q3ik-mail-db` and replace the placeholder below
 [[d1_databases]]
 binding = "DB"
 database_name = "q3ik-mail-db"
@@ -12,5 +13,4 @@ database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
 
 [vars]
 ENVIRONMENT = "production"
-# RESEND_API_KEY and RESEND_WEBHOOK_SECRET are set via wrangler secret put
-# SENTRY_DSN is set via wrangler secret put
+# RESEND_API_KEY, RESEND_WEBHOOK_SECRET, and SENTRY_DSN are set via wrangler secret put
