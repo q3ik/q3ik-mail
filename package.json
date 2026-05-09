@@ -9,5 +9,8 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "deploy": "wrangler pages deploy apps/web/out"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2"
   }
 }
