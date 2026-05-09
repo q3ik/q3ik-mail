@@ -3,4 +3,5 @@ interface CloudflareEnv {
   RESEND_API_KEY: string;
   AUTH_SECRET: string;
   SENTRY_DSN: string;
+  NEXT_PUBLIC_SENTRY_DSN: string;
 }
