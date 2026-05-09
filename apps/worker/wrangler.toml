@@ -10,6 +10,6 @@ database_name = "q3ik-mail-db"
 database_id = "a184446c-a11e-4b15-89c0-8b099304ab08"
 
 [vars]
-# These will be set via 'wrangler secret put'
-# RESEND_API_KEY = "re_..."
-# RESEND_WEBHOOK_SECRET = "whsec_..."
+ENVIRONMENT = "production"
+# RESEND_API_KEY and RESEND_WEBHOOK_SECRET are set via wrangler secret put
+# SENTRY_DSN is set via wrangler secret put
