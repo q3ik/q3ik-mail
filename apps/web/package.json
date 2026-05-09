@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "wrangler pages dev --compatibility-flag=nodejs_compat",
-    "build": "next build",
-    "deploy": "next build && rm -rf .next/cache && wrangler pages deploy .next --project-name=q3ik-mail",
+    "build": "npx @cloudflare/next-on-pages",
+    "deploy": "rm -rf .next/cache && wrangler pages deploy .next --project-name=q3ik-mail",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
