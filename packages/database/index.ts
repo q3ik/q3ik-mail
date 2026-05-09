@@ -112,7 +112,7 @@ export async function getThreadList(
            is_read, is_sent, created_at,
            ROW_NUMBER() OVER (
              PARTITION BY thread_id
-             ORDER BY created_at DESC, id DESC
+             ORDER BY created_at DESC
            ) AS thread_rank
          FROM emails
        ) ranked_emails
