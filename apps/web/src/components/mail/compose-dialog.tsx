@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Email } from '@q3ik-mail/database';
 import { Button } from '@/components/ui/button';
 
@@ -11,13 +11,23 @@ interface ComposeDialogProps {
 }
 
 export function ComposeDialog({ open, onOpenChange, replyTo }: ComposeDialogProps) {
-  const [to, setTo] = useState(replyTo?.from_address ?? '');
-  const [subject, setSubject] = useState(
-    replyTo?.subject ? `Re: ${replyTo.subject.replace(/^Re:\s*/i, '')}` : ''
-  );
+  const [to, setTo] = useState('');
+  const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Sync form fields when the dialog opens or when replyTo changes while open
+  useEffect(() => {
+    if (open) {
+      setTo(replyTo?.from_address ?? '');
+      setSubject(
+        replyTo?.subject ? `Re: ${replyTo.subject.replace(/^Re:\s*/i, '')}` : ''
+      );
+      setContent('');
+      setError(null);
+    }
+  }, [open, replyTo]);
 
   if (!open) return null;
 

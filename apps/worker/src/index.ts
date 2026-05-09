@@ -28,6 +28,16 @@ interface ReceivedEmail {
   headers?: Array<{ name: string; value: string }>;
 }
 
+// Typed accessor for the Resend inbound-email receiving API.
+// resend.emails.receiving is a newer endpoint not yet reflected in the
+// published SDK type declarations; this wrapper avoids a blanket `any` cast.
+interface ResendReceiving {
+  get(emailId: string): Promise<ReceivedEmail>;
+}
+interface ResendEmailsWithReceiving {
+  receiving: ResendReceiving;
+}
+
 export default Sentry.withSentry(
   (env: Env) => ({
     dsn: env.SENTRY_DSN,
@@ -67,13 +77,10 @@ export default Sentry.withSentry(
     const emailId = event.data.email_id;
 
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
-    // resend.emails.receiving.get() retrieves inbound email; cast to any as it
-    // is a newer API not yet reflected in the published SDK typings.
     const resend = new Resend(env.RESEND_API_KEY);
     let receivedEmail: ReceivedEmail;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      receivedEmail = await (resend.emails as any).receiving.get(emailId) as ReceivedEmail;
+      receivedEmail = await (resend.emails as unknown as ResendEmailsWithReceiving).receiving.get(emailId);
     } catch (err) {
       Sentry.captureException(err, {
         tags: { layer: 'worker', operation: 'resend.receiving.get' },
