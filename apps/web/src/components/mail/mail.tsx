@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useRef } from 'react';
 import type { Email, EmailSummary } from '@q3ik-mail/database';
 import {
   ResizablePanelGroup,
@@ -17,27 +17,49 @@ interface MailProps {
   defaultSelectedId?: string;
 }
 
-export function Mail({ threads, selectedThread, defaultSelectedId }: MailProps) {
+export function Mail({ threads: initialThreads, selectedThread, defaultSelectedId }: MailProps) {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
     defaultSelectedId ?? null
   );
   const [currentThread, setCurrentThread] = useState<Email[]>(selectedThread);
+  // Bug #6 fix: lift threads into state so we can optimistically update is_read
+  const [threads, setThreads] = useState<EmailSummary[]>(initialThreads);
   const [isPending, startTransition] = useTransition();
 
-  function handleSelectThread(threadId: string) {
+  // Bug #3 fix: monotonically-increasing token to guard against out-of-order responses
+  const requestTokenRef = useRef(0);
+
+  async function handleSelectThread(threadId: string) {
     if (threadId === selectedThreadId) return;
 
-    startTransition(async () => {
-      const emails = await fetchThread(threadId);
+    // Increment token for this request; capture it in the closure
+    const token = ++requestTokenRef.current;
+
+    // Bug #5 fix: run async fetch OUTSIDE startTransition so isPending is
+    // reliable from the moment the user clicks until state is committed.
+    const emails = await fetchThread(threadId);
+
+    // Bug #3 fix: discard response if a newer selection has already been made
+    if (token !== requestTokenRef.current) return;
+
+    // Bug #5 fix: wrap only the synchronous state updates in startTransition
+    startTransition(() => {
       setSelectedThreadId(threadId);
       setCurrentThread(emails);
 
-      // Mark all unread emails in the thread as read concurrently
-      const unreadIds = emails.filter((e) => e.is_read === 0).map((e) => e.id);
-      if (unreadIds.length > 0) {
-        await Promise.all(unreadIds.map((id) => markEmailAsRead(id)));
-      }
+      // Bug #6 fix: optimistically mark the selected thread as read in the list
+      setThreads((prev) =>
+        prev.map((t) =>
+          t.thread_id === threadId ? { ...t, is_read: 1 } : t
+        )
+      );
     });
+
+    // Fire-and-forget the DB writes after UI is already updated
+    const unreadIds = emails.filter((e) => e.is_read === 0).map((e) => e.id);
+    if (unreadIds.length > 0) {
+      void Promise.all(unreadIds.map((id) => markEmailAsRead(id)));
+    }
   }
 
   return (
