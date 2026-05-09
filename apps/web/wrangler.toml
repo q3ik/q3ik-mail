@@ -4,11 +4,11 @@ compatibility_date = "2024-05-01"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = ".vercel/output/static"
 
-# D1 database binding — must match database_id in apps/worker/wrangler.toml
+# D1 database binding
 [[d1_databases]]
 binding = "DB"
 database_name = "q3ik-mail-db"
-database_id = "your-d1-id-here"  # replace with output from: wrangler d1 create q3ik-mail-db
+database_id = "a184446c-a11e-4b15-89c0-8b099304ab08"
 
 [vars]
 # RESEND_API_KEY is set via: wrangler secret put RESEND_API_KEY
