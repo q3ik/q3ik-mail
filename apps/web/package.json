@@ -21,10 +21,14 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250508.0",
+    "@playwright/test": "^1.59.1",
     "@types/node": "^22.15.18",
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19.1.4",
+    "@vitejs/plugin-react": "^5.2.0",
     "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "wait-on": "^9.0.5",
     "wrangler": "^4.13.2"
   }
 }

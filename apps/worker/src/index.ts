@@ -2,7 +2,7 @@ import { Resend } from 'resend';
 
 // Env interface — matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
-interface Env {
+export interface Env {
   DB: D1Database;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
@@ -22,8 +22,10 @@ export default {
 
     // --- Step 1: Verify webhook signature ---
     // Use Awaited<ReturnType<...>> because verify() is async
+    // @ts-ignore — resend v4 types don't yet include webhooks; runtime API exists
     let event: Awaited<ReturnType<typeof resend.webhooks.verify>>;
     try {
+      // @ts-ignore — resend v4 types don't yet include webhooks; runtime API exists
       event = await resend.webhooks.verify({
         payload: rawBody,
         headers: {
@@ -47,10 +49,12 @@ export default {
     const emailId = event.data.email_id;
 
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
+    // @ts-ignore — resend v4 types don't yet include emails.receiving; runtime API exists
     let receivedEmail: Awaited<ReturnType<typeof resend.emails.receiving.get>>;
     try {
       // Use resend.emails.receiving.get() — NOT resend.emails.get()
       // resend.emails.get() is for sent mail; receiving.get() is for inbound
+      // @ts-ignore — resend v4 types don't yet include emails.receiving; runtime API exists
       receivedEmail = await resend.emails.receiving.get(emailId);
     } catch (_err) {
       return new Response('Failed to fetch email payload', { status: 502 });
