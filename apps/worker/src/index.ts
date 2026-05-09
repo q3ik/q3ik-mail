@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/cloudflare';
 import { Resend } from 'resend';
+import { Webhook } from 'svix';
 
 // Env interface — matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
@@ -9,6 +10,22 @@ interface Env {
   RESEND_WEBHOOK_SECRET: string;
   SENTRY_DSN: string;        // injected via wrangler secret
   ENVIRONMENT: string;       // set in wrangler.toml [vars]
+}
+
+// Shape of a verified Resend webhook event
+interface ResendWebhookEvent {
+  type: string;
+  data: { email_id: string };
+}
+
+// Shape of the inbound email payload from the Resend receiving API
+interface ReceivedEmail {
+  from?: string;
+  to?: string | string[];
+  subject?: string | null;
+  text?: string | null;
+  html?: string | null;
+  headers?: Array<{ name: string; value: string }>;
 }
 
 export default Sentry.withSentry(
@@ -27,22 +44,16 @@ export default Sentry.withSentry(
     // Read raw body as text BEFORE any parsing — required for signature verification
     const rawBody = await request.text();
 
-    const resend = new Resend(env.RESEND_API_KEY);
-
-    // --- Step 1: Verify webhook signature ---
-    // Use Awaited<ReturnType<...>> because verify() is async
-    let event: Awaited<ReturnType<typeof resend.webhooks.verify>>;
+    // --- Step 1: Verify webhook signature via svix ---
+    let event: ResendWebhookEvent;
     try {
-      event = await resend.webhooks.verify({
-        payload: rawBody,
-        headers: {
-          'svix-id': request.headers.get('svix-id') ?? '',
-          'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
-          'svix-signature': request.headers.get('svix-signature') ?? '',
-        },
-        webhookSecret: env.RESEND_WEBHOOK_SECRET,
-      });
-    } catch (_err) {
+      const wh = new Webhook(env.RESEND_WEBHOOK_SECRET);
+      event = wh.verify(rawBody, {
+        'svix-id': request.headers.get('svix-id') ?? '',
+        'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
+        'svix-signature': request.headers.get('svix-signature') ?? '',
+      }) as ResendWebhookEvent;
+    } catch {
       // Signature mismatch or missing headers
       return new Response('Unauthorized', { status: 401 });
     }
@@ -56,11 +67,13 @@ export default Sentry.withSentry(
     const emailId = event.data.email_id;
 
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
-    let receivedEmail: Awaited<ReturnType<typeof resend.emails.receiving.get>>;
+    // resend.emails.receiving.get() retrieves inbound email; cast to any as it
+    // is a newer API not yet reflected in the published SDK typings.
+    const resend = new Resend(env.RESEND_API_KEY);
+    let receivedEmail: ReceivedEmail;
     try {
-      // Use resend.emails.receiving.get() — NOT resend.emails.get()
-      // resend.emails.get() is for sent mail; receiving.get() is for inbound
-      receivedEmail = await resend.emails.receiving.get(emailId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      receivedEmail = await (resend.emails as any).receiving.get(emailId) as ReceivedEmail;
     } catch (err) {
       Sentry.captureException(err, {
         tags: { layer: 'worker', operation: 'resend.receiving.get' },

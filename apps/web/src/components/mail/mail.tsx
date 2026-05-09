@@ -9,7 +9,10 @@ import {
 } from '@/components/ui/resizable';
 import { MailList } from './mail-list';
 import { MailDisplay } from './mail-display';
+import { ComposeDialog } from './compose-dialog';
 import { fetchThread, markEmailAsRead } from '@/app/actions/mail';
+import { Button } from '@/components/ui/button';
+import { PenSquare } from 'lucide-react';
 
 interface MailProps {
   threads: EmailSummary[];
@@ -25,6 +28,7 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
   // Bug #6 fix: lift threads into state so we can optimistically update is_read
   const [threads, setThreads] = useState<EmailSummary[]>(initialThreads);
   const [isPending, startTransition] = useTransition();
+  const [composeOpen, setComposeOpen] = useState(false);
 
   // Bug #3 fix: monotonically-increasing token to guard against out-of-order responses
   const requestTokenRef = useRef(0);
@@ -62,21 +66,46 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
     }
   }
 
+  // Most recent email in the thread for reply pre-fill
+  const latestEmail = currentThread[currentThread.length - 1] ?? null;
+
   return (
-    <ResizablePanelGroup direction="horizontal" className="h-full">
-      <ResizablePanel defaultSize={30} minSize={20}>
-        <MailList
-          threads={threads}
-          selectedThreadId={selectedThreadId}
-          onSelectThread={handleSelectThread}
-        />
-      </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={70} minSize={30}>
-        <div className={isPending ? 'opacity-60 transition-opacity' : ''}>
-          <MailDisplay thread={currentThread} />
-        </div>
-      </ResizablePanel>
-    </ResizablePanelGroup>
+    <>
+      <ResizablePanelGroup direction="horizontal" className="h-full">
+        <ResizablePanel defaultSize={30} minSize={20}>
+          <div className="flex items-center justify-between px-3 py-2 border-b">
+            <span className="text-sm font-semibold">Inbox</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Compose"
+              onClick={() => setComposeOpen(true)}
+            >
+              <PenSquare className="h-4 w-4" />
+            </Button>
+          </div>
+          <MailList
+            threads={threads}
+            selectedThreadId={selectedThreadId}
+            onSelectThread={handleSelectThread}
+          />
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={70} minSize={30}>
+          <div className={isPending ? 'opacity-60 transition-opacity' : ''}>
+            <MailDisplay
+              thread={currentThread}
+              onReply={() => setComposeOpen(true)}
+            />
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+
+      <ComposeDialog
+        open={composeOpen}
+        onOpenChange={setComposeOpen}
+        replyTo={latestEmail}
+      />
+    </>
   );
 }
