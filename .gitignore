@@ -35,6 +35,10 @@ out/
 .env.local
 .env.*.local
 
+# Wrangler local secrets (never commit — use Cloudflare dashboard for production secrets)
+.dev.vars
+**/.dev.vars
+
 # Build artifacts
 dist/
 .vercel/
@@ -43,4 +47,3 @@ dist/
 **/test-results/
 **/playwright-report/
 **/coverage/
-
