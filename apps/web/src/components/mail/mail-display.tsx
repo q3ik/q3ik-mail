@@ -1,11 +1,15 @@
 import type { Email } from '@q3ik-mail/database';
+import { ReplyIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import type { ComposePayload } from '@/components/mail/compose-dialog';
 
 interface MailDisplayProps {
   thread: Email[];
+  onReply?: (payload: ComposePayload) => void;
 }
 
-export function MailDisplay({ thread }: MailDisplayProps) {
+export function MailDisplay({ thread, onReply }: MailDisplayProps) {
   if (thread.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -14,16 +18,22 @@ export function MailDisplay({ thread }: MailDisplayProps) {
     );
   }
 
+  const lastEmailId = thread[thread.length - 1].id;
+
   return (
     <div className="flex flex-col gap-4 p-4 overflow-auto h-full">
       {thread.map((email) => (
-        <EmailCard key={email.id} email={email} />
+        <EmailCard
+          key={email.id}
+          email={email}
+          onReply={email.id === lastEmailId ? onReply : undefined}
+        />
       ))}
     </div>
   );
 }
 
-function EmailCard({ email }: { email: Email }) {
+function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: ComposePayload) => void }) {
   const senderName = email.from_name ?? email.from_address;
   const date = new Date(email.created_at).toLocaleString();
 
@@ -41,7 +51,29 @@ function EmailCard({ email }: { email: Email }) {
           </span>
           <span className="text-xs text-muted-foreground">{email.from_address}</span>
         </div>
-        <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
+          {onReply && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              onClick={() =>
+                onReply({
+                  to: email.from_address,
+                  subject: email.subject?.startsWith('Re: ')
+                    ? email.subject
+                    : `Re: ${email.subject ?? ''}`,
+                  replyToId: email.id,
+                  references: email.thread_id,
+                })
+              }
+            >
+              <ReplyIcon className="h-4 w-4 mr-1" />
+              Reply
+            </Button>
+          )}
+        </div>
       </div>
 
       {email.subject && (
