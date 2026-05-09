@@ -1,0 +1,33 @@
+/**
+ * Full email row — mirrors the D1 `emails` table exactly.
+ * Used when rendering the reading pane (full body required).
+ */
+export interface Email {
+  id: string; // UUID primary key
+  resend_id: string; // Resend email_id (unique)
+  thread_id: string; // Groups replies into conversations
+  from_address: string; // Sender email address
+  from_name: string | null; // Sender display name (nullable)
+  to_address: string; // Recipient(s), comma-separated if multiple
+  subject: string | null;
+  body_text: string | null; // Plain text body
+  body_html: string | null; // Raw HTML — MUST be sanitized before rendering
+  message_id: string | null; // RFC 2822 Message-ID header
+  in_reply_to: string | null; // RFC 2822 In-Reply-To header
+  is_read: 0 | 1; // SQLite boolean
+  is_sent: 0 | 1; // 0 = inbound, 1 = outbound
+  created_at: string; // ISO 8601 datetime string
+}
+
+/**
+ * Lightweight projection for inbox list views.
+ * Omits body_html and body_text to reduce payload size.
+ * Used by getLatestEmails() and list rendering in apps/web.
+ */
+export type EmailSummary = Omit<Email, 'body_html' | 'body_text'>;
+
+/**
+ * Input type for inserting a new inbound email.
+ * Omits auto-generated fields (created_at).
+ */
+export type NewEmail = Omit<Email, 'created_at'>;
