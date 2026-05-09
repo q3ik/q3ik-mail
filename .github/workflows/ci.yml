@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker typecheck
       - run: pnpm --filter @q3ik-mail/web typecheck
       - run: pnpm --filter @q3ik-mail/database typecheck
@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker lint
       - run: pnpm --filter @q3ik-mail/web lint
 
@@ -53,7 +53,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker test
       - run: pnpm --filter @q3ik-mail/database test
       - run: pnpm --filter @q3ik-mail/web test
