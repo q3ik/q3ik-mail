@@ -1,5 +1,32 @@
-# Wrangler local state (D1 SQLite files, KV, etc.)
+# Dependencies
+node_modules/
+
+# Wrangler local state (D1 SQLite files, KV, R2, etc.)
 .wrangler/
+
+# Wrangler account cache (contains local account metadata)
+node_modules/.cache/wrangler/
 
 # Generated type files (regenerated via `wrangler types`)
 worker-configuration.d.ts
+
+# pnpm workspace state (machine-local, regenerated on install)
+node_modules/.pnpm-workspace-state-v1.json
+# NOTE: pnpm-lock.yaml is intentionally NOT ignored — commit it for deterministic installs
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
+# Next.js build output
+.next/
+out/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+dist/
+.vercel/
