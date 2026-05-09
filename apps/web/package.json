@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "next lint",
+    "lint": "eslint src",
     "test": "vitest run",
     "e2e": "playwright test"
   },
@@ -36,6 +36,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250508.0",
+    "@eslint/eslintrc": "^3.3.1",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.3.0",
     "@tailwindcss/typography": "^0.5.19",
@@ -44,6 +45,8 @@
     "@types/react-dom": "^19.1.4",
     "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.5.0",
+    "eslint": "^9.27.0",
+    "eslint-config-next": "^15.3.2",
     "postcss": "^8.5.14",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4",
@@ -51,4 +54,3 @@
     "wrangler": "^4.13.2"
   }
 }
-
