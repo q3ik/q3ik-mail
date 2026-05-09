@@ -109,7 +109,7 @@ jobs:
       - name: Start wrangler pages dev
         run: |
           pnpm --filter @q3ik-mail/web exec wrangler pages dev .next --port 3000 &
-          npx wait-on http://localhost:3000 --timeout 60000
+          pnpm --filter @q3ik-mail/web exec wait-on http://localhost:3000 --timeout 60000
 
       - name: Run Playwright E2E
         run: pnpm --filter @q3ik-mail/web e2e
