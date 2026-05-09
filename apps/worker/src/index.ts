@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare';
 import { Resend } from 'resend';
 
 // Env interface — matches wrangler.toml bindings and secrets
@@ -6,9 +7,17 @@ export interface Env {
   DB: D1Database;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
+  SENTRY_DSN: string;        // injected via wrangler secret
+  ENVIRONMENT: string;       // set in wrangler.toml [vars]
 }
 
-export default {
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    tracesSampleRate: 0.2,
+    environment: env.ENVIRONMENT ?? 'production',
+  }),
+  {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Only accept POST requests
     if (request.method !== 'POST') {
@@ -56,7 +65,11 @@ export default {
       // resend.emails.get() is for sent mail; receiving.get() is for inbound
       // @ts-ignore — resend v4 types don't yet include emails.receiving; runtime API exists
       receivedEmail = await resend.emails.receiving.get(emailId);
-    } catch (_err) {
+    } catch (err) {
+      Sentry.captureException(err, {
+        tags: { layer: 'worker', operation: 'resend.receiving.get' },
+        extra: { emailId },
+      });
       return new Response('Failed to fetch email payload', { status: 502 });
     }
 
@@ -128,10 +141,15 @@ export default {
           inReplyTo,                  // in_reply_to (nullable)
         )
         .run();
-    } catch (_err) {
+    } catch (err) {
+      Sentry.captureException(err, {
+        tags: { layer: 'worker', operation: 'db.insert' },
+        extra: { emailId },
+      });
       return new Response('Database error', { status: 500 });
     }
 
     return new Response('OK', { status: 200 });
   },
-};
+} satisfies ExportedHandler<Env>
+);
