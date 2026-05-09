@@ -34,3 +34,4 @@ out/
 # Build artifacts
 dist/
 .vercel/
+tsconfig.tsbuildinfo
