@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type MockedClass } from 'vitest';
+import type { NextRequest } from 'next/server';
+import { Resend } from 'resend';
+import type { CreateEmailOptions } from 'resend';
 
 // Mock @cloudflare/next-on-pages before importing the route
 vi.mock('@cloudflare/next-on-pages', () => ({
@@ -25,7 +28,7 @@ describe.skip('POST /api/send', () => {
       body: JSON.stringify({ subject: 'Hi', content: 'Hello' }),
       headers: { 'Content-Type': 'application/json' },
     });
-    const res = await POST(req as any);
+    const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
   });
 
@@ -36,7 +39,7 @@ describe.skip('POST /api/send', () => {
       body: JSON.stringify({ to: 'a@b.com', content: 'Hello' }),
       headers: { 'Content-Type': 'application/json' },
     });
-    const res = await POST(req as any);
+    const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
   });
 
@@ -47,24 +50,24 @@ describe.skip('POST /api/send', () => {
       body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
       headers: { 'Content-Type': 'application/json' },
     });
-    const res = await POST(req as any);
+    const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.id).toBe('sent-id');
   });
 
   it('sets In-Reply-To and References headers when replyToId is provided', async () => {
-    const { Resend } = await import('resend');
+    const MockedResend = Resend as MockedClass<typeof Resend>;
     const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'r1' }, error: null });
-    (Resend as any).mockImplementationOnce(() => ({ emails: { send: sendSpy } }));
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
       method: 'POST',
       body: JSON.stringify({ to: 'a@b.com', subject: 'Re: Hi', content: 'Hi back', replyToId: '<msg-1@example.com>' }),
       headers: { 'Content-Type': 'application/json' },
     });
-    await POST(req as any);
-    const callArgs = sendSpy.mock.calls[0][0];
+    await POST(req as unknown as NextRequest);
+    const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
     expect(callArgs.headers?.['In-Reply-To']).toBe('<msg-1@example.com>');
     expect(callArgs.headers?.['References']).toBe('<msg-1@example.com>');
   });
