@@ -1,5 +1,13 @@
 import { Resend } from 'resend';
 
+// Env interface — matches wrangler.toml bindings and secrets
+// DB is the D1 binding; secrets are set via `wrangler secret put`
+interface Env {
+  DB: D1Database;
+  RESEND_API_KEY: string;
+  RESEND_WEBHOOK_SECRET: string;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Only accept POST requests
@@ -13,9 +21,9 @@ export default {
     const resend = new Resend(env.RESEND_API_KEY);
 
     // --- Step 1: Verify webhook signature ---
-    let event: ReturnType<typeof resend.webhooks.verify>;
+    // Use Awaited<ReturnType<...>> because verify() is async
+    let event: Awaited<ReturnType<typeof resend.webhooks.verify>>;
     try {
-      // NOTE: resend.webhooks.verify() is async — must be awaited
       event = await resend.webhooks.verify({
         payload: rawBody,
         headers: {
@@ -49,19 +57,38 @@ export default {
     }
 
     // --- Step 4: Threading logic ---
-    // Parse headers array for In-Reply-To to group replies into threads
-    const headers: Array<{ name: string; value: string }> = receivedEmail.headers ?? [];
+    // Parse headers array for In-Reply-To and Message-ID
+    const emailHeaders: Array<{ name: string; value: string }> = receivedEmail.headers ?? [];
 
-    const inReplyTo = headers.find(
+    const inReplyTo = emailHeaders.find(
       (h) => h.name.toLowerCase() === 'in-reply-to'
     )?.value ?? null;
 
-    const messageId = headers.find(
+    const messageId = emailHeaders.find(
       (h) => h.name.toLowerCase() === 'message-id'
     )?.value ?? null;
 
-    // New conversations start their own thread; replies inherit the thread
-    const threadId = inReplyTo ?? emailId;
+    // Fix: Look up the parent email's thread_id from D1 using the In-Reply-To
+    // Message-ID. This ensures multi-level reply chains all share the same
+    // root thread_id, rather than each reply forking into its own thread.
+    //
+    // Strategy:
+    //   1. If inReplyTo is set, query emails WHERE message_id = inReplyTo
+    //   2. If a parent row is found, reuse its thread_id (may itself be a reply)
+    //   3. If no parent found (dangling reference), fall back to messageId ?? emailId
+    //   4. New messages (no inReplyTo) start a new thread keyed on messageId ?? emailId
+    let threadId: string;
+    if (inReplyTo) {
+      const parentRow = await env.DB
+        .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
+        .bind(inReplyTo)
+        .first<{ thread_id: string }>();
+      // Use the parent's thread_id if found; otherwise fall back to a new thread
+      threadId = parentRow?.thread_id ?? messageId ?? emailId;
+    } else {
+      // Root message — start a new thread
+      threadId = messageId ?? emailId;
+    }
 
     // --- Step 5: Parse from_name and from_address ---
     // Resend returns from as "Display Name <email@example.com>" or just "email@example.com"
@@ -84,17 +111,17 @@ export default {
           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
       `)
         .bind(
-          crypto.randomUUID(),  // id
-          emailId,              // resend_id
-          threadId,             // thread_id
-          fromAddress,          // from_address
-          fromName,             // from_name (nullable)
-          toAddress,            // to_address
+          crypto.randomUUID(),        // id
+          emailId,                    // resend_id
+          threadId,                   // thread_id (looked up or new)
+          fromAddress,                // from_address
+          fromName,                   // from_name (nullable)
+          toAddress,                  // to_address
           receivedEmail.subject ?? null,
           receivedEmail.text ?? null,
           receivedEmail.html ?? null,
-          messageId,            // message_id (nullable)
-          inReplyTo,            // in_reply_to (nullable)
+          messageId,                  // message_id (nullable)
+          inReplyTo,                  // in_reply_to (nullable)
         )
         .run();
     } catch (_err) {
