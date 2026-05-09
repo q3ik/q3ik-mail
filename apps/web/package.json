@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler pages dev --compatibility-flag=nodejs_compat",
     "build": "next build",
-    "deploy": "next build && wrangler pages deploy .next --project-name=q3ik-mail",
+    "deploy": "next build && wrangler pages deploy .next --project-name=q3ik-mail --exclude=cache",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
