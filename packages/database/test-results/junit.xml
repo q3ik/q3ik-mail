@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="7" failures="0" errors="0" time="0.005011895">
+    <testsuite name="__tests__/queries.test.ts" timestamp="2026-05-09T18:14:38.733Z" hostname="runnervmeorf1" tests="7" failures="0" errors="0" skipped="0" time="0.005011895">
+        <testcase classname="__tests__/queries.test.ts" name="getLatestEmails &gt; returns emails ordered by received_at DESC" time="0.001201088">
+        </testcase>
+        <testcase classname="__tests__/queries.test.ts" name="getLatestEmails &gt; respects the limit parameter" time="0.000887476">
+        </testcase>
+        <testcase classname="__tests__/queries.test.ts" name="getEmailsByThread &gt; returns all emails in a thread" time="0.000281894">
+        </testcase>
+        <testcase classname="__tests__/queries.test.ts" name="markAsRead &gt; does not throw on valid emailId" time="0.000595797">
+        </testcase>
+        <testcase classname="__tests__/queries.test.ts" name="getEmailById &gt; returns null when no email found" time="0.000198479">
+        </testcase>
+        <testcase classname="__tests__/queries.test.ts" name="getEmailById &gt; returns the email when found" time="0.000200893">
+        </testcase>
+        <testcase classname="__tests__/queries.test.ts" name="getThreadList &gt; returns thread summary rows" time="0.000349196">
+        </testcase>
+    </testsuite>
+</testsuites>
