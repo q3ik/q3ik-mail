@@ -32,11 +32,10 @@ export function Mail({ threads, selectedThread, defaultSelectedId }: MailProps) 
       setSelectedThreadId(threadId);
       setCurrentThread(emails);
 
-      // Mark unread emails in the thread as read
-      for (const email of emails) {
-        if (email.is_read === 0) {
-          await markEmailAsRead(email.id);
-        }
+      // Mark all unread emails in the thread as read concurrently
+      const unreadIds = emails.filter((e) => e.is_read === 0).map((e) => e.id);
+      if (unreadIds.length > 0) {
+        await Promise.all(unreadIds.map((id) => markEmailAsRead(id)));
       }
     });
   }
