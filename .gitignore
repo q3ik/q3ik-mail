@@ -12,6 +12,7 @@ worker-configuration.d.ts
 
 # pnpm state files (machine-local: absolute paths + timestamps)
 node_modules/.modules.yaml
+node_modules/.pnpm/
 
 # pnpm workspace state (machine-local, regenerated on install)
 node_modules/.pnpm-workspace-state-v1.json
@@ -26,6 +27,9 @@ node_modules/.pnpm-workspace-state-v1.json
 .next/
 out/
 
+# TypeScript build info (incremental compilation cache)
+*.tsbuildinfo
+
 # Environment files
 .env
 .env.local
@@ -34,3 +38,8 @@ out/
 # Build artifacts
 dist/
 .vercel/
+
+# Test results (generated, uploaded as CI artifacts)
+**/test-results/
+**/playwright-report/
+**/coverage/
