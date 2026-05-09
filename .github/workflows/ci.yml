@@ -15,13 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker typecheck
       - run: pnpm --filter @q3ik-mail/web typecheck
       - run: pnpm --filter @q3ik-mail/database typecheck
@@ -34,13 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker lint
       - run: pnpm --filter @q3ik-mail/web lint
 
@@ -51,18 +47,17 @@ jobs:
     permissions:
       contents: read
       checks: write
+
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @q3ik-mail/database test
+      - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker test
+      - run: pnpm --filter @q3ik-mail/database test
       - run: pnpm --filter @q3ik-mail/web test
       - name: Upload test results
         uses: actions/upload-artifact@v4
