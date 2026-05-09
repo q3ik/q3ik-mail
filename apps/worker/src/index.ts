@@ -92,16 +92,26 @@ export default Sentry.withSentry(
     // Strategy:
     //   1. If inReplyTo is set, query emails WHERE message_id = inReplyTo
     //   2. If a parent row is found, reuse its thread_id (may itself be a reply)
-    //   3. If no parent found (dangling reference), fall back to messageId ?? emailId
+    //   3. If no parent found (out-of-order delivery), use inReplyTo as thread_id
+    //      and flag for re-threading once the parent arrives
     //   4. New messages (no inReplyTo) start a new thread keyed on messageId ?? emailId
     let threadId: string;
+    let needsRethreading = 0;
     if (inReplyTo) {
       const parentRow = await env.DB
         .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
         .bind(inReplyTo)
         .first<{ thread_id: string }>();
-      // Use the parent's thread_id if found; otherwise fall back to a new thread
-      threadId = parentRow?.thread_id ?? messageId ?? emailId;
+      if (parentRow) {
+        // Parent found — join existing thread
+        threadId = parentRow.thread_id;
+      } else {
+        // Parent not yet received — use In-Reply-To value as thread_id for now
+        // and flag for re-threading once the parent arrives
+        threadId = inReplyTo;
+        needsRethreading = 1;
+        console.warn(`[threading] Parent not found for In-Reply-To: ${inReplyTo}. Flagged for re-threading.`);
+      }
     } else {
       // Root message — start a new thread
       threadId = messageId ?? emailId;
@@ -123,9 +133,9 @@ export default Sentry.withSentry(
     try {
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
-          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, is_read, is_sent)
+          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, is_read, is_sent, needs_rethreading)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
       `)
         .bind(
           crypto.randomUUID(),        // id
@@ -139,6 +149,7 @@ export default Sentry.withSentry(
           receivedEmail.html ?? null,
           messageId,                  // message_id (nullable)
           inReplyTo,                  // in_reply_to (nullable)
+          needsRethreading,           // needs_rethreading (0 or 1)
         )
         .run();
     } catch (err) {
