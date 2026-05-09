@@ -1,0 +1,24 @@
+{
+  "name": "@q3ik-mail/worker",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@q3ik-mail/database": "workspace:*",
+    "resend": "^4.5.1",
+    "svix": "^1.63.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.7",
+    "@cloudflare/workers-types": "^4.20250508.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.3",
+    "wrangler": "^4.13.2"
+  }
+}
