@@ -12,7 +12,7 @@ worker-configuration.d.ts
 
 # pnpm workspace state (machine-local, regenerated on install)
 node_modules/.pnpm-workspace-state-v1.json
-pnpm-lock.yaml
+# NOTE: pnpm-lock.yaml is intentionally NOT ignored — commit it for deterministic installs
 
 # macOS metadata
 .DS_Store
