@@ -5,9 +5,9 @@ compatibility_date = "2024-05-01"
 
 # The D1 database binding
 [[d1_databases]]
-binding = "q3ik_mail_db"
+binding = "DB"
 database_name = "q3ik-mail-db"
-database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+database_id = "your-d1-id-here"
 
 [vars]
 # These will be set via 'wrangler secret put'
