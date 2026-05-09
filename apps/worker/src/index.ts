@@ -31,10 +31,10 @@ export default Sentry.withSentry(
 
     // --- Step 1: Verify webhook signature ---
     // Use Awaited<ReturnType<...>> because verify() is async
-    // @ts-ignore — resend v4 types don't yet include webhooks; runtime API exists
+    // @ts-expect-error — resend v4 types don't yet include webhooks; runtime API exists
     let event: Awaited<ReturnType<typeof resend.webhooks.verify>>;
     try {
-      // @ts-ignore — resend v4 types don't yet include webhooks; runtime API exists
+      // @ts-expect-error — resend v4 types don't yet include webhooks; runtime API exists
       event = await resend.webhooks.verify({
         payload: rawBody,
         headers: {
@@ -44,7 +44,7 @@ export default Sentry.withSentry(
         },
         webhookSecret: env.RESEND_WEBHOOK_SECRET,
       });
-    } catch (_err) {
+    } catch {
       // Signature mismatch or missing headers
       return new Response('Unauthorized', { status: 401 });
     }
@@ -58,12 +58,12 @@ export default Sentry.withSentry(
     const emailId = event.data.email_id;
 
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
-    // @ts-ignore — resend v4 types don't yet include emails.receiving; runtime API exists
+    // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
     let receivedEmail: Awaited<ReturnType<typeof resend.emails.receiving.get>>;
     try {
       // Use resend.emails.receiving.get() — NOT resend.emails.get()
       // resend.emails.get() is for sent mail; receiving.get() is for inbound
-      // @ts-ignore — resend v4 types don't yet include emails.receiving; runtime API exists
+      // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
       receivedEmail = await resend.emails.receiving.get(emailId);
     } catch (err) {
       Sentry.captureException(err, {

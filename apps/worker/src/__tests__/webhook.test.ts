@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type MockedClass } from 'vitest';
+import { Resend } from 'resend';
 import worker from '../index';
 
 // Mock the Resend SDK to avoid real API calls in CI
@@ -55,11 +56,11 @@ describe('webhook handler', () => {
   });
 
   it('returns 401 when resend.webhooks.verify throws', async () => {
-    const { Resend } = await import('resend');
-    (Resend as any).mockImplementationOnce(() => ({
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    MockedResend.mockImplementationOnce(() => ({
       webhooks: { verify: vi.fn().mockRejectedValueOnce(new Error('bad sig')) },
       emails: { receiving: { get: vi.fn() } },
-    }));
+    }) as unknown as Resend);
     const req = makeRequest('{"type":"email.received"}', {
       'svix-id': 'x', 'svix-timestamp': 'x', 'svix-signature': 'x',
     });
@@ -68,11 +69,11 @@ describe('webhook handler', () => {
   });
 
   it('returns 200 and skips insert for non-email.received events', async () => {
-    const { Resend } = await import('resend');
-    (Resend as any).mockImplementationOnce(() => ({
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    MockedResend.mockImplementationOnce(() => ({
       webhooks: { verify: vi.fn().mockResolvedValueOnce({ type: 'email.delivered', data: {} }) },
       emails: { receiving: { get: vi.fn() } },
-    }));
+    }) as unknown as Resend);
     const req = makeRequest('{}');
     const res = await worker.fetch(req, mockEnv);
     expect(res.status).toBe(200);
