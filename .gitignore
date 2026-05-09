@@ -27,6 +27,9 @@ node_modules/.pnpm/
 .next/
 out/
 
+# TypeScript build info (incremental compilation cache)
+*.tsbuildinfo
+
 # Environment files
 .env
 .env.local
@@ -35,4 +38,9 @@ out/
 # Build artifacts
 dist/
 .vercel/
-tsconfig.tsbuildinfo
+
+# Test results (generated, uploaded as CI artifacts)
+**/test-results/
+**/playwright-report/
+**/coverage/
+
