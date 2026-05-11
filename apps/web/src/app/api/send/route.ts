@@ -9,9 +9,11 @@ function buildEmailHeaders(
   references?: string
 ): Record<string, string> | undefined {
   if (!replyToId) return undefined;
-  // RFC 2822: References accumulates all ancestor Message-IDs in the thread.
-  // thread_id is the Message-ID of the first email in the thread, which is a
-  // valid starting point for References if we don't have a full chain yet.
+  // RFC 2822 References must be a space-separated chain of all ancestor
+  // Message-IDs. `references` is the persisted References value from the
+  // replied-to email (stored in D1). Appending `replyToId` grows the chain
+  // by one hop for each reply level. If references is absent (e.g. the
+  // replied-to email is the thread root), seed the chain with replyToId alone.
   const updatedReferences = references
     ? `${references} ${replyToId}`
     : replyToId;
