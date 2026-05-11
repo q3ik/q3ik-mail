@@ -116,14 +116,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const messageId = `<${crypto.randomUUID()}@q3ik.com>`;
+    const sentMessageId = `<${crypto.randomUUID()}@q3ik.com>`;
     const persistedReferences = buildReferencesHeader(replyToId, references);
     const result = await resend.emails.send({
       from: `${APP_FROM_NAME} <${APP_FROM_ADDRESS}>`,
       to: [to as string],
       subject,
       text: content,
-      headers: buildEmailHeaders(messageId, replyToId, references),
+      headers: buildEmailHeaders(sentMessageId, replyToId, references),
     });
 
     if (result.error) {
@@ -138,10 +138,11 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      const sentEmailRowId = crypto.randomUUID();
       const { threadId, needsRethreading } = await resolveThreadingMetadata(
         env.DB,
         replyToId,
-        messageId
+        sentMessageId
       );
 
       await env.DB.prepare(`
@@ -151,7 +152,7 @@ export async function POST(req: NextRequest) {
           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
       `)
         .bind(
-          crypto.randomUUID(),
+          sentEmailRowId,
           result.data?.id ?? '',
           threadId,
           APP_FROM_ADDRESS,
@@ -160,7 +161,7 @@ export async function POST(req: NextRequest) {
           subject,
           content,
           null,
-          messageId,
+          sentMessageId,
           replyToId ?? null,
           persistedReferences,
           needsRethreading
