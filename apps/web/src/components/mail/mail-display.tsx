@@ -1,9 +1,23 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import type { Email } from '@q3ik-mail/database';
-import DOMPurify from 'isomorphic-dompurify';
 import { ReplyIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { ComposePayload } from '@/components/mail/compose-dialog';
+
+const sanitizeOptions = {
+  USE_PROFILES: { html: true },
+  FORBID_ATTR: ['style'],
+};
+
+let DOMPurifyPromise: Promise<typeof import('isomorphic-dompurify')> | undefined;
+
+function loadDomPurify() {
+  DOMPurifyPromise ??= import('isomorphic-dompurify');
+  return DOMPurifyPromise;
+}
 
 interface MailDisplayProps {
   thread: Email[];
@@ -87,19 +101,46 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
 }
 
 function EmailBody({ email }: { email: Email }) {
+  const [sanitizedHtml, setSanitizedHtml] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (email.body_html) {
+      void loadDomPurify()
+        .then(({ default: DOMPurify }) => {
+          if (!cancelled) {
+            setSanitizedHtml(DOMPurify.sanitize(email.body_html!, sanitizeOptions));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSanitizedHtml(null);
+          }
+        });
+    } else {
+      setSanitizedHtml(null);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [email.body_html]);
+
   if (email.body_html) {
-    const sanitizedHtml = DOMPurify.sanitize(email.body_html, {
-      // Use an allowlist-based profile rather than a blocklist so that new
-      // attack vectors are blocked by default instead of requiring new FORBID_* entries.
-      USE_PROFILES: { html: true },
-      // Strip inline style attributes to prevent CSS expression()/url() attacks.
-      FORBID_ATTR: ['style'],
-    });
+    if (sanitizedHtml) {
+      return (
+        <div
+          className="prose prose-sm max-w-none"
+          dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+        />
+      );
+    }
+
     return (
-      <div
-        className="prose prose-sm max-w-none"
-        dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
-      />
+      <p aria-live="polite" className="text-sm text-muted-foreground italic">
+        Loading email content...
+      </p>
     );
   }
 
