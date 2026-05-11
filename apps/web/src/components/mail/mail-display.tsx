@@ -104,16 +104,15 @@ function EmailBody({ email }: { email: Email }) {
   useEffect(() => {
     let cancelled = false;
 
-    if (!email.body_html) {
+    if (email.body_html) {
+      void loadDomPurify().then(({ default: DOMPurify }) => {
+        if (!cancelled) {
+          setSanitizedHtml(DOMPurify.sanitize(email.body_html!, sanitizeOptions));
+        }
+      });
+    } else {
       setSanitizedHtml(null);
-      return;
     }
-
-    void loadDomPurify().then(({ default: DOMPurify }) => {
-      if (!cancelled) {
-        setSanitizedHtml(DOMPurify.sanitize(email.body_html!, sanitizeOptions));
-      }
-    });
 
     return () => {
       cancelled = true;
@@ -131,7 +130,9 @@ function EmailBody({ email }: { email: Email }) {
     }
 
     return (
-      <p className="text-sm text-muted-foreground italic">(loading message)</p>
+      <p aria-live="polite" className="text-sm text-muted-foreground italic">
+        (loading message)
+      </p>
     );
   }
 
