@@ -15,10 +15,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check wrangler.toml database_id placeholder
+        env:
+          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
         run: |
+          # Substitute the real database_id from the repo secret before checking.
+          # The placeholder must never be hardcoded in source — the secret
+          # is the single source of truth for the real D1 ID.
+          if [ -n "$D1_DATABASE_ID" ]; then
+            sed -i "s/REPLACE_WITH_YOUR_DATABASE_ID/${D1_DATABASE_ID}/" apps/worker/wrangler.toml
+          fi
           if grep -q "REPLACE_WITH_YOUR_DATABASE_ID" apps/worker/wrangler.toml; then
             echo "ERROR: database_id placeholder not replaced in apps/worker/wrangler.toml"
-            echo "Run 'npx wrangler d1 list' to find your database ID and update the file."
+            echo "Ensure the CLOUDFLARE_D1_DATABASE_ID secret is set in repo Settings → Secrets."
             exit 1
           fi
 
