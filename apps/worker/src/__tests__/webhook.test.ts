@@ -65,16 +65,30 @@ function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
 }
 
 /**
- * Creates a spy-instrumented Env whose DB.prepare / .bind calls are recorded.
- * Use `prepareSpy` to assert which SQL was executed and `bindSpy` to inspect
- * the bound parameter values.
+ * Creates a spy-instrumented Env for INSERT assertions.
+ *
+ * SELECT statements (thread-lookup) are routed to a separate non-spy path
+ * that always returns null, so bindSpy exclusively captures INSERT .bind()
+ * calls. This makes getInsertArgs unambiguous: bindSpy.mock.calls[0] is
+ * always the INSERT bind args regardless of how many SELECT calls precede it.
  */
 function makeEnvWithSpy() {
   const bindSpy = vi.fn().mockReturnValue({
     first: async () => null,
     run: async () => ({ success: true }),
   });
-  const prepareSpy = vi.fn().mockReturnValue({ bind: bindSpy });
+  const prepareSpy = vi.fn().mockImplementation((sql: string) => {
+    // Route SELECTs to a silent non-spy stub so bindSpy only sees INSERT calls.
+    if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
+      return {
+        bind: () => ({
+          first: async () => null,
+          run: async () => ({ success: true }),
+        }),
+      };
+    }
+    return { bind: bindSpy };
+  });
   const env = {
     ...mockEnv,
     DB: { prepare: prepareSpy },
@@ -83,27 +97,31 @@ function makeEnvWithSpy() {
 }
 
 /**
- * Given a prepareSpy and bindSpy (from makeEnvWithSpy), finds the INSERT
- * call for the emails table and returns the column names + bound values.
- * Throws if no INSERT is found.
+ * Parses the INSERT OR IGNORE INTO emails statement captured by prepareSpy
+ * and returns column names paired with their bound values from bindSpy.
+ *
+ * Because makeEnvWithSpy routes SELECTs to a non-spy path, bindSpy.mock.calls[0]
+ * is always the INSERT bind args — no offset arithmetic needed.
  */
 function getInsertArgs(
   prepareSpy: ReturnType<typeof vi.fn>,
   bindSpy: ReturnType<typeof vi.fn>,
-) {
-  const insertIdx = prepareSpy.mock.calls.findIndex((args: unknown[]) =>
-    (args[0] as string).includes('INSERT OR IGNORE INTO emails')
+): { columns: string[]; values: unknown[] } {
+  const insertIdx = (prepareSpy.mock.calls as unknown[][]).findIndex(
+    (args) => (args[0] as string).includes('INSERT OR IGNORE INTO emails'),
   );
   expect(insertIdx).toBeGreaterThanOrEqual(0);
 
   const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
-  const insertBindArgs = bindSpy.mock.calls[insertIdx] as unknown[];
-
   const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
   expect(colMatch).not.toBeNull();
-  const columns = colMatch![1].split(',').map((c) => c.trim().replace(/["'`]/g, ''));
+  const columns = colMatch![1]
+    .split(',')
+    .map((c) => c.trim().replace(/["'`]/g, ''));
 
-  return { columns, insertBindArgs };
+  // bindSpy.mock.calls[0] is always the INSERT — SELECTs are routed elsewhere.
+  const values = bindSpy.mock.calls[0] as unknown[];
+  return { columns, values };
 }
 
 describe('webhook handler', () => {
@@ -174,10 +192,10 @@ describe('webhook handler', () => {
     const res = await fetchWorker(req, env);
     expect(res.status).toBe(200);
 
-    const { columns, insertBindArgs } = getInsertArgs(prepareSpy, bindSpy);
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
     const referencesIdx = columns.indexOf('references');
     expect(referencesIdx).toBeGreaterThanOrEqual(0);
-    expect(insertBindArgs[referencesIdx]).toBe('<root-456@mail.example.com>');
+    expect(values[referencesIdx]).toBe('<root-456@mail.example.com>');
   });
 
   it('stores null for references when References header is absent', async () => {
@@ -207,9 +225,9 @@ describe('webhook handler', () => {
     const res = await fetchWorker(req, env);
     expect(res.status).toBe(200);
 
-    const { columns, insertBindArgs } = getInsertArgs(prepareSpy, bindSpy);
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
     const referencesIdx = columns.indexOf('references');
     expect(referencesIdx).toBeGreaterThanOrEqual(0);
-    expect(insertBindArgs[referencesIdx]).toBeNull();
+    expect(values[referencesIdx]).toBeNull();
   });
 });
