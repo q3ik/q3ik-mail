@@ -17,6 +17,7 @@ export interface Email {
   body_html: string | null;  // Raw HTML — MUST be sanitized before rendering
   message_id: string | null; // RFC 2822 Message-ID header
   in_reply_to: string | null; // RFC 2822 In-Reply-To header
+  references: string | null; // RFC 2822 References header (space-separated Message-ID chain)
   is_read: 0 | 1;         // SQLite boolean
   is_sent: 0 | 1;         // 0 = inbound, 1 = outbound
   needs_rethreading: 0 | 1; // 1 if thread_id couldn't be resolved at ingest

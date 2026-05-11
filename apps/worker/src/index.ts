@@ -125,6 +125,10 @@ const handler: ExportedHandler<Env> = {
       (h) => h.name.toLowerCase() === 'message-id'
     )?.value ?? null;
 
+    const referencesHeader = emailHeaders.find(
+      (h) => h.name.toLowerCase() === 'references'
+    )?.value ?? null;
+
     // Fix: Look up the parent email's thread_id from D1 using the In-Reply-To
     // Message-ID. This ensures multi-level reply chains all share the same
     // root thread_id, rather than each reply forking into its own thread.
@@ -175,9 +179,9 @@ const handler: ExportedHandler<Env> = {
     try {
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
-          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, is_read, is_sent, needs_rethreading)
+          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, references, is_read, is_sent, needs_rethreading)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
       `)
         .bind(
           crypto.randomUUID(),        // id
@@ -191,6 +195,7 @@ const handler: ExportedHandler<Env> = {
           receivedEmail.html ?? null,
           messageId,                  // message_id (nullable)
           inReplyTo,                  // in_reply_to (nullable)
+          referencesHeader,           // references (nullable)
           needsRethreading,           // needs_rethreading (0 or 1)
         )
         .run();
