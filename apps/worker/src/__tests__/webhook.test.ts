@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import worker, { parseFrom } from '../index';
+import worker from '../index';
+import { parseFrom } from '../utils/parseFrom';
 
 type WorkerFetch = NonNullable<typeof worker.fetch>;
 type WorkerRequest = Parameters<WorkerFetch>[0];
@@ -113,6 +114,11 @@ describe('parseFrom', () => {
     expect(parseFrom('"Smith, John" <john@example.com>')).toEqual({ name: 'Smith, John', address: 'john@example.com' });
   });
 
+  it('parses angle-bracket-only form with no display name', () => {
+    // Valid RFC 5322 form: <alice@example.com> — no display name, name must be null
+    expect(parseFrom('<alice@example.com>')).toEqual({ name: null, address: 'alice@example.com' });
+  });
+
   it('parses plain email address with no display name', () => {
     expect(parseFrom('alice@example.com')).toEqual({ name: null, address: 'alice@example.com' });
   });
@@ -198,12 +204,25 @@ describe('threading', () => {
       RESEND_API_KEY: 'test-key',
       RESEND_WEBHOOK_SECRET: 'test-secret',
       DB: {
-        prepare: () => ({
-          bind: (...args: unknown[]) => ({
-            first: async () => null,
-            run: async () => { insertedNeedsRethreading = args[args.length - 1]; return { success: true }; },
-          }),
-        }),
+        prepare: (sql: string) => {
+          if (sql.includes('SELECT')) {
+            // Simulate parent not found for the thread-lookup query
+            return { bind: () => ({ first: async () => null }) };
+          }
+          return {
+            bind: (...args: unknown[]) => ({
+              first: async () => null,
+              run: async () => {
+                // INSERT bind order (0-based):
+                // 0:id, 1:resend_id, 2:thread_id, 3:from_address, 4:from_name,
+                // 5:to_address, 6:subject, 7:body_text, 8:body_html,
+                // 9:message_id, 10:in_reply_to, 11:needs_rethreading
+                insertedNeedsRethreading = args[11];
+                return { success: true };
+              },
+            }),
+          };
+        },
       },
     } as unknown as import('../index').Env;
 
@@ -241,6 +260,8 @@ describe('threading', () => {
         prepare: () => ({
           bind: (...args: unknown[]) => ({
             first: async () => null,
+            // INSERT bind order (0-based):
+            // 0:id, 1:resend_id, 2:thread_id, 3:from_address, 4:from_name, ...
             run: async () => { insertedFromAddress = args[3]; insertedFromName = args[4]; return { success: true }; },
           }),
         }),
@@ -254,5 +275,29 @@ describe('threading', () => {
     expect(res.status).toBe(200);
     expect(insertedFromAddress).toBe('john@example.com');
     expect(insertedFromName).toBe('Smith, John');
+  });
+
+  it('returns 400 when from address is missing or unparseable', async () => {
+    const { Resend } = await import('resend');
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: '',   // empty from field — parseFrom returns address: ''
+            to: ['you@q3ik.com'],
+            subject: 'No Sender',
+            text: 'Hi',
+            html: '<p>Hi</p>',
+            headers: [],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
+    expect(res.status).toBe(400);
   });
 });
