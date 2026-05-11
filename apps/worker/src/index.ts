@@ -177,12 +177,17 @@ const handler: ExportedHandler<Env> = {
       : (typeof toRaw === 'string' ? toRaw : '');
 
     // --- Step 6: Persist to D1 ---
+    // All 14 columns use bound ? parameters so that the column list and the
+    // .bind() argument list are always the same length. Hardcoding literals
+    // (e.g. 0, 0 for is_read/is_sent) shifts the value indices relative to the
+    // column indices, which breaks any test or tooling that maps columns to
+    // bind args by position.
     try {
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
           (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, is_read, is_sent, needs_rethreading)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
         .bind(
           crypto.randomUUID(),        // id
@@ -196,6 +201,8 @@ const handler: ExportedHandler<Env> = {
           receivedEmail.html ?? null,
           messageId,                  // message_id (nullable)
           inReplyTo,                  // in_reply_to (nullable)
+          0,                          // is_read
+          0,                          // is_sent
           needsRethreading,           // needs_rethreading (0 or 1)
         )
         .run();
