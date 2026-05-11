@@ -2,6 +2,8 @@ export async function captureException(err: unknown): Promise<void> {
   const serverSdk = '@sentry/cloudflare';
   const clientSdk = '@sentry/nextjs';
 
+  // Next.js uses both server runtime labels; in either case we must stay on
+  // the Cloudflare SDK to avoid pulling Node-only Sentry internals into Pages.
   if (process.env.NEXT_RUNTIME === 'edge' || process.env.NEXT_RUNTIME === 'nodejs') {
     const { captureException: captureExceptionImpl } = await import(serverSdk);
     captureExceptionImpl(err);

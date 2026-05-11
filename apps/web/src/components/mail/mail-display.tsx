@@ -10,11 +10,11 @@ const sanitizeOptions = {
   FORBID_ATTR: ['style'],
 };
 
-let domPurifyPromise: Promise<typeof import('isomorphic-dompurify')> | undefined;
+let DOMPurifyPromise: Promise<typeof import('isomorphic-dompurify')> | undefined;
 
 function loadDomPurify() {
-  domPurifyPromise ??= import('isomorphic-dompurify');
-  return domPurifyPromise;
+  DOMPurifyPromise ??= import('isomorphic-dompurify');
+  return DOMPurifyPromise;
 }
 
 interface MailDisplayProps {
@@ -131,7 +131,7 @@ function EmailBody({ email }: { email: Email }) {
 
     return (
       <p aria-live="polite" className="text-sm text-muted-foreground italic">
-        (loading message)
+        Loading email content...
       </p>
     );
   }
