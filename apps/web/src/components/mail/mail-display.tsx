@@ -1,9 +1,21 @@
+import { useEffect, useState } from 'react';
 import type { Email } from '@q3ik-mail/database';
-import DOMPurify from 'isomorphic-dompurify';
 import { ReplyIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { ComposePayload } from '@/components/mail/compose-dialog';
+
+const sanitizeOptions = {
+  USE_PROFILES: { html: true },
+  FORBID_ATTR: ['style'],
+};
+
+let domPurifyPromise: Promise<typeof import('isomorphic-dompurify')> | undefined;
+
+function loadDomPurify() {
+  domPurifyPromise ??= import('isomorphic-dompurify');
+  return domPurifyPromise;
+}
 
 interface MailDisplayProps {
   thread: Email[];
@@ -87,19 +99,47 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
 }
 
 function EmailBody({ email }: { email: Email }) {
-  if (email.body_html) {
-    const sanitizedHtml = DOMPurify.sanitize(email.body_html, {
-      // Use an allowlist-based profile rather than a blocklist so that new
-      // attack vectors are blocked by default instead of requiring new FORBID_* entries.
-      USE_PROFILES: { html: true },
-      // Strip inline style attributes to prevent CSS expression()/url() attacks.
-      FORBID_ATTR: ['style'],
+  const [sanitizedHtml, setSanitizedHtml] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!email.body_html) {
+      setSanitizedHtml(null);
+      return;
+    }
+
+    void loadDomPurify().then(({ default: DOMPurify }) => {
+      if (!cancelled) {
+        setSanitizedHtml(DOMPurify.sanitize(email.body_html!, sanitizeOptions));
+      }
     });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [email.body_html]);
+
+  if (email.body_html) {
+    if (sanitizedHtml) {
+      return (
+        <div
+          className="prose prose-sm max-w-none"
+          dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+        />
+      );
+    }
+
+    if (email.body_text) {
+      return (
+        <pre className="whitespace-pre-wrap text-sm text-foreground font-sans break-words">
+          {email.body_text}
+        </pre>
+      );
+    }
+
     return (
-      <div
-        className="prose prose-sm max-w-none"
-        dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
-      />
+      <p className="text-sm text-muted-foreground italic">(loading message)</p>
     );
   }
 

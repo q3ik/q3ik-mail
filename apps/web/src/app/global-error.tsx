@@ -1,6 +1,5 @@
 'use client';
 
-import * as Sentry from '@sentry/nextjs';
 import { useEffect } from 'react';
 
 export default function GlobalError({
@@ -11,11 +10,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Guard: captureException may be undefined if the Sentry Node SDK was
-    // stubbed out at build time (CF Workers runtime incompatibility).
-    if (typeof Sentry.captureException === 'function') {
-      Sentry.captureException(error);
-    }
+    void import('@/lib/sentry').then(({ captureException }) => captureException(error));
   }, [error]);
 
   return (
