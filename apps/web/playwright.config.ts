@@ -28,7 +28,7 @@ export default defineConfig({
     command: [
       'pnpm exec wrangler pages dev .vercel/output/static',
       '--port 3000',
-      '--compatibility-flag nodejs_compat',
+      '--compatibility-flags nodejs_compat',
       `--persist-to ${persistTo}`,
     ].join(' '),
     url: 'http://localhost:3000',
