@@ -1,4 +1,5 @@
 import type { Email } from '@q3ik-mail/database';
+import DOMPurify from 'isomorphic-dompurify';
 import { ReplyIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -21,7 +22,7 @@ export function MailDisplay({ thread, onReply }: MailDisplayProps) {
   const lastEmailId = thread[thread.length - 1].id;
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full">
+    <div data-testid="mail-display" className="flex flex-col gap-4 p-4 overflow-auto h-full">
       {thread.map((email) => (
         <EmailCard
           key={email.id}
@@ -86,9 +87,22 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
 }
 
 function EmailBody({ email }: { email: Email }) {
-  // Render plain text body as a fallback.
-  // TODO: Attempt isomorphic-dompurify for sanitized HTML rendering once
-  // Cloudflare Workers DOM shim compatibility is confirmed.
+  if (email.body_html) {
+    const sanitizedHtml = DOMPurify.sanitize(email.body_html, {
+      // Use an allowlist-based profile rather than a blocklist so that new
+      // attack vectors are blocked by default instead of requiring new FORBID_* entries.
+      USE_PROFILES: { html: true },
+      // Strip inline style attributes to prevent CSS expression()/url() attacks.
+      FORBID_ATTR: ['style'],
+    });
+    return (
+      <div
+        className="prose prose-sm max-w-none"
+        dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+      />
+    );
+  }
+
   if (email.body_text) {
     return (
       <pre className="whitespace-pre-wrap text-sm text-foreground font-sans break-words">

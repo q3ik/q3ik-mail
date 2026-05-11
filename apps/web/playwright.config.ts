@@ -1,4 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'node:path';
+
+const persistTo = path.resolve(__dirname, '../../.wrangler/state');
 
 export default defineConfig({
   testDir: './e2e',
@@ -19,4 +22,21 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
+  webServer: {
+    // Playwright starts this command, waits for a real HTTP 200 on the
+    // url below, and tears it down after all tests finish.
+    command: [
+      'pnpm exec wrangler pages dev .vercel/output/static',
+      '--port 3000',
+      '--compatibility-flags nodejs_compat',
+      `--persist-to ${persistTo}`,
+    ].join(' '),
+    url: 'http://localhost:3000',
+    // In CI always start fresh; locally re-use an already-running server.
+    reuseExistingServer: !process.env.CI,
+    // Give wrangler up to 60 s to finish initialising before failing.
+    timeout: 60_000,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  },
 });

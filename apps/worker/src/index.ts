@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/cloudflare';
+import { Webhook } from 'svix';
 import { Resend } from 'resend';
 
 // Env interface — matches wrangler.toml bindings and secrets
@@ -7,17 +8,11 @@ export interface Env {
   DB: D1Database;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
-  SENTRY_DSN: string;        // injected via wrangler secret
+  SENTRY_DSN?: string;       // optional — worker runs without Sentry if unset
   ENVIRONMENT: string;       // set in wrangler.toml [vars]
 }
 
-export default Sentry.withSentry(
-  (env: Env) => ({
-    dsn: env.SENTRY_DSN,
-    tracesSampleRate: 0.2,
-    environment: env.ENVIRONMENT ?? 'production',
-  }),
-  {
+const handler: ExportedHandler<Env> = {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Only accept POST requests
     if (request.method !== 'POST') {
@@ -27,23 +22,15 @@ export default Sentry.withSentry(
     // Read raw body as text BEFORE any parsing — required for signature verification
     const rawBody = await request.text();
 
-    const resend = new Resend(env.RESEND_API_KEY);
-
-    // --- Step 1: Verify webhook signature ---
-    // Use Awaited<ReturnType<...>> because verify() is async
-    // @ts-expect-error — resend v4 types don't yet include webhooks; runtime API exists
-    let event: Awaited<ReturnType<typeof resend.webhooks.verify>>;
+    // --- Step 1: Verify webhook signature via svix directly ---
+    let event: { type: string; data: { email_id: string } };
     try {
-      // @ts-expect-error — resend v4 types don't yet include webhooks; runtime API exists
-      event = await resend.webhooks.verify({
-        payload: rawBody,
-        headers: {
-          'svix-id': request.headers.get('svix-id') ?? '',
-          'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
-          'svix-signature': request.headers.get('svix-signature') ?? '',
-        },
-        webhookSecret: env.RESEND_WEBHOOK_SECRET,
-      });
+      const wh = new Webhook(env.RESEND_WEBHOOK_SECRET);
+      event = wh.verify(rawBody, {
+        'svix-id': request.headers.get('svix-id') ?? '',
+        'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
+        'svix-signature': request.headers.get('svix-signature') ?? '',
+      }) as { type: string; data: { email_id: string } };
     } catch {
       // Signature mismatch or missing headers
       return new Response('Unauthorized', { status: 401 });
@@ -57,6 +44,8 @@ export default Sentry.withSentry(
 
     const emailId = event.data.email_id;
 
+    const resend = new Resend(env.RESEND_API_KEY);
+
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
     // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
     let receivedEmail: Awaited<ReturnType<typeof resend.emails.receiving.get>>;
@@ -66,10 +55,12 @@ export default Sentry.withSentry(
       // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
       receivedEmail = await resend.emails.receiving.get(emailId);
     } catch (err) {
-      Sentry.captureException(err, {
-        tags: { layer: 'worker', operation: 'resend.receiving.get' },
-        extra: { emailId },
-      });
+      if (env.SENTRY_DSN) {
+        Sentry.captureException(err, {
+          tags: { layer: 'worker', operation: 'resend.receiving.get' },
+          extra: { emailId },
+        });
+      }
       return new Response('Failed to fetch email payload', { status: 502 });
     }
 
@@ -153,14 +144,26 @@ export default Sentry.withSentry(
         )
         .run();
     } catch (err) {
-      Sentry.captureException(err, {
-        tags: { layer: 'worker', operation: 'db.insert' },
-        extra: { emailId },
-      });
+      if (env.SENTRY_DSN) {
+        Sentry.captureException(err, {
+          tags: { layer: 'worker', operation: 'db.insert' },
+          extra: { emailId },
+        });
+      }
       return new Response('Database error', { status: 500 });
     }
 
     return new Response('OK', { status: 200 });
   },
-} satisfies ExportedHandler<Env>
+} satisfies ExportedHandler<Env>;
+
+export default Sentry.withSentry(
+  (env: Env) => env.SENTRY_DSN
+    ? {
+        dsn: env.SENTRY_DSN,
+        tracesSampleRate: 0.2,
+        environment: env.ENVIRONMENT ?? 'production',
+      }
+    : undefined,
+  handler,
 );
