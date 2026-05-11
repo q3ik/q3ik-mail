@@ -17,7 +17,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker typecheck
@@ -34,7 +34,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker lint
@@ -53,7 +53,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker test
@@ -85,31 +85,49 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # Build Next.js app (required before wrangler pages dev)
+      # Build for Cloudflare Pages — outputs to .vercel/output/static
       - name: Build web app
-        run: pnpm --filter @q3ik-mail/web build
+        run: pnpm --filter @q3ik-mail/web run build:cf
 
-      # Seed local D1 with schema and fixture data
+      # Seed local D1 with schema and fixture data.
+      # --persist-to pins the miniflare state directory to a fixed absolute
+      # path shared by all wrangler invocations in this job, so that the data
+      # seeded here is visible to wrangler pages dev below.
       - name: Initialize local D1 schema
-        run: npx wrangler d1 execute q3ik-mail-db --local --file=../../packages/database/schema.sql
+        run: >
+          npx wrangler d1 execute q3ik-mail-db
+          --local
+          --persist-to $GITHUB_WORKSPACE/.wrangler/state
+          --file=../../packages/database/schema.sql
         working-directory: apps/web
       - name: Seed E2E fixtures
-        run: npx wrangler d1 execute q3ik-mail-db --local --file=../../packages/database/fixtures.sql
+        run: >
+          npx wrangler d1 execute q3ik-mail-db
+          --local
+          --persist-to $GITHUB_WORKSPACE/.wrangler/state
+          --file=../../packages/database/fixtures.sql
         working-directory: apps/web
 
       # Install only Chromium (faster than full Playwright install)
       - name: Install Playwright Chromium
         run: pnpm --filter @q3ik-mail/web exec playwright install chromium --with-deps
 
-      # Start local server in background, wait for it
+      # Start local server in background, wait for port to be ready.
+      # --persist-to must match the path used by the seed steps above so that
+      # the dev server reads from the same miniflare state directory.
       - name: Start wrangler pages dev
         run: |
-          pnpm --filter @q3ik-mail/web exec wrangler pages dev .next --port 3000 &
-          npx wait-on http://localhost:3000 --timeout 60000
+          pnpm --filter @q3ik-mail/web exec wrangler pages dev .vercel/output/static \
+            --port 3000 \
+            --d1 DB=q3ik-mail-db \
+            --compatibility-flag nodejs_compat \
+            --persist-to $GITHUB_WORKSPACE/.wrangler/state &
+          pnpm --filter @q3ik-mail/web exec wait-on tcp:3000 --timeout 60000
+        working-directory: apps/web
 
       - name: Run Playwright E2E
         run: pnpm --filter @q3ik-mail/web e2e
