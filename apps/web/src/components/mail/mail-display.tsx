@@ -130,14 +130,6 @@ function EmailBody({ email }: { email: Email }) {
       );
     }
 
-    if (email.body_text) {
-      return (
-        <pre className="whitespace-pre-wrap text-sm text-foreground font-sans break-words">
-          {email.body_text}
-        </pre>
-      );
-    }
-
     return (
       <p className="text-sm text-muted-foreground italic">(loading message)</p>
     );
