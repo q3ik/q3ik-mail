@@ -18,22 +18,22 @@ interface ResendReceivedEmail {
   headers?: Array<{ name: string; value: string }>;
 }
 
-// Env interface — matches wrangler.toml bindings and secrets
+// Env interface -- matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
 export interface Env {
   DB: D1Database;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
-  SENTRY_DSN?: string;       // optional — worker runs without Sentry if unset
+  SENTRY_DSN?: string;       // optional -- worker runs without Sentry if unset
   ENVIRONMENT: string;       // set in wrangler.toml [vars]
 }
 
 const handler: ExportedHandler<Env> = {
-  // ---------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
   // Cron Trigger: re-thread orphaned emails on a schedule
   // Replaces the former /api/rethread HTTP endpoint (issue #31).
   // Runs every 5 minutes; resolves emails flagged with needs_rethreading=1.
-  // ---------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       resolveOrphanedThreads(env.DB).then((resolved) => {
@@ -51,16 +51,16 @@ const handler: ExportedHandler<Env> = {
     );
   },
 
-  // ---------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
   // Fetch handler: inbound email webhook from Resend
-  // ---------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
   async fetch(request: Request, env: Env): Promise<Response> {
     // Only accept POST requests
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });
     }
 
-    // Read raw body as text BEFORE any parsing — required for signature verification
+    // Read raw body as text BEFORE any parsing -- required for signature verification
     const rawBody = await request.text();
 
     // --- Step 1: Verify webhook signature via svix directly ---
@@ -92,7 +92,7 @@ const handler: ExportedHandler<Env> = {
     // and assert the expected shape so all downstream field accesses are type-checked.
     let receivedEmail: ResendReceivedEmail;
     try {
-      // Use resend.emails.receiving.get() — NOT resend.emails.get()
+      // Use resend.emails.receiving.get() -- NOT resend.emails.get()
       // resend.emails.get() is for sent mail; receiving.get() is for inbound
       receivedEmail = await (resend.emails as unknown as { receiving: { get: (id: string) => Promise<ResendReceivedEmail> } }).receiving.get(emailId);
     } catch (err) {
@@ -107,7 +107,7 @@ const handler: ExportedHandler<Env> = {
 
     // --- Runtime shape guard ---
     // The API response is cast from `any`; validate the minimum required shape
-    // before proceeding so that API drift surfaces immediately as a 502 rather
+    // before proceeding so that API will surface immediately as a 502 rather
     // than silently writing nulls into D1.
     if (!receivedEmail || typeof receivedEmail !== 'object') {
       console.error('[worker] Resend receiving API returned unexpected payload type:', typeof receivedEmail);
@@ -125,6 +125,13 @@ const handler: ExportedHandler<Env> = {
     const messageId = emailHeaders.find(
       (h) => h.name.toLowerCase() === 'message-id'
     )?.value ?? null;
+
+    const referencesHeader = (emailHeaders.find(
+      (h) => h.name.toLowerCase() === 'references'
+    )?.value ?? null)
+      // Normalise folded whitespace (CRLF + WSP) into single spaces so
+      // downstream consumers receive a clean space-separated Message-ID chain.
+      ?.replace(/\s+/g, ' ').trim() ?? null;
 
     // Fix: Look up the parent email's thread_id from D1 using the In-Reply-To
     // Message-ID. This ensures multi-level reply chains all share the same
@@ -144,17 +151,17 @@ const handler: ExportedHandler<Env> = {
         .bind(inReplyTo)
         .first<{ thread_id: string }>();
       if (parentRow) {
-        // Parent found — join existing thread
+        // Parent found -- join existing thread
         threadId = parentRow.thread_id;
       } else {
-        // Parent not yet received — use In-Reply-To value as thread_id for now
+        // Parent not yet received -- use In-Reply-To value as thread_id for now
         // and flag for re-threading once the parent arrives
         threadId = inReplyTo;
         needsRethreading = 1;
         console.warn(`[threading] Parent not found for In-Reply-To: ${inReplyTo}. Flagged for re-threading.`);
       }
     } else {
-      // Root message — start a new thread
+      // Root message -- start a new thread
       threadId = messageId ?? emailId;
     }
 
@@ -163,31 +170,36 @@ const handler: ExportedHandler<Env> = {
     const { name: fromName, address: fromAddress } = parseFrom(receivedEmail.from ?? '');
 
     // Guard: a missing or unparseable from field must not silently write an empty
-    // string into the NOT NULL from_address column — reject the webhook instead.
+    // string into the NOT NULL from_address column -- reject the webhook instead.
     if (!fromAddress) {
       console.warn('[worker] Received email with missing or unparseable from address; rejecting.', { emailId });
       return new Response('Missing from address', { status: 400 });
     }
 
     // Normalise `to` to a string regardless of whether the API returns a bare
-    // string or an array — both branches are now handled explicitly.
+    // string or an array -- both branches are now handled explicitly.
     const toRaw = receivedEmail.to;
     const toAddress = Array.isArray(toRaw)
       ? toRaw.join(', ')
       : (typeof toRaw === 'string' ? toRaw : '');
 
     // --- Step 6: Persist to D1 ---
-    // All 14 columns use bound ? parameters so that the column list and the
-    // .bind() argument list are always the same length. Hardcoding literals
-    // (e.g. 0, 0 for is_read/is_sent) shifts the value indices relative to the
-    // column indices, which breaks any test or tooling that maps columns to
-    // bind args by position.
+    // INSERT OR IGNORE: Resend guarantees at-least-once delivery, so duplicate
+    // webhook deliveries are expected. IGNORE silently skips the entire row if
+    // resend_id or message_id already exists. This is intentional -- the first
+    // ingestion wins and subsequent duplicates are discarded. If idempotent
+    // upsert semantics are ever needed, replace with INSERT OR REPLACE or add
+    // an ON CONFLICT DO UPDATE clause.
+    //
+    // Column order in the INSERT and .bind() are kept in sync:
+    //   13 bound ? placeholders + 2 literal 0s (is_read, is_sent) = 15 columns.
+    //   All 13 bound args below map 1-1 to the 13 `?` placeholders.
     try {
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
-          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, is_read, is_sent, needs_rethreading)
+          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
       `)
         .bind(
           crypto.randomUUID(),        // id
@@ -201,8 +213,7 @@ const handler: ExportedHandler<Env> = {
           receivedEmail.html ?? null,
           messageId,                  // message_id (nullable)
           inReplyTo,                  // in_reply_to (nullable)
-          0,                          // is_read
-          0,                          // is_sent
+          referencesHeader,           // references (nullable)
           needsRethreading,           // needs_rethreading (0 or 1)
         )
         .run();

@@ -52,6 +52,11 @@ export function MailDisplay({ thread, onReply }: MailDisplayProps) {
 function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: ComposePayload) => void }) {
   const senderName = email.from_name ?? email.from_address;
   const date = new Date(email.created_at).toLocaleString();
+  // A valid reply requires a real RFC 2822 Message-ID in In-Reply-To.
+  // email.id is an internal UUID — not a valid Message-ID — so when
+  // message_id is null we disable the button rather than silently sending
+  // a malformed header that breaks threading in external mail clients.
+  const canReply = Boolean(email.message_id);
 
   return (
     <div
@@ -70,24 +75,32 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
         <div className="flex items-center gap-2">
           <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
           {onReply && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="shrink-0"
-              onClick={() =>
-                onReply({
-                  to: email.from_address,
-                  subject: email.subject?.startsWith('Re: ')
-                    ? email.subject
-                    : `Re: ${email.subject ?? ''}`,
-                  replyToId: email.id,
-                  references: email.thread_id,
-                })
-              }
+            <span
+              tabIndex={canReply ? undefined : 0}
+              title={!canReply ? 'Cannot reply — this email has no Message-ID' : undefined}
             >
-              <ReplyIcon className="h-4 w-4 mr-1" />
-              Reply
-            </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0"
+                disabled={!canReply}
+                aria-disabled={!canReply}
+                onClick={() =>
+                  canReply &&
+                  onReply({
+                    to: email.from_address,
+                    subject: email.subject?.startsWith('Re: ')
+                      ? email.subject
+                      : `Re: ${email.subject ?? ''}`,
+                    replyToId: email.message_id!,
+                    references: email.references ?? undefined,
+                  })
+                }
+              >
+                <ReplyIcon className="h-4 w-4 mr-1" />
+                Reply
+              </Button>
+            </span>
           )}
         </div>
       </div>

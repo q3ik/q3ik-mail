@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { getLatestEmails, getEmailsByThread, markAsRead, getEmailById, getThreadList } from '../index';
 
-// Minimal in-memory D1 mock for unit testing query functions
-// Real D1 binding tests run in the worker layer via @cloudflare/vitest-pool-workers
-function createMockDb(rows: any[] = []) {
+// Minimal in-memory D1 mock for unit testing query functions.
+// Real D1 binding tests run in the worker layer via @cloudflare/vitest-pool-workers.
+function createMockDb(rows: Record<string, unknown>[] = []) {
   return {
     prepare: (_sql: string) => ({
-      bind: (..._args: any[]) => ({
+      bind: (..._args: unknown[]) => ({
         all: async () => ({ results: rows }),
         first: async () => rows[0] ?? null,
         run: async () => ({ success: true }),
@@ -31,6 +31,24 @@ describe('getLatestEmails', () => {
     const db = createMockDb(rows.slice(0, 3));
     const result = await getLatestEmails(db, 3);
     expect(result).toHaveLength(3);
+  });
+
+  it('surfaces the references field when present', async () => {
+    const rows = [{
+      id: '1',
+      references: '<root-001@example.com>',
+      subject: 'Re: Hello',
+    }];
+    const db = createMockDb(rows);
+    const result = await getLatestEmails(db, 1);
+    expect(result[0].references).toBe('<root-001@example.com>');
+  });
+
+  it('surfaces null references when absent', async () => {
+    const rows = [{ id: '1', references: null, subject: 'Hello' }];
+    const db = createMockDb(rows);
+    const result = await getLatestEmails(db, 1);
+    expect(result[0].references).toBeNull();
   });
 });
 
@@ -66,6 +84,17 @@ describe('getEmailById', () => {
     const result = await getEmailById(db, 'abc');
     expect(result?.subject).toBe('Hello');
   });
+
+  it('surfaces the references field when present', async () => {
+    const email = {
+      id: 'abc',
+      subject: 'Re: Hello',
+      references: '<root-001@example.com>',
+    };
+    const db = createMockDb([email]);
+    const result = await getEmailById(db, 'abc');
+    expect(result?.references).toBe('<root-001@example.com>');
+  });
 });
 
 describe('getThreadList', () => {
@@ -77,5 +106,17 @@ describe('getThreadList', () => {
     const result = await getThreadList(db, 50);
     expect(result).toHaveLength(1);
     expect(result[0].thread_id).toBe('thread-abc');
+  });
+
+  it('surfaces the references field for thread representative rows', async () => {
+    const rows = [{
+      id: '1',
+      thread_id: 'thread-abc',
+      subject: 'Re: Root',
+      references: '<root-001@example.com>',
+    }];
+    const db = createMockDb(rows);
+    const result = await getThreadList(db, 1);
+    expect(result[0].references).toBe('<root-001@example.com>');
   });
 });

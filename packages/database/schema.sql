@@ -1,8 +1,8 @@
--- Reference schema — mirrors 000_init.sql exactly.
+-- Reference schema — mirrors the cumulative result of all applied migrations.
 -- This file is kept as human-readable documentation and for tooling that reads
 -- the schema directly (e.g. DB GUIs, type generators).
--- The canonical source of truth for the live database is
--- packages/database/migrations/000_init.sql (and subsequent numbered migrations).
+-- The canonical source of truth for the live database is the numbered migration
+-- files in packages/database/migrations/ (applied in order).
 -- Do NOT apply this file directly to D1 — use:
 --   cd apps/worker && npx wrangler d1 migrations apply q3ik-mail-db --local
 
@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS emails (
   body_html         TEXT,
   message_id        TEXT UNIQUE,                          -- RFC 2822 Message-ID header
   in_reply_to       TEXT,                                 -- RFC 2822 In-Reply-To header
+  "references"      TEXT,                                 -- RFC 2822 References header (space-separated Message-ID chain)
+                                                          -- NOTE: no index added yet — column is stored only, not queried.
+                                                          -- Add idx_emails_references if thread-reconstruction queries land.
   is_read           INTEGER NOT NULL DEFAULT 0,           -- Boolean (0 = unread, 1 = read)
   is_sent           INTEGER NOT NULL DEFAULT 0,           -- 0 = inbound, 1 = outbound
   needs_rethreading INTEGER NOT NULL DEFAULT 0,           -- 1 if thread_id couldn't be resolved at ingest
