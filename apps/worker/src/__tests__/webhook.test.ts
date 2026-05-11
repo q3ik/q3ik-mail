@@ -220,28 +220,8 @@ describe('threading', () => {
       },
     }));
 
-//---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
     const { env, prepareSpy, bindSpy } = makeThreadEnv({ thread_id: 'existing-thread-id' });
-    let insertedThreadId: unknown;
-    const customEnv = {
-      RESEND_API_KEY: 'test-key',
-      RESEND_WEBHOOK_SECRET: 'test-secret',
-      DB: {
-        prepare: (sql: string) => {
-          if (sql.includes('SELECT')) {
-            return { bind: () => ({ first: async () => ({ thread_id: 'existing-thread-id' }), run: async () => ({ success: true }) }) };
-          }
-          return {
-            bind: (...args: unknown[]) => ({
-              first: async () => null,
-              run: async () => { insertedThreadId = args[2]; return { success: true }; },
-            }),
-          };
-        },
-      },
-    } as unknown as import('../index').Env;
-//---------- END of block to fix ---
-    
+
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
@@ -273,44 +253,12 @@ describe('threading', () => {
       },
     }));
 
-    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
-
     // selectFirstResult = null simulates parent not found
     const { env, prepareSpy, bindSpy } = makeThreadEnv(null);
-    let insertedNeedsRethreading: unknown;
-    const customEnv = {
-      RESEND_API_KEY: 'test-key',
-      RESEND_WEBHOOK_SECRET: 'test-secret',
-      DB: {
-        prepare: (sql: string) => {
-          if (sql.includes('SELECT')) {
-            // Simulate parent not found for the thread-lookup query
-            return { bind: () => ({ first: async () => null }) };
-          }
-          return {
-            bind: (...args: unknown[]) => ({
-              first: async () => null,
-              run: async () => {
-                // INSERT bind order (0-based):
-                // 0:id, 1:resend_id, 2:thread_id, 3:from_address, 4:from_name,
-                // 5:to_address, 6:subject, 7:body_text, 8:body_html,
-                // 9:message_id, 10:in_reply_to, 11:needs_rethreading
-                insertedNeedsRethreading = args[11];
-                return { success: true };
-              },
-            }),
-          };
-        },
-      },
-    } as unknown as import('../index').Env;
-    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- END of block to fix ---
-
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
-    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
-
     const res = await worker.fetch!(req as WorkerRequest, env, mockCtx);
     expect(res.status).toBe(200);
 
@@ -318,11 +266,6 @@ describe('threading', () => {
     const needsRethreadingIdx = columns.indexOf('needs_rethreading');
     expect(needsRethreadingIdx).toBeGreaterThanOrEqual(0);
     expect(values[needsRethreadingIdx]).toBe(1);
-    const res = await worker.fetch!(req as WorkerRequest, customEnv, mockCtx);
-    expect(res.status).toBe(200);
-    expect(insertedNeedsRethreading).toBe(1);
-    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- END of block to fix ---
-
   });
 
   it('stores correct from_name and from_address for quoted display name with comma', async () => {
@@ -342,45 +285,17 @@ describe('threading', () => {
       },
     }));
 
-    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
-
     const { env, prepareSpy, bindSpy } = makeThreadEnv();
-    let insertedFromAddress: unknown;
-    let insertedFromName: unknown;
-    const customEnv = {
-      RESEND_API_KEY: 'test-key',
-      RESEND_WEBHOOK_SECRET: 'test-secret',
-      DB: {
-        prepare: () => ({
-          bind: (...args: unknown[]) => ({
-            first: async () => null,
-            // INSERT bind order (0-based):
-            // 0:id, 1:resend_id, 2:thread_id, 3:from_address, 4:from_name, ...
-            run: async () => { insertedFromAddress = args[3]; insertedFromName = args[4]; return { success: true }; },
-          }),
-        }),
-      },
-    } as unknown as import('../index').Env;
-    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- END of block to fix ---
-
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
-    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
-
     const res = await worker.fetch!(req as WorkerRequest, env, mockCtx);
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
     expect(values[columns.indexOf('from_address')]).toBe('john@example.com');
     expect(values[columns.indexOf('from_name')]).toBe('Smith, John');
-    const res = await worker.fetch!(req as WorkerRequest, customEnv, mockCtx);
-    expect(res.status).toBe(200);
-    expect(insertedFromAddress).toBe('john@example.com');
-    expect(insertedFromName).toBe('Smith, John');
-    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- END of block to fix ---
-
   });
 
   it('returns 400 when from address is missing or unparseable', async () => {
