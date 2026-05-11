@@ -36,7 +36,7 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>();
 
   function openCompose(payload?: ComposePayload) {
-    setComposePayload(payload ?? undefined);
+    setComposePayload(payload);
     setComposeOpen(true);
   }
 
