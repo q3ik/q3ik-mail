@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/cloudflare';
 import { Webhook } from 'svix';
 import { Resend } from 'resend';
 import { resolveOrphanedThreads } from '@q3ik-mail/database';
+import { parseFrom } from './utils/parseFrom';
 
 // Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
 // Field names verified against https://resend.com/docs/api-reference/inbound
@@ -25,31 +26,6 @@ export interface Env {
   RESEND_WEBHOOK_SECRET: string;
   SENTRY_DSN?: string;       // optional — worker runs without Sentry if unset
   ENVIRONMENT: string;       // set in wrangler.toml [vars]
-}
-
-/**
- * Parse the RFC 5322 `From` header value into a display name and email address.
- *
- * Handles the following forms:
- *   "Smith, John" <john@example.com>   → { name: "Smith, John", address: "john@example.com" }
- *   Alice <alice@example.com>          → { name: "Alice",       address: "alice@example.com" }
- *   alice@example.com                  → { name: null,          address: "alice@example.com" }
- */
-export function parseFrom(raw: string): { name: string | null; address: string } {
-  // Quoted display name (handles commas and other special chars inside the quotes)
-  // Uses [^"]+ and [^>]+ to avoid polynomial backtracking (ReDoS).
-  const quotedMatch = raw.match(/^\s*"([^"]+)"\s*<([^>]+)>\s*$/);
-  if (quotedMatch) {
-    return { name: quotedMatch[1].trim() || null, address: quotedMatch[2].trim() };
-  }
-  // Unquoted display name — match everything before '<', then the address inside '<...>'
-  // Uses [^<]+ and [^>]+ to avoid polynomial backtracking (ReDoS).
-  const unquotedMatch = raw.match(/^([^<]+)<([^>]+)>\s*$/);
-  if (unquotedMatch) {
-    return { name: unquotedMatch[1].trim() || null, address: unquotedMatch[2].trim() };
-  }
-  // Plain email address with no display name
-  return { name: null, address: raw.trim() };
 }
 
 const handler: ExportedHandler<Env> = {
@@ -185,6 +161,13 @@ const handler: ExportedHandler<Env> = {
     // --- Step 5: Parse from_name and from_address ---
     // Resend returns from as "Display Name <email@example.com>" or just "email@example.com"
     const { name: fromName, address: fromAddress } = parseFrom(receivedEmail.from ?? '');
+
+    // Guard: a missing or unparseable from field must not silently write an empty
+    // string into the NOT NULL from_address column — reject the webhook instead.
+    if (!fromAddress) {
+      console.warn('[worker] Received email with missing or unparseable from address; rejecting.', { emailId });
+      return new Response('Missing from address', { status: 400 });
+    }
 
     // Normalise `to` to a string regardless of whether the API returns a bare
     // string or an array — both branches are now handled explicitly.
