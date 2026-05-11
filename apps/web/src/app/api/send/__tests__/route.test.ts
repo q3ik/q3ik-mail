@@ -54,6 +54,30 @@ describe('POST /api/send', () => {
     expect(body.error).toBe('Invalid or missing email address');
   });
 
+<<<<<<< fix/review-audit-54-51-49
+  // Boundary cases that the original indexOf-based check passed incorrectly
+  it.each([
+    ['trailing dot in domain', 'a@b.'],
+    ['leading dot in domain', 'a@.b.com'],
+    ['space in domain', 'a@ b.com'],
+    ['multiple @ signs', 'a@b@c.com'],
+    ['empty local part', '@b.com'],
+    ['empty string', ''],
+  ])('returns 400 for invalid email: %s (%s)', async (_label, address) => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: address, subject: 'Hi', content: 'Hello' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('Invalid or missing email address');
+  });
+
+=======
+>>>>>>> copilot/fix-email-validation-in-api-send
   it('returns 200 with email id on success', async () => {
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {

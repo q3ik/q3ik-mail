@@ -10,6 +10,7 @@ import type { ComposePayload } from '@/components/mail/compose-dialog';
 const sanitizeOptions = {
   USE_PROFILES: { html: true },
   FORBID_ATTR: ['style'],
+  ALLOW_DATA_ATTR: false,
 };
 
 let DOMPurifyPromise: Promise<typeof import('isomorphic-dompurify')> | undefined;
@@ -130,9 +131,11 @@ function EmailBody({ email }: { email: Email }) {
   if (email.body_html) {
     if (sanitizedHtml) {
       return (
-        <div
-          className="prose prose-sm max-w-none"
-          dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+        <iframe
+          title="Email body"
+          srcDoc={sanitizedHtml}
+          sandbox=""
+          className="w-full h-[70vh] min-h-[16rem] border-0"
         />
       );
     }
