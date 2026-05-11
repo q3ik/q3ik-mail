@@ -4,6 +4,12 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Cron Trigger: re-thread orphaned emails every 5 minutes.
+# Replaces the former /api/rethread HTTP endpoint (issue #31).
+# To test locally: npx wrangler dev --test-scheduled
+[triggers]
+crons = ["*/5 * * * *"]
+
 # The D1 database binding
 # Run `npx wrangler d1 create q3ik-mail-db` and replace the placeholder below
 [[d1_databases]]
