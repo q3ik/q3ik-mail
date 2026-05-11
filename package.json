@@ -2,6 +2,9 @@
   "name": "q3ik-mail",
   "private": true,
   "packageManager": "pnpm@10.10.0",
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
