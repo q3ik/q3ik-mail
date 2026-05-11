@@ -66,17 +66,23 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
       );
     });
 
-    // Persist the DB writes after UI is already updated; revert optimistic
-    // update if the write fails so the read state stays in sync.
+    // Persist the DB writes after UI is already updated. Use allSettled so
+    // individual failures are tracked: only revert the optimistic is_read update
+    // when at least one write failed (preserving correctly-read emails in the DB).
     const unreadIds = emails.filter((e) => e.is_read === 0).map((e) => e.id);
     if (unreadIds.length > 0) {
-      Promise.all(unreadIds.map((id) => markEmailAsRead(id))).catch((err) => {
-        console.error('[mail] markAsRead batch failed, reverting optimistic update', err);
-        setThreads((prev) =>
-          prev.map((t) =>
-            t.thread_id === threadId ? { ...t, is_read: 0 } : t
-          )
+      Promise.allSettled(unreadIds.map((id) => markEmailAsRead(id))).then((results) => {
+        const failedIds = new Set(
+          unreadIds.filter((_, i) => results[i].status === 'rejected')
         );
+        if (failedIds.size > 0) {
+          console.error('[mail] markAsRead batch failed, reverting optimistic update', [...failedIds]);
+          setThreads((prev) =>
+            prev.map((t) =>
+              t.thread_id === threadId ? { ...t, is_read: 0 } : t
+            )
+          );
+        }
       });
     }
   }
