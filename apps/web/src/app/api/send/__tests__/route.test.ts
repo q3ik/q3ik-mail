@@ -60,7 +60,9 @@ function getInsertArgs(): { columns: string[]; values: unknown[] } {
   expect(valuesMatch).not.toBeNull();
   const valueTokens = valuesMatch![1].split(',').map((value) => value.trim());
 
-  const boundValues = routeMocks.insertBind.mock.calls[0] as unknown[];
+  const firstInsertBindCall = routeMocks.insertBind.mock.calls[0];
+  expect(firstInsertBindCall).toBeDefined();
+  const boundValues = firstInsertBindCall as unknown[];
   const columnToValue: Record<string, unknown> = {};
   let paramIdx = 0;
 
