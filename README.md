@@ -27,14 +27,18 @@
 
 ### 1. Database Initialization
 
-Create your D1 database and apply the schema found in `packages/database/schema.sql`:
+Create your D1 database and apply all migrations from `packages/database/migrations/`:
 
 ```bash
-# Create the database
+# Create the database (one-time setup — copy the returned database_id into apps/worker/wrangler.toml)
 npx wrangler d1 create q3ik-mail-db
 
-# Run migrations (Remote)
-npx wrangler d1 execute q3ik-mail-db --remote --file=packages/database/schema.sql
+# Apply migrations to the local development database
+cd apps/worker
+npx wrangler d1 migrations apply q3ik-mail-db --local
+
+# Apply migrations to the remote (production) database
+npx wrangler d1 migrations apply q3ik-mail-db --remote
 
 ```
 
