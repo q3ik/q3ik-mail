@@ -130,3 +130,56 @@ export async function getThreadList(
     .all<EmailSummary>();
   return results;
 }
+
+/**
+ * Re-threading sweep: finds emails flagged with needs_rethreading=1
+ * and attempts to resolve their thread_id by looking up the parent.
+ *
+ * This is intended to be called:
+ * - Manually via a Cloudflare Worker Cron Trigger (future)
+ * - Via a debug API route for immediate recovery
+ *
+ * @param db - D1Database binding
+ * @returns number of emails successfully re-threaded
+ */
+export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
+  // Fetch all orphaned emails (batch of 50)
+  const { results: orphans } = await db
+    .prepare(
+      `SELECT id, in_reply_to
+       FROM emails
+       WHERE needs_rethreading = 1
+         AND in_reply_to IS NOT NULL
+       ORDER BY created_at ASC
+       LIMIT 50`
+    )
+    .all<{ id: string; in_reply_to: string }>();
+
+  if (orphans.length === 0) return 0;
+
+  let resolvedCount = 0;
+
+  for (const orphan of orphans) {
+    // Look up the parent by its message_id
+    const parent = await db
+      .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
+      .bind(orphan.in_reply_to)
+      .first<{ thread_id: string }>();
+
+    if (!parent) continue; // Parent still hasn't arrived
+
+    // Update the orphan's thread_id and clear the flag
+    await db
+      .prepare(
+        `UPDATE emails
+         SET thread_id = ?, needs_rethreading = 0
+         WHERE id = ?`
+      )
+      .bind(parent.thread_id, orphan.id)
+      .run();
+
+    resolvedCount++;
+  }
+
+  return resolvedCount;
+}
