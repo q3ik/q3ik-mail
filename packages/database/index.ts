@@ -2,6 +2,11 @@ import type { Email, EmailSummary } from './types';
 
 export type { Email, EmailSummary, NewEmail } from './types';
 
+export interface ThreadListPage {
+  threads: EmailSummary[];
+  nextCursor: string | null;
+}
+
 /**
  * Fetch the N most recent emails ordered by created_at DESC.
  * Returns EmailSummary (no body fields) for efficient list rendering.
@@ -105,30 +110,75 @@ export async function getThreadList(
   db: D1Database,
   limit: number = 50
 ): Promise<EmailSummary[]> {
+  const { threads } = await getThreadListPage(db, { limit });
+  return threads;
+}
+
+export async function getThreadListPage(
+  db: D1Database,
+  {
+    limit = 50,
+    cursor,
+  }: {
+    limit?: number;
+    cursor?: string;
+  } = {}
+): Promise<ThreadListPage> {
+  const pageSize = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
+  const fetchLimit = pageSize + 1;
+
   const { results } = await db
     .prepare(
-      `SELECT
-         id, resend_id, thread_id, from_address, from_name,
-         to_address, subject, message_id, in_reply_to, "references",
-         is_read, is_sent, needs_rethreading, created_at
-       FROM (
-         SELECT
-           id, resend_id, thread_id, from_address, from_name,
-           to_address, subject, message_id, in_reply_to, "references",
-           is_read, is_sent, needs_rethreading, created_at,
-           ROW_NUMBER() OVER (
-             PARTITION BY thread_id
-             ORDER BY created_at DESC, resend_id ASC
-           ) AS thread_rank
-         FROM emails
-       ) ranked_emails
-       WHERE thread_rank = 1
-       ORDER BY created_at DESC, id ASC
-       LIMIT ?`
+      cursor
+        ? `SELECT
+             id, resend_id, thread_id, from_address, from_name,
+             to_address, subject, message_id, in_reply_to, "references",
+             is_read, is_sent, needs_rethreading, created_at
+           FROM (
+             SELECT
+               id, resend_id, thread_id, from_address, from_name,
+               to_address, subject, message_id, in_reply_to, "references",
+               is_read, is_sent, needs_rethreading, created_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY thread_id
+                 ORDER BY created_at DESC, resend_id ASC
+               ) AS thread_rank
+             FROM emails
+           ) ranked_emails
+           WHERE thread_rank = 1
+             AND created_at < ?
+           ORDER BY created_at DESC, id ASC
+           LIMIT ?`
+        : `SELECT
+             id, resend_id, thread_id, from_address, from_name,
+             to_address, subject, message_id, in_reply_to, "references",
+             is_read, is_sent, needs_rethreading, created_at
+           FROM (
+             SELECT
+               id, resend_id, thread_id, from_address, from_name,
+               to_address, subject, message_id, in_reply_to, "references",
+               is_read, is_sent, needs_rethreading, created_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY thread_id
+                 ORDER BY created_at DESC, resend_id ASC
+               ) AS thread_rank
+             FROM emails
+           ) ranked_emails
+           WHERE thread_rank = 1
+           ORDER BY created_at DESC, id ASC
+           LIMIT ?`
     )
-    .bind(limit)
+    .bind(...(cursor ? [cursor, fetchLimit] : [fetchLimit]))
     .all<EmailSummary>();
-  return results;
+
+  const threads = results.slice(0, pageSize);
+  const nextCursor =
+    results.length > pageSize ? threads.at(-1)?.created_at ?? null : null;
+
+  return {
+    threads,
+    nextCursor,
+  };
 }
 
 /**

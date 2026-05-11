@@ -18,15 +18,23 @@ interface MailProps {
   threads: EmailSummary[];
   selectedThread: Email[];
   defaultSelectedId?: string;
+  initialNextCursor?: string | null;
 }
 
-export function Mail({ threads: initialThreads, selectedThread, defaultSelectedId }: MailProps) {
+export function Mail({
+  threads: initialThreads,
+  selectedThread,
+  defaultSelectedId,
+  initialNextCursor = null,
+}: MailProps) {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
     defaultSelectedId ?? null
   );
   const [currentThread, setCurrentThread] = useState<Email[]>(selectedThread);
   // Bug #6 fix: lift threads into state so we can optimistically update is_read
   const [threads, setThreads] = useState<EmailSummary[]>(initialThreads);
+  const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   // Bug #3 fix: monotonically-increasing token to guard against out-of-order responses
@@ -38,6 +46,34 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
   function openCompose(payload?: ComposePayload) {
     setComposePayload(payload ?? undefined);
     setComposeOpen(true);
+  }
+
+  async function handleLoadMore() {
+    if (!nextCursor || isLoadingMore) return;
+
+    setIsLoadingMore(true);
+
+    try {
+      const response = await fetch(
+        `/api/emails?cursor=${encodeURIComponent(nextCursor)}`
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to load more emails (${response.status})`);
+      }
+
+      const payload = (await response.json()) as {
+        threads: EmailSummary[];
+        nextCursor: string | null;
+      };
+
+      setThreads((prev) => [...prev, ...payload.threads]);
+      setNextCursor(payload.nextCursor);
+    } catch (err) {
+      console.error('[mail] load more failed:', err);
+    } finally {
+      setIsLoadingMore(false);
+    }
   }
 
   async function handleSelectThread(threadId: string) {
@@ -109,6 +145,8 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
               threads={threads}
               selectedThreadId={selectedThreadId}
               onSelectThread={handleSelectThread}
+              onLoadMore={nextCursor ? handleLoadMore : undefined}
+              isLoadingMore={isLoadingMore}
             />
           </div>
         </ResizablePanel>

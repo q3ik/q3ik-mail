@@ -9,12 +9,16 @@ interface MailListProps {
   threads: EmailSummary[];
   selectedThreadId: string | null;
   onSelectThread: (threadId: string) => void;
+  onLoadMore?: () => void;
+  isLoadingMore?: boolean;
 }
 
 export function MailList({
   threads,
   selectedThreadId,
   onSelectThread,
+  onLoadMore,
+  isLoadingMore = false,
 }: MailListProps) {
   if (threads.length === 0) {
     return (
@@ -35,6 +39,16 @@ export function MailList({
             onSelect={() => onSelectThread(thread.thread_id)}
           />
         ))}
+        {onLoadMore && (
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={isLoadingMore}
+            className="mt-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        )}
       </div>
     </ScrollArea>
   );
