@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/cloudflare';
 import { Webhook } from 'svix';
 import { Resend } from 'resend';
 import { resolveOrphanedThreads } from '@q3ik-mail/database';
+import { parseFrom } from './utils/parseFrom';
 
 // Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
 // Field names verified against https://resend.com/docs/api-reference/inbound
@@ -159,10 +160,14 @@ const handler: ExportedHandler<Env> = {
 
     // --- Step 5: Parse from_name and from_address ---
     // Resend returns from as "Display Name <email@example.com>" or just "email@example.com"
-    const fromRaw: string = receivedEmail.from ?? '';
-    const fromMatch = fromRaw.match(/^(.+?)\s*<(.+?)>$/);
-    const fromName = fromMatch ? fromMatch[1].trim() : null;
-    const fromAddress = fromMatch ? fromMatch[2].trim() : fromRaw.trim();
+    const { name: fromName, address: fromAddress } = parseFrom(receivedEmail.from ?? '');
+
+    // Guard: a missing or unparseable from field must not silently write an empty
+    // string into the NOT NULL from_address column — reject the webhook instead.
+    if (!fromAddress) {
+      console.warn('[worker] Received email with missing or unparseable from address; rejecting.', { emailId });
+      return new Response('Missing from address', { status: 400 });
+    }
 
     // Normalise `to` to a string regardless of whether the API returns a bare
     // string or an array — both branches are now handled explicitly.
