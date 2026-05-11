@@ -16,8 +16,8 @@ import { Label } from '@/components/ui/label';
 export interface ComposePayload {
   to?: string;
   subject?: string;
-  replyToId?: string;   // Message-ID of the email being replied to
-  references?: string;  // thread_id / accumulated References header chain
+  replyToId?: string;   // RFC 2822 Message-ID of the email being replied to (used in In-Reply-To header)
+  references?: string;  // RFC 2822 References header value from the replied-to email (echoed verbatim to build the chain)
 }
 
 interface ComposeDialogProps {

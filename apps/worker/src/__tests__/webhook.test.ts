@@ -60,8 +60,8 @@ function makeRequest(body: string, headers: Record<string, string> = {}) {
   });
 }
 
-function fetchWorker(req: Request) {
-  return worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
+function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
+  return worker.fetch!(req as WorkerRequest, env, ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -70,23 +70,24 @@ function fetchWorker(req: Request) {
 
 /**
  * Creates a spy-instrumented Env whose DB.prepare / .bind calls are recorded.
- * The SELECT branch (thread lookup) returns `selectFirstResult`; all other
- * statements (INSERT) use the spy so bind args can be inspected.
+ * SELECT statements (thread-lookup) are routed to a silent non-spy stub so
+ * bindSpy exclusively captures INSERT .bind() calls.
+ *
+ * `selectFirstResult` is the value returned by SELECT .first() — use an
+ * object like `{ thread_id: 'x' }` to simulate a found parent, or `null`
+ * for the orphan / no-parent path.
  */
-function makeThreadEnv(
-  selectFirstResult: unknown = null,
-): {
-  env: import('../index').Env;
-  prepareSpy: ReturnType<typeof vi.fn>;
-  bindSpy: ReturnType<typeof vi.fn>;
-} {
+function makeEnvWithSpy(selectFirstResult: unknown = null) {
   const bindSpy = vi.fn().mockReturnValue({
     first: async () => null,
     run: async () => ({ success: true }),
   });
   const prepareSpy = vi.fn().mockImplementation((sql: string) => {
-    if (sql.includes('SELECT')) {
-      return { bind: () => ({ first: async () => selectFirstResult }) };
+    // Route SELECTs to a silent non-spy stub so bindSpy only sees INSERT calls.
+    if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
+      return {
+        bind: () => ({ first: async () => selectFirstResult }),
+      };
     }
     return { bind: bindSpy };
   });
@@ -100,8 +101,14 @@ function makeThreadEnv(
 
 /**
  * Parses the INSERT OR IGNORE INTO emails statement captured by prepareSpy
- * and returns the column names alongside the corresponding bound values from
- * bindSpy — making assertions immune to future column additions/reorderings.
+ * and returns column names alongside their corresponding bound values.
+ *
+ * The INSERT uses a mix of `?` placeholders and literal values (e.g. `0, 0`
+ * for is_read and is_sent). This helper aligns columns to bound-param
+ * positions by scanning the VALUES clause for `?` tokens, so assertions
+ * remain correct regardless of which columns use literals vs. bound params.
+ *
+ * bindSpy.mock.calls[0] is always the INSERT — SELECTs are routed elsewhere.
  */
 function getInsertArgs(
   prepareSpy: ReturnType<typeof vi.fn>,
@@ -113,14 +120,38 @@ function getInsertArgs(
   expect(insertIdx).toBeGreaterThanOrEqual(0);
 
   const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
+
+  // Parse column list
   const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
   expect(colMatch).not.toBeNull();
-  const columns = colMatch![1]
+  const allColumns = colMatch![1]
     .split(',')
     .map((c) => c.trim().replace(/["'`]/g, ''));
 
-  const values = bindSpy.mock.calls[0] as unknown[];
-  return { columns, values };
+  // Parse VALUES clause to find which positions are `?` vs literals
+  const valuesMatch = insertSql.match(/VALUES\s*\(([^)]+)\)/i);
+  expect(valuesMatch).not.toBeNull();
+  const valueTokens = valuesMatch![1].split(',').map((v) => v.trim());
+
+  // Build a map: column name → bound-param index (only for `?` entries)
+  // Columns with literal values (e.g. `0`) are excluded from the values array.
+  const boundValues = bindSpy.mock.calls[0] as unknown[];
+  const columnToValue: Record<string, unknown> = {};
+  let paramIdx = 0;
+  for (let i = 0; i < valueTokens.length; i++) {
+    if (valueTokens[i] === '?') {
+      columnToValue[allColumns[i]] = boundValues[paramIdx++];
+    } else {
+      // Literal value — parse and store directly so callers can still look it up
+      const literal = valueTokens[i];
+      const parsed = isNaN(Number(literal)) ? literal : Number(literal);
+      columnToValue[allColumns[i]] = parsed;
+    }
+  }
+
+  // Return columns and a values array aligned to allColumns order (literals + bound)
+  const values = allColumns.map((col) => columnToValue[col]);
+  return { columns: allColumns, values };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +195,74 @@ describe('webhook handler', () => {
     });
     const res = await fetchWorker(req);
     expect(res.status).toBe(200);
+  });
+
+  it('extracts and persists References header from inbound email', async () => {
+    const { Resend } = await import('resend');
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy();
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Re: Hello',
+            text: 'Reply body',
+            html: null,
+            headers: [
+              { name: 'Message-ID', value: '<reply-123@mail.example.com>' },
+              { name: 'In-Reply-To', value: '<root-456@mail.example.com>' },
+              { name: 'References', value: '<root-456@mail.example.com>' },
+            ],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+    expect(res.status).toBe(200);
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    const referencesIdx = columns.indexOf('references');
+    expect(referencesIdx).toBeGreaterThanOrEqual(0);
+    expect(values[referencesIdx]).toBe('<root-456@mail.example.com>');
+  });
+
+  it('stores null for references when References header is absent', async () => {
+    const { Resend } = await import('resend');
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy();
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Bob <bob@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'No References header',
+            text: 'Body',
+            html: null,
+            headers: [
+              { name: 'Message-ID', value: '<new-789@mail.example.com>' },
+            ],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+    expect(res.status).toBe(200);
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    const referencesIdx = columns.indexOf('references');
+    expect(referencesIdx).toBeGreaterThanOrEqual(0);
+    expect(values[referencesIdx]).toBeNull();
   });
 });
 
@@ -220,7 +319,8 @@ describe('threading', () => {
       },
     }));
 
-    const { env, prepareSpy, bindSpy } = makeThreadEnv({ thread_id: 'existing-thread-id' });
+    // selectFirstResult = found parent row
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy({ thread_id: 'existing-thread-id' });
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
@@ -254,7 +354,7 @@ describe('threading', () => {
     }));
 
     // selectFirstResult = null simulates parent not found
-    const { env, prepareSpy, bindSpy } = makeThreadEnv(null);
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy(null);
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
@@ -265,6 +365,8 @@ describe('threading', () => {
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
     const needsRethreadingIdx = columns.indexOf('needs_rethreading');
     expect(needsRethreadingIdx).toBeGreaterThanOrEqual(0);
+    // needs_rethreading is a bound `?` param — getInsertArgs resolves it correctly
+    // regardless of the literal 0s for is_read/is_sent in the same INSERT.
     expect(values[needsRethreadingIdx]).toBe(1);
   });
 
@@ -285,7 +387,7 @@ describe('threading', () => {
       },
     }));
 
-    const { env, prepareSpy, bindSpy } = makeThreadEnv();
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy();
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
