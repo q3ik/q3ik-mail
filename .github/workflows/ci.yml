@@ -126,17 +126,17 @@ jobs:
       - name: Build web app
         run: pnpm --filter @q3ik-mail/web run build:cf
 
-      # Seed local D1 with schema and fixture data.
-      # --persist-to pins the miniflare state directory to a fixed absolute
-      # path shared by all wrangler invocations in this job, including the
-      # wrangler pages dev process started by Playwright's webServer.
-      - name: Initialize local D1 schema
+      # Apply all numbered migrations against the local D1 instance.
+      # Uses the canonical migration workflow (000_init.sql, 001_*, …) rather
+      # than the legacy schema.sql one-shot, so CI matches the production
+      # deployment path exactly.
+      - name: Apply D1 migrations (local)
         run: >
-          npx wrangler d1 execute q3ik-mail-db
+          npx wrangler d1 migrations apply q3ik-mail-db
           --local
           --persist-to $GITHUB_WORKSPACE/.wrangler/state
-          --file=../../packages/database/schema.sql
-        working-directory: apps/web
+        working-directory: apps/worker
+
       - name: Seed E2E fixtures
         run: >
           npx wrangler d1 execute q3ik-mail-db
