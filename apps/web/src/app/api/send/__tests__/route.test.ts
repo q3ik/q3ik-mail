@@ -122,42 +122,46 @@ describe('POST /api/send', () => {
   });
 
   it('returns 200 with email id on success and persists the sent email', async () => {
-    vi.spyOn(globalThis.crypto, 'randomUUID')
+    const randomUuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('message-uuid')
       .mockReturnValueOnce('row-uuid');
-    const { POST } = await import('../route');
-    const req = new Request('http://localhost/api/send', {
-      method: 'POST',
-      body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const res = await POST(req as unknown as NextRequest);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.id).toBe('sent-id');
+    try {
+      const { POST } = await import('../route');
+      const req = new Request('http://localhost/api/send', {
+        method: 'POST',
+        body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const res = await POST(req as unknown as NextRequest);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.id).toBe('sent-id');
 
-    const MockedResend = Resend as MockedClass<typeof Resend>;
-    const sendSpy = MockedResend.mock.results[0]?.value.emails.send as ReturnType<typeof vi.fn>;
-    const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
-    expect(callArgs.headers?.['Message-ID']).toBe('<message-uuid@q3ik.com>');
+      const MockedResend = Resend as MockedClass<typeof Resend>;
+      const sendSpy = MockedResend.mock.results[0]?.value.emails.send as ReturnType<typeof vi.fn>;
+      const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
+      expect(callArgs.headers?.['Message-ID']).toBe('<message-uuid@q3ik.com>');
 
-    const { sql, boundValues } = getInsertCall();
-    expect(sql).toContain('1, 1, ?');
-    expect(boundValues).toEqual([
-      'row-uuid',
-      'sent-id',
-      '<message-uuid@q3ik.com>',
-      'mail@q3ik.com',
-      'q3ik Mail',
-      'a@b.com',
-      'Hi',
-      'Hello',
-      null,
-      '<message-uuid@q3ik.com>',
-      null,
-      null,
-      0,
-    ]);
+      const { sql, boundValues } = getInsertCall();
+      expect(sql).toContain('1, 1, ?');
+      expect(boundValues).toEqual([
+        'row-uuid',
+        'sent-id',
+        '<message-uuid@q3ik.com>',
+        'mail@q3ik.com',
+        'q3ik Mail',
+        'a@b.com',
+        'Hi',
+        'Hello',
+        null,
+        '<message-uuid@q3ik.com>',
+        null,
+        null,
+        0,
+      ]);
+    } finally {
+      randomUuidSpy.mockRestore();
+    }
   });
 
   it('returns generic error message when Resend API returns an error', async () => {
@@ -179,67 +183,75 @@ describe('POST /api/send', () => {
 
   it('sets In-Reply-To and References headers when replyToId is provided', async () => {
     const MockedResend = Resend as MockedClass<typeof Resend>;
-    vi.spyOn(globalThis.crypto, 'randomUUID')
+    const randomUuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('reply-message-uuid')
       .mockReturnValueOnce('reply-row-uuid');
     routeMocks.selectFirst.mockResolvedValueOnce({ thread_id: 'thread-123' });
     const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'r1' }, error: null });
     MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
-    const { POST } = await import('../route');
-    const req = new Request('http://localhost/api/send', {
-      method: 'POST',
-      body: JSON.stringify({
-        to: 'a@b.com',
-        subject: 'Re: Hi',
-        content: 'Hi back',
-        replyToId: '<msg-1@example.com>',
-        references: '<root@example.com>',
-      }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    await POST(req as unknown as NextRequest);
-    const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
-    expect(callArgs.headers?.['Message-ID']).toBe('<reply-message-uuid@q3ik.com>');
-    expect(callArgs.headers?.['In-Reply-To']).toBe('<msg-1@example.com>');
-    expect(callArgs.headers?.['References']).toBe('<root@example.com> <msg-1@example.com>');
-    expect(routeMocks.selectBind).toHaveBeenCalledWith('<msg-1@example.com>');
+    try {
+      const { POST } = await import('../route');
+      const req = new Request('http://localhost/api/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          to: 'a@b.com',
+          subject: 'Re: Hi',
+          content: 'Hi back',
+          replyToId: '<msg-1@example.com>',
+          references: '<root@example.com>',
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await POST(req as unknown as NextRequest);
+      const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
+      expect(callArgs.headers?.['Message-ID']).toBe('<reply-message-uuid@q3ik.com>');
+      expect(callArgs.headers?.['In-Reply-To']).toBe('<msg-1@example.com>');
+      expect(callArgs.headers?.['References']).toBe('<root@example.com> <msg-1@example.com>');
+      expect(routeMocks.selectBind).toHaveBeenCalledWith('<msg-1@example.com>');
 
-    const { sql, boundValues } = getInsertCall();
-    expect(sql).toContain('1, 1, ?');
-    expect(boundValues).toEqual([
-      'reply-row-uuid',
-      'r1',
-      'thread-123',
-      'mail@q3ik.com',
-      'q3ik Mail',
-      'a@b.com',
-      'Re: Hi',
-      'Hi back',
-      null,
-      '<reply-message-uuid@q3ik.com>',
-      '<msg-1@example.com>',
-      '<root@example.com> <msg-1@example.com>',
-      0,
-    ]);
+      const { sql, boundValues } = getInsertCall();
+      expect(sql).toContain('1, 1, ?');
+      expect(boundValues).toEqual([
+        'reply-row-uuid',
+        'r1',
+        'thread-123',
+        'mail@q3ik.com',
+        'q3ik Mail',
+        'a@b.com',
+        'Re: Hi',
+        'Hi back',
+        null,
+        '<reply-message-uuid@q3ik.com>',
+        '<msg-1@example.com>',
+        '<root@example.com> <msg-1@example.com>',
+        0,
+      ]);
+    } finally {
+      randomUuidSpy.mockRestore();
+    }
   });
 
   it('still returns 200 when D1 persistence fails after send succeeds', async () => {
     routeMocks.insertRun.mockRejectedValueOnce(new Error('db unavailable'));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { POST } = await import('../route');
-    const req = new Request('http://localhost/api/send', {
-      method: 'POST',
-      body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
+    try {
+      const { POST } = await import('../route');
+      const req = new Request('http://localhost/api/send', {
+        method: 'POST',
+        body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
+        headers: { 'Content-Type': 'application/json' },
+      });
 
-    const res = await POST(req as unknown as NextRequest);
+      const res = await POST(req as unknown as NextRequest);
 
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ id: 'sent-id' });
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[api/send] Failed to persist sent email to D1:',
-      expect.any(Error)
-    );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ id: 'sent-id' });
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[api/send] Failed to persist sent email to D1:',
+        expect.any(Error)
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
