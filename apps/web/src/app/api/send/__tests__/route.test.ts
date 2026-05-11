@@ -43,43 +43,17 @@ vi.mock('resend', () => ({
   })),
 }));
 
-function getInsertArgs(): { columns: string[]; values: unknown[] } {
+function getInsertCall(): { sql: string; boundValues: unknown[] } {
   const insertIdx = (routeMocks.prepare.mock.calls as unknown[][]).findIndex(
     (args) => (args[0] as string).includes('INSERT OR IGNORE INTO emails')
   );
   expect(insertIdx).toBeGreaterThanOrEqual(0);
 
-  const insertSql = routeMocks.prepare.mock.calls[insertIdx][0] as string;
-  const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
-  expect(colMatch).not.toBeNull();
-  const allColumns = colMatch![1]
-    .split(',')
-    .map((column) => column.trim().replace(/["'`]/g, ''));
-
-  const valuesMatch = insertSql.match(/VALUES\s*\(([^)]+)\)/i);
-  expect(valuesMatch).not.toBeNull();
-  const valueTokens = valuesMatch![1].split(',').map((value) => value.trim());
-
   const firstInsertBindCall = routeMocks.insertBind.mock.calls[0];
   expect(firstInsertBindCall).toBeDefined();
-  const boundValues = firstInsertBindCall as unknown[];
-  const columnToValue: Record<string, unknown> = {};
-  let paramIdx = 0;
-
-  for (let i = 0; i < valueTokens.length; i++) {
-    if (valueTokens[i] === '?') {
-      columnToValue[allColumns[i]] = boundValues[paramIdx++];
-    } else {
-      const literal = valueTokens[i];
-      columnToValue[allColumns[i]] = Number.isNaN(Number(literal))
-        ? literal
-        : Number(literal);
-    }
-  }
-
   return {
-    columns: allColumns,
-    values: allColumns.map((column) => columnToValue[column]),
+    sql: routeMocks.prepare.mock.calls[insertIdx][0] as string,
+    boundValues: firstInsertBindCall as unknown[],
   };
 }
 
@@ -166,22 +140,23 @@ describe('POST /api/send', () => {
     const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
     expect(callArgs.headers?.['Message-ID']).toBe('<message-uuid@q3ik.com>');
 
-    const { columns, values } = getInsertArgs();
-    expect(values[columns.indexOf('id')]).toBe('row-uuid');
-    expect(values[columns.indexOf('resend_id')]).toBe('sent-id');
-    expect(values[columns.indexOf('thread_id')]).toBe('<message-uuid@q3ik.com>');
-    expect(values[columns.indexOf('from_address')]).toBe('mail@q3ik.com');
-    expect(values[columns.indexOf('from_name')]).toBe('q3ik Mail');
-    expect(values[columns.indexOf('to_address')]).toBe('a@b.com');
-    expect(values[columns.indexOf('subject')]).toBe('Hi');
-    expect(values[columns.indexOf('body_text')]).toBe('Hello');
-    expect(values[columns.indexOf('body_html')]).toBeNull();
-    expect(values[columns.indexOf('message_id')]).toBe('<message-uuid@q3ik.com>');
-    expect(values[columns.indexOf('in_reply_to')]).toBeNull();
-    expect(values[columns.indexOf('references')]).toBeNull();
-    expect(values[columns.indexOf('is_read')]).toBe(1);
-    expect(values[columns.indexOf('is_sent')]).toBe(1);
-    expect(values[columns.indexOf('needs_rethreading')]).toBe(0);
+    const { sql, boundValues } = getInsertCall();
+    expect(sql).toContain('1, 1, ?');
+    expect(boundValues).toEqual([
+      'row-uuid',
+      'sent-id',
+      '<message-uuid@q3ik.com>',
+      'mail@q3ik.com',
+      'q3ik Mail',
+      'a@b.com',
+      'Hi',
+      'Hello',
+      null,
+      '<message-uuid@q3ik.com>',
+      null,
+      null,
+      0,
+    ]);
   });
 
   it('returns generic error message when Resend API returns an error', async () => {
@@ -228,13 +203,23 @@ describe('POST /api/send', () => {
     expect(callArgs.headers?.['References']).toBe('<root@example.com> <msg-1@example.com>');
     expect(routeMocks.selectBind).toHaveBeenCalledWith('<msg-1@example.com>');
 
-    const { columns, values } = getInsertArgs();
-    expect(values[columns.indexOf('id')]).toBe('reply-row-uuid');
-    expect(values[columns.indexOf('thread_id')]).toBe('thread-123');
-    expect(values[columns.indexOf('message_id')]).toBe('<reply-message-uuid@q3ik.com>');
-    expect(values[columns.indexOf('in_reply_to')]).toBe('<msg-1@example.com>');
-    expect(values[columns.indexOf('references')]).toBe('<root@example.com> <msg-1@example.com>');
-    expect(values[columns.indexOf('needs_rethreading')]).toBe(0);
+    const { sql, boundValues } = getInsertCall();
+    expect(sql).toContain('1, 1, ?');
+    expect(boundValues).toEqual([
+      'reply-row-uuid',
+      'r1',
+      'thread-123',
+      'mail@q3ik.com',
+      'q3ik Mail',
+      'a@b.com',
+      'Re: Hi',
+      'Hi back',
+      null,
+      '<reply-message-uuid@q3ik.com>',
+      '<msg-1@example.com>',
+      '<root@example.com> <msg-1@example.com>',
+      0,
+    ]);
   });
 
   it('still returns 200 when D1 persistence fails after send succeeds', async () => {
