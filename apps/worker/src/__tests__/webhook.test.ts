@@ -64,15 +64,20 @@ function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
   return worker.fetch!(req as WorkerRequest, env, ctx);
 }
 
+// ---------------------------------------------------------------------------
+// DB spy helpers
+// ---------------------------------------------------------------------------
+
 /**
- * Creates a spy-instrumented Env for INSERT assertions.
+ * Creates a spy-instrumented Env whose DB.prepare / .bind calls are recorded.
+ * SELECT statements (thread-lookup) are routed to a silent non-spy stub so
+ * bindSpy exclusively captures INSERT .bind() calls.
  *
- * SELECT statements (thread-lookup) are routed to a separate non-spy path
- * that always returns null, so bindSpy exclusively captures INSERT .bind()
- * calls. This makes getInsertArgs unambiguous: bindSpy.mock.calls[0] is
- * always the INSERT bind args regardless of how many SELECT calls precede it.
+ * `selectFirstResult` is the value returned by SELECT .first() — use an
+ * object like `{ thread_id: 'x' }` to simulate a found parent, or `null`
+ * for the orphan / no-parent path.
  */
-function makeEnvWithSpy() {
+function makeEnvWithSpy(selectFirstResult: unknown = null) {
   const bindSpy = vi.fn().mockReturnValue({
     first: async () => null,
     run: async () => ({ success: true }),
@@ -81,72 +86,8 @@ function makeEnvWithSpy() {
     // Route SELECTs to a silent non-spy stub so bindSpy only sees INSERT calls.
     if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
       return {
-        bind: () => ({
-          first: async () => null,
-          run: async () => ({ success: true }),
-        }),
+        bind: () => ({ first: async () => selectFirstResult }),
       };
-    }
-    return { bind: bindSpy };
-  });
-  const env = {
-    ...mockEnv,
-    DB: { prepare: prepareSpy },
-  } as unknown as import('../index').Env;
-  return { env, prepareSpy, bindSpy };
-}
-
-/**
- * Parses the INSERT OR IGNORE INTO emails statement captured by prepareSpy
- * and returns column names paired with their bound values from bindSpy.
- *
- * Because makeEnvWithSpy routes SELECTs to a non-spy path, bindSpy.mock.calls[0]
- * is always the INSERT bind args — no offset arithmetic needed.
- */
-function getInsertArgs(
-  prepareSpy: ReturnType<typeof vi.fn>,
-  bindSpy: ReturnType<typeof vi.fn>,
-): { columns: string[]; values: unknown[] } {
-  const insertIdx = (prepareSpy.mock.calls as unknown[][]).findIndex(
-    (args) => (args[0] as string).includes('INSERT OR IGNORE INTO emails'),
-  );
-  expect(insertIdx).toBeGreaterThanOrEqual(0);
-
-  const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
-  const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
-  expect(colMatch).not.toBeNull();
-  const columns = colMatch![1]
-    .split(',')
-    .map((c) => c.trim().replace(/["'`]/g, ''));
-
-  // bindSpy.mock.calls[0] is always the INSERT — SELECTs are routed elsewhere.
-  const values = bindSpy.mock.calls[0] as unknown[];
-  return { columns, values };
-}
-
-// ---------------------------------------------------------------------------
-// DB spy helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Creates a spy-instrumented Env whose DB.prepare / .bind calls are recorded.
- * The SELECT branch (thread lookup) returns `selectFirstResult`; all other
- * statements (INSERT) use the spy so bind args can be inspected.
- */
-function makeThreadEnv(
-  selectFirstResult: unknown = null,
-): {
-  env: import('../index').Env;
-  prepareSpy: ReturnType<typeof vi.fn>;
-  bindSpy: ReturnType<typeof vi.fn>;
-} {
-  const bindSpy = vi.fn().mockReturnValue({
-    first: async () => null,
-    run: async () => ({ success: true }),
-  });
-  const prepareSpy = vi.fn().mockImplementation((sql: string) => {
-    if (sql.includes('SELECT')) {
-      return { bind: () => ({ first: async () => selectFirstResult }) };
     }
     return { bind: bindSpy };
   });
@@ -160,8 +101,14 @@ function makeThreadEnv(
 
 /**
  * Parses the INSERT OR IGNORE INTO emails statement captured by prepareSpy
- * and returns the column names alongside the corresponding bound values from
- * bindSpy — making assertions immune to future column additions/reorderings.
+ * and returns column names alongside their corresponding bound values.
+ *
+ * The INSERT uses a mix of `?` placeholders and literal values (e.g. `0, 0`
+ * for is_read and is_sent). This helper aligns columns to bound-param
+ * positions by scanning the VALUES clause for `?` tokens, so assertions
+ * remain correct regardless of which columns use literals vs. bound params.
+ *
+ * bindSpy.mock.calls[0] is always the INSERT — SELECTs are routed elsewhere.
  */
 function getInsertArgs(
   prepareSpy: ReturnType<typeof vi.fn>,
@@ -173,14 +120,38 @@ function getInsertArgs(
   expect(insertIdx).toBeGreaterThanOrEqual(0);
 
   const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
+
+  // Parse column list
   const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
   expect(colMatch).not.toBeNull();
-  const columns = colMatch![1]
+  const allColumns = colMatch![1]
     .split(',')
     .map((c) => c.trim().replace(/["'`]/g, ''));
 
-  const values = bindSpy.mock.calls[0] as unknown[];
-  return { columns, values };
+  // Parse VALUES clause to find which positions are `?` vs literals
+  const valuesMatch = insertSql.match(/VALUES\s*\(([^)]+)\)/i);
+  expect(valuesMatch).not.toBeNull();
+  const valueTokens = valuesMatch![1].split(',').map((v) => v.trim());
+
+  // Build a map: column name → bound-param index (only for `?` entries)
+  // Columns with literal values (e.g. `0`) are excluded from the values array.
+  const boundValues = bindSpy.mock.calls[0] as unknown[];
+  const columnToValue: Record<string, unknown> = {};
+  let paramIdx = 0;
+  for (let i = 0; i < valueTokens.length; i++) {
+    if (valueTokens[i] === '?') {
+      columnToValue[allColumns[i]] = boundValues[paramIdx++];
+    } else {
+      // Literal value — parse and store directly so callers can still look it up
+      const literal = valueTokens[i];
+      const parsed = isNaN(Number(literal)) ? literal : Number(literal);
+      columnToValue[allColumns[i]] = parsed;
+    }
+  }
+
+  // Return columns and a values array aligned to allColumns order (literals + bound)
+  const values = allColumns.map((col) => columnToValue[col]);
+  return { columns: allColumns, values };
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +319,8 @@ describe('threading', () => {
       },
     }));
 
-    const { env, prepareSpy, bindSpy } = makeThreadEnv({ thread_id: 'existing-thread-id' });
+    // selectFirstResult = found parent row
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy({ thread_id: 'existing-thread-id' });
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
@@ -382,7 +354,7 @@ describe('threading', () => {
     }));
 
     // selectFirstResult = null simulates parent not found
-    const { env, prepareSpy, bindSpy } = makeThreadEnv(null);
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy(null);
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
@@ -393,6 +365,8 @@ describe('threading', () => {
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
     const needsRethreadingIdx = columns.indexOf('needs_rethreading');
     expect(needsRethreadingIdx).toBeGreaterThanOrEqual(0);
+    // needs_rethreading is a bound `?` param — getInsertArgs resolves it correctly
+    // regardless of the literal 0s for is_read/is_sent in the same INSERT.
     expect(values[needsRethreadingIdx]).toBe(1);
   });
 
@@ -413,7 +387,7 @@ describe('threading', () => {
       },
     }));
 
-    const { env, prepareSpy, bindSpy } = makeThreadEnv();
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy();
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
