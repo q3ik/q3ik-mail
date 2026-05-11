@@ -135,7 +135,7 @@ function EmailBody({ email }: { email: Email }) {
           title="Email body"
           srcDoc={sanitizedHtml}
           sandbox=""
-          className="w-full min-h-[16rem] border-0"
+          className="w-full h-[70vh] min-h-[16rem] border-0"
         />
       );
     }
