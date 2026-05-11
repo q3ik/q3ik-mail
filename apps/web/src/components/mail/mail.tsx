@@ -66,10 +66,18 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
       );
     });
 
-    // Fire-and-forget the DB writes after UI is already updated
+    // Persist the DB writes after UI is already updated; revert optimistic
+    // update if the write fails so the read state stays in sync.
     const unreadIds = emails.filter((e) => e.is_read === 0).map((e) => e.id);
     if (unreadIds.length > 0) {
-      void Promise.all(unreadIds.map((id) => markEmailAsRead(id)));
+      Promise.all(unreadIds.map((id) => markEmailAsRead(id))).catch((err) => {
+        console.error('[mail] markAsRead batch failed, reverting optimistic update', err);
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.thread_id === threadId ? { ...t, is_read: 0 } : t
+          )
+        );
+      });
     }
   }
 
