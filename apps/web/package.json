@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "wrangler pages dev --compatibility-flag=nodejs_compat",
     "build": "next build",
-    "build:cf": "npx @cloudflare/next-on-pages",
-    "deploy": "rm -rf .next/cache && wrangler pages deploy .next --project-name=q3ik-mail",
+    "build:cf": "next-on-pages",
+    "deploy": "pnpm run build:cf && wrangler pages deploy .vercel/output/static --project-name=q3ik-mail",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
