@@ -17,7 +17,7 @@ export async function getLatestEmails(
     .prepare(
       `SELECT
          id, resend_id, thread_id, from_address, from_name,
-         to_address, subject, message_id, in_reply_to, references,
+         to_address, subject, message_id, in_reply_to, "references",
          is_read, is_sent, needs_rethreading, created_at
        FROM emails
        ORDER BY created_at DESC, id ASC
@@ -109,12 +109,12 @@ export async function getThreadList(
     .prepare(
       `SELECT
          id, resend_id, thread_id, from_address, from_name,
-         to_address, subject, message_id, in_reply_to, references,
+         to_address, subject, message_id, in_reply_to, "references",
          is_read, is_sent, needs_rethreading, created_at
        FROM (
          SELECT
            id, resend_id, thread_id, from_address, from_name,
-           to_address, subject, message_id, in_reply_to, references,
+           to_address, subject, message_id, in_reply_to, "references",
            is_read, is_sent, needs_rethreading, created_at,
            ROW_NUMBER() OVER (
              PARTITION BY thread_id

@@ -140,20 +140,23 @@ describe('webhook handler', () => {
     const res = await fetchWorker(req as WorkerRequest, envWithSpy, mockCtx);
     expect(res.status).toBe(200);
 
-    // The INSERT statement should have been called with references value
-    // Find the INSERT prepare call (not the SELECT for thread lookup)
-    const insertCall = prepareSpy.mock.calls.find((args: string[]) =>
+    // Find the INSERT prepare call and its corresponding bind args
+    const insertIdx = prepareSpy.mock.calls.findIndex((args: unknown[]) =>
       (args[0] as string).includes('INSERT OR IGNORE INTO emails')
     );
-    expect(insertCall).toBeDefined();
+    expect(insertIdx).toBeGreaterThanOrEqual(0);
 
-    // bindSpy args for the INSERT: positional params include references at index 11
-    const insertBindArgs = bindSpy.mock.calls.find((_: unknown, i: number) => {
-      return prepareSpy.mock.calls[i]?.[0]?.includes('INSERT OR IGNORE INTO emails');
-    });
-    // Check that '<root-456@mail.example.com>' appears in the bind args
-    const allBindArgs = bindSpy.mock.calls.flat();
-    expect(allBindArgs).toContain('<root-456@mail.example.com>');
+    const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
+    const insertBindArgs = bindSpy.mock.calls[insertIdx] as unknown[];
+
+    // Parse column names from the INSERT SQL to find the "references" position
+    const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
+    expect(colMatch).not.toBeNull();
+    const columns = colMatch![1].split(',').map((c) => c.trim().replace(/["'`]/g, ''));
+    const referencesIdx = columns.indexOf('references');
+    expect(referencesIdx).toBeGreaterThanOrEqual(0);
+
+    expect(insertBindArgs[referencesIdx]).toBe('<root-456@mail.example.com>');
   });
 
   it('stores null for references when References header is absent', async () => {
@@ -191,20 +194,22 @@ describe('webhook handler', () => {
     const res = await fetchWorker(req as WorkerRequest, envWithSpy, mockCtx);
     expect(res.status).toBe(200);
 
-    // The INSERT call's bind args should contain null for the references position
-    const insertPrepareCalls = prepareSpy.mock.calls.filter((args: string[]) =>
+    // Find the INSERT prepare call and its corresponding bind args
+    const insertIdx = prepareSpy.mock.calls.findIndex((args: unknown[]) =>
       (args[0] as string).includes('INSERT OR IGNORE INTO emails')
     );
-    expect(insertPrepareCalls.length).toBe(1);
+    expect(insertIdx).toBeGreaterThanOrEqual(0);
 
-    // Bind args for the INSERT contain null at the references position (index 11)
-    // positions: id(0) resend_id(1) thread_id(2) from_address(3) from_name(4)
-    //            to_address(5) subject(6) body_text(7) body_html(8) message_id(9)
-    //            in_reply_to(10) references(11) needs_rethreading(12)
-    const insertPrepareIndex = prepareSpy.mock.calls.findIndex((args: string[]) =>
-      (args[0] as string).includes('INSERT OR IGNORE INTO emails')
-    );
-    const insertBindCall = bindSpy.mock.calls[insertPrepareIndex];
-    expect(insertBindCall[11]).toBeNull(); // references should be null
+    const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
+    const insertBindArgs = bindSpy.mock.calls[insertIdx] as unknown[];
+
+    // Parse column names from the INSERT SQL to find the "references" position
+    const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
+    expect(colMatch).not.toBeNull();
+    const columns = colMatch![1].split(',').map((c) => c.trim().replace(/["'`]/g, ''));
+    const referencesIdx = columns.indexOf('references');
+    expect(referencesIdx).toBeGreaterThanOrEqual(0);
+
+    expect(insertBindArgs[referencesIdx]).toBeNull();
   });
 });
