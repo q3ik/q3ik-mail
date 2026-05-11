@@ -36,11 +36,7 @@ const handler: ExportedHandler<Env> = {
   // --------------------------------------------------------------------------
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      resolveOrphanedThreads(env.DB).then((resolved) => {
-        if (resolved > 0) {
-          console.log(`[cron/rethread] Resolved ${resolved} orphaned thread(s).`);
-        }
-      }).catch((err) => {
+      resolveOrphanedThreads(env.DB).catch((err) => {
         console.error('[cron/rethread] resolveOrphanedThreads failed:', err);
         if (env.SENTRY_DSN) {
           Sentry.captureException(err, {
