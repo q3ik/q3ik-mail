@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/cloudflare';
 import { Webhook } from 'svix';
 import { Resend } from 'resend';
+import { resolveOrphanedThreads } from '@q3ik-mail/database';
 
 // Env interface — matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
@@ -13,6 +14,31 @@ export interface Env {
 }
 
 const handler: ExportedHandler<Env> = {
+  // ---------------------------------------------------------------------------
+  // Cron Trigger: re-thread orphaned emails on a schedule
+  // Replaces the former /api/rethread HTTP endpoint (issue #31).
+  // Runs every 5 minutes; resolves emails flagged with needs_rethreading=1.
+  // ---------------------------------------------------------------------------
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      resolveOrphanedThreads(env.DB).then((resolved) => {
+        if (resolved > 0) {
+          console.log(`[cron/rethread] Resolved ${resolved} orphaned thread(s).`);
+        }
+      }).catch((err) => {
+        console.error('[cron/rethread] resolveOrphanedThreads failed:', err);
+        if (env.SENTRY_DSN) {
+          Sentry.captureException(err, {
+            tags: { layer: 'worker', operation: 'cron.rethread' },
+          });
+        }
+      })
+    );
+  },
+
+  // ---------------------------------------------------------------------------
+  // Fetch handler: inbound email webhook from Resend
+  // ---------------------------------------------------------------------------
   async fetch(request: Request, env: Env): Promise<Response> {
     // Only accept POST requests
     if (request.method !== 'POST') {
