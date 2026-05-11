@@ -249,10 +249,14 @@ describe('Mail — markAsRead error recovery', () => {
 
     render(
       <Mail
-        threads={[makeThread()]}
+        threads={[
+          makeThread({
+            created_at: '2024-01-02T00:00:00Z',
+          }),
+        ]}
         selectedThread={[]}
         defaultSelectedId={undefined}
-        initialNextCursor="2024-01-01T00:00:00Z"
+        initialNextCursor="2024-01-02T00:00:00Z"
       />
     );
 
@@ -264,7 +268,7 @@ describe('Mail — markAsRead error recovery', () => {
       expect(screen.queryByTestId('thread-thread-def')).not.toBeNull()
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/emails?cursor=2024-01-01T00%3A00%3A00Z'
+      '/api/emails?cursor=2024-01-02T00%3A00%3A00Z'
     );
     expect(screen.queryByTestId('load-more')).toBeNull();
   });
