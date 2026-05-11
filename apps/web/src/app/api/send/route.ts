@@ -21,6 +21,31 @@ function buildEmailHeaders(
   };
 }
 
+/**
+ * Validates an email address using a structurally sound approach:
+ * - Exactly one '@' separator (split-based, not indexOf)
+ * - Non-empty local and domain parts
+ * - Domain contains a dot, not at start or end
+ * - No whitespace anywhere
+ *
+ * Intentionally does not use a backtracking regex (ReDoS-safe).
+ */
+function isValidEmail(value: string): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  const parts = value.split('@');
+  // Exactly two parts: local @ domain
+  if (parts.length !== 2) return false;
+  const [local, domain] = parts;
+  if (local.length === 0) return false;
+  if (domain.length === 0) return false;
+  // No whitespace anywhere in the address
+  if (/\s/.test(value)) return false;
+  // Domain must contain a dot, not at start or end
+  const dotIndex = domain.indexOf('.');
+  if (dotIndex <= 0 || dotIndex === domain.length - 1) return false;
+  return true;
+}
+
 export async function POST(req: NextRequest) {
   const { env } = getRequestContext();
   const resend = new Resend(env.RESEND_API_KEY);
@@ -41,22 +66,29 @@ export async function POST(req: NextRequest) {
 
   const { to, subject, content, replyToId, references } = body;
 
-  if (!to || !subject || !content) {
-    return Response.json({ error: 'Missing required fields: to, subject, content' }, { status: 400 });
+  // Validate all required fields with consistent semantics
+  if (!subject || !content) {
+    return Response.json({ error: 'Missing required fields: subject, content' }, { status: 400 });
+  }
+
+  if (!isValidEmail(to ?? '')) {
+    return Response.json({ error: 'Invalid or missing email address' }, { status: 400 });
   }
 
   try {
     const result = await resend.emails.send({
       from: 'q3ik Mail <mail@q3ik.com>',
-      to: [to],
+      to: [to as string],
       subject,
       text: content,
       headers: buildEmailHeaders(replyToId, references),
     });
 
     if (result.error) {
-      console.error('Resend API error:', result.error);
-      return Response.json({ error: result.error.message }, { status: 500 });
+      // Log only non-sensitive error metadata — never log .message which may
+      // echo back user input or contain PII-adjacent rate-limit/account details.
+      console.error('[api/send] Resend error:', result.error.name, result.error.statusCode);
+      return Response.json({ error: 'Failed to send email' }, { status: 500 });
     }
 
     return Response.json({ id: result.data?.id }, { status: 200 });

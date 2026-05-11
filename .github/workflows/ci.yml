@@ -18,12 +18,20 @@ jobs:
         env:
           D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
         run: |
-          # Substitute the real database_id from the repo secret before checking.
-          # The placeholder must never be hardcoded in source — the secret
-          # is the single source of truth for the real D1 ID.
-          if [ -n "$D1_DATABASE_ID" ]; then
-            sed -i "s/REPLACE_WITH_YOUR_DATABASE_ID/${D1_DATABASE_ID}/" apps/worker/wrangler.toml
+          # Fail fast and explicitly if the secret is missing or empty.
+          # This distinguishes "secret not configured" from any other failure mode.
+          if [ -z "$D1_DATABASE_ID" ]; then
+            echo "ERROR: CLOUDFLARE_D1_DATABASE_ID secret is empty or not set."
+            echo "Configure it in: repo Settings → Secrets and variables → Actions"
+            exit 1
           fi
+
+          # Substitute the real database_id from the repo secret before checking.
+          # Use | as the sed delimiter — safe for UUIDs which never contain |.
+          # The placeholder must never be hardcoded in source; the secret is the
+          # single source of truth for the real D1 ID.
+          sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/worker/wrangler.toml
+
           if grep -q "REPLACE_WITH_YOUR_DATABASE_ID" apps/worker/wrangler.toml; then
             echo "ERROR: database_id placeholder not replaced in apps/worker/wrangler.toml"
             echo "Ensure the CLOUDFLARE_D1_DATABASE_ID secret is set in repo Settings → Secrets."

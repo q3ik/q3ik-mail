@@ -3,6 +3,20 @@ import { Webhook } from 'svix';
 import { Resend } from 'resend';
 import { resolveOrphanedThreads } from '@q3ik-mail/database';
 
+// Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
+// Field names verified against https://resend.com/docs/api-reference/inbound
+// When Resend ships official types, replace this interface with the proper SDK import.
+// TODO: confirm `text` vs `body_text` field name against live API once Resend docs stabilise.
+interface ResendReceivedEmail {
+  from?: string;
+  // Resend may return a single address string or an array; normalise downstream.
+  to?: string | string[];
+  subject?: string;
+  text?: string;
+  html?: string;
+  headers?: Array<{ name: string; value: string }>;
+}
+
 // Env interface — matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
 export interface Env {
@@ -73,13 +87,13 @@ const handler: ExportedHandler<Env> = {
     const resend = new Resend(env.RESEND_API_KEY);
 
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
-    // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
-    let receivedEmail: Awaited<ReturnType<typeof resend.emails.receiving.get>>;
+    // resend v4 types don't yet include emails.receiving; cast through unknown to call it
+    // and assert the expected shape so all downstream field accesses are type-checked.
+    let receivedEmail: ResendReceivedEmail;
     try {
       // Use resend.emails.receiving.get() — NOT resend.emails.get()
       // resend.emails.get() is for sent mail; receiving.get() is for inbound
-      // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
-      receivedEmail = await resend.emails.receiving.get(emailId);
+      receivedEmail = await (resend.emails as unknown as { receiving: { get: (id: string) => Promise<ResendReceivedEmail> } }).receiving.get(emailId);
     } catch (err) {
       if (env.SENTRY_DSN) {
         Sentry.captureException(err, {
@@ -88,6 +102,15 @@ const handler: ExportedHandler<Env> = {
         });
       }
       return new Response('Failed to fetch email payload', { status: 502 });
+    }
+
+    // --- Runtime shape guard ---
+    // The API response is cast from `any`; validate the minimum required shape
+    // before proceeding so that API drift surfaces immediately as a 502 rather
+    // than silently writing nulls into D1.
+    if (!receivedEmail || typeof receivedEmail !== 'object') {
+      console.error('[worker] Resend receiving API returned unexpected payload type:', typeof receivedEmail);
+      return new Response('Invalid email payload from upstream', { status: 502 });
     }
 
     // --- Step 4: Threading logic ---
@@ -141,10 +164,12 @@ const handler: ExportedHandler<Env> = {
     const fromName = fromMatch ? fromMatch[1].trim() : null;
     const fromAddress = fromMatch ? fromMatch[2].trim() : fromRaw.trim();
 
-    // to_address may be an array — store as comma-separated string
-    const toAddress = Array.isArray(receivedEmail.to)
-      ? receivedEmail.to.join(', ')
-      : (receivedEmail.to ?? '');
+    // Normalise `to` to a string regardless of whether the API returns a bare
+    // string or an array — both branches are now handled explicitly.
+    const toRaw = receivedEmail.to;
+    const toAddress = Array.isArray(toRaw)
+      ? toRaw.join(', ')
+      : (typeof toRaw === 'string' ? toRaw : '');
 
     // --- Step 6: Persist to D1 ---
     try {
