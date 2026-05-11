@@ -89,8 +89,11 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
 function EmailBody({ email }: { email: Email }) {
   if (email.body_html) {
     const sanitizedHtml = DOMPurify.sanitize(email.body_html, {
-      FORBID_TAGS: ['script', 'style'],
-      FORBID_ATTR: ['onerror', 'onload', 'onclick'],
+      // Use an allowlist-based profile rather than a blocklist so that new
+      // attack vectors are blocked by default instead of requiring new FORBID_* entries.
+      USE_PROFILES: { html: true },
+      // Strip inline style attributes to prevent CSS expression()/url() attacks.
+      FORBID_ATTR: ['style'],
     });
     return (
       <div
