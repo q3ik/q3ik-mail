@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useState } from 'react';
 import type { Email } from '@q3ik-mail/database';
 import { ReplyIcon } from 'lucide-react';
@@ -105,11 +107,17 @@ function EmailBody({ email }: { email: Email }) {
     let cancelled = false;
 
     if (email.body_html) {
-      void loadDomPurify().then(({ default: DOMPurify }) => {
-        if (!cancelled) {
-          setSanitizedHtml(DOMPurify.sanitize(email.body_html!, sanitizeOptions));
-        }
-      });
+      void loadDomPurify()
+        .then(({ default: DOMPurify }) => {
+          if (!cancelled) {
+            setSanitizedHtml(DOMPurify.sanitize(email.body_html!, sanitizeOptions));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSanitizedHtml(null);
+          }
+        });
     } else {
       setSanitizedHtml(null);
     }
