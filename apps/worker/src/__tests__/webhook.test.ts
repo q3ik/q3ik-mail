@@ -6,7 +6,6 @@ type WorkerFetch = NonNullable<typeof worker.fetch>;
 type WorkerRequest = Parameters<WorkerFetch>[0];
 
 // Mock svix — the worker uses `new Webhook(secret).verify()` directly.
-// Mocking resend.webhooks.verify has no effect because the worker never calls it.
 vi.mock('svix', () => ({
   Webhook: vi.fn().mockImplementation(() => ({
     verify: vi.fn().mockReturnValue({
@@ -64,6 +63,69 @@ function makeRequest(body: string, headers: Record<string, string> = {}) {
 function fetchWorker(req: Request) {
   return worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
 }
+
+// ---------------------------------------------------------------------------
+// DB spy helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a spy-instrumented Env whose DB.prepare / .bind calls are recorded.
+ * The SELECT branch (thread lookup) returns `selectFirstResult`; all other
+ * statements (INSERT) use the spy so bind args can be inspected.
+ */
+function makeThreadEnv(
+  selectFirstResult: unknown = null,
+): {
+  env: import('../index').Env;
+  prepareSpy: ReturnType<typeof vi.fn>;
+  bindSpy: ReturnType<typeof vi.fn>;
+} {
+  const bindSpy = vi.fn().mockReturnValue({
+    first: async () => null,
+    run: async () => ({ success: true }),
+  });
+  const prepareSpy = vi.fn().mockImplementation((sql: string) => {
+    if (sql.includes('SELECT')) {
+      return { bind: () => ({ first: async () => selectFirstResult }) };
+    }
+    return { bind: bindSpy };
+  });
+  const env = {
+    RESEND_API_KEY: 'test-key',
+    RESEND_WEBHOOK_SECRET: 'test-secret',
+    DB: { prepare: prepareSpy },
+  } as unknown as import('../index').Env;
+  return { env, prepareSpy, bindSpy };
+}
+
+/**
+ * Parses the INSERT OR IGNORE INTO emails statement captured by prepareSpy
+ * and returns the column names alongside the corresponding bound values from
+ * bindSpy — making assertions immune to future column additions/reorderings.
+ */
+function getInsertArgs(
+  prepareSpy: ReturnType<typeof vi.fn>,
+  bindSpy: ReturnType<typeof vi.fn>,
+): { columns: string[]; values: unknown[] } {
+  const insertIdx = (prepareSpy.mock.calls as unknown[][]).findIndex(
+    (args) => (args[0] as string).includes('INSERT OR IGNORE INTO emails'),
+  );
+  expect(insertIdx).toBeGreaterThanOrEqual(0);
+
+  const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
+  const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
+  expect(colMatch).not.toBeNull();
+  const columns = colMatch![1]
+    .split(',')
+    .map((c) => c.trim().replace(/["'`]/g, ''));
+
+  const values = bindSpy.mock.calls[0] as unknown[];
+  return { columns, values };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 describe('webhook handler', () => {
   it('returns 405 for non-POST requests', async () => {
@@ -130,6 +192,11 @@ describe('parseFrom', () => {
   it('returns empty address for empty input', () => {
     expect(parseFrom('')).toEqual({ name: null, address: '' });
   });
+
+  it('returns null name for all-whitespace quoted display name', () => {
+    // "   " is a valid quoted string but semantically empty — name must be null, not ''
+    expect(parseFrom('"   " <alice@example.com>')).toEqual({ name: null, address: 'alice@example.com' });
+  });
 });
 
 describe('threading', () => {
@@ -153,6 +220,8 @@ describe('threading', () => {
       },
     }));
 
+//---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
+    const { env, prepareSpy, bindSpy } = makeThreadEnv({ thread_id: 'existing-thread-id' });
     let insertedThreadId: unknown;
     const customEnv = {
       RESEND_API_KEY: 'test-key',
@@ -171,13 +240,18 @@ describe('threading', () => {
         },
       },
     } as unknown as import('../index').Env;
-
+//---------- END of block to fix ---
+    
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
-    const res = await worker.fetch!(req as WorkerRequest, customEnv, mockCtx);
+    const res = await worker.fetch!(req as WorkerRequest, env, mockCtx);
     expect(res.status).toBe(200);
-    expect(insertedThreadId).toBe('existing-thread-id');
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    const threadIdIdx = columns.indexOf('thread_id');
+    expect(threadIdIdx).toBeGreaterThanOrEqual(0);
+    expect(values[threadIdIdx]).toBe('existing-thread-id');
   });
 
   it('sets needs_rethreading=1 when In-Reply-To parent is not found', async () => {
@@ -199,6 +273,10 @@ describe('threading', () => {
       },
     }));
 
+    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
+
+    // selectFirstResult = null simulates parent not found
+    const { env, prepareSpy, bindSpy } = makeThreadEnv(null);
     let insertedNeedsRethreading: unknown;
     const customEnv = {
       RESEND_API_KEY: 'test-key',
@@ -225,13 +303,26 @@ describe('threading', () => {
         },
       },
     } as unknown as import('../index').Env;
+    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- END of block to fix ---
+
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
+    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
+
+    const res = await worker.fetch!(req as WorkerRequest, env, mockCtx);
+    expect(res.status).toBe(200);
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    const needsRethreadingIdx = columns.indexOf('needs_rethreading');
+    expect(needsRethreadingIdx).toBeGreaterThanOrEqual(0);
+    expect(values[needsRethreadingIdx]).toBe(1);
     const res = await worker.fetch!(req as WorkerRequest, customEnv, mockCtx);
     expect(res.status).toBe(200);
     expect(insertedNeedsRethreading).toBe(1);
+    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- END of block to fix ---
+
   });
 
   it('stores correct from_name and from_address for quoted display name with comma', async () => {
@@ -251,6 +342,9 @@ describe('threading', () => {
       },
     }));
 
+    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
+
+    const { env, prepareSpy, bindSpy } = makeThreadEnv();
     let insertedFromAddress: unknown;
     let insertedFromName: unknown;
     const customEnv = {
@@ -267,14 +361,26 @@ describe('threading', () => {
         }),
       },
     } as unknown as import('../index').Env;
+    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- END of block to fix ---
+
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
+    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- START of block to fix ---
+
+    const res = await worker.fetch!(req as WorkerRequest, env, mockCtx);
+    expect(res.status).toBe(200);
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    expect(values[columns.indexOf('from_address')]).toBe('john@example.com');
+    expect(values[columns.indexOf('from_name')]).toBe('Smith, John');
     const res = await worker.fetch!(req as WorkerRequest, customEnv, mockCtx);
     expect(res.status).toBe(200);
     expect(insertedFromAddress).toBe('john@example.com');
     expect(insertedFromName).toBe('Smith, John');
+    //---------- TODO: FIX!!! BROKEN AS A RESULT OF A MERGE CONFLICT RESOLUTION --- END of block to fix ---
+
   });
 
   it('returns 400 when from address is missing or unparseable', async () => {
@@ -297,6 +403,7 @@ describe('threading', () => {
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
+    // Guard fires before DB — mockEnv is sufficient, no spy needed
     const res = await worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
     expect(res.status).toBe(400);
   });
