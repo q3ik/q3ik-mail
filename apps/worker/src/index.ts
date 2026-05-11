@@ -90,7 +90,7 @@ const handler: ExportedHandler<Env> = {
     try {
       // Use resend.emails.receiving.get() — NOT resend.emails.get()
       // resend.emails.get() is for sent mail; receiving.get() is for inbound
-      receivedEmail = await (resend.emails as any).receiving.get(emailId) as ResendReceivedEmail;
+      receivedEmail = await (resend.emails as unknown as { receiving: { get: (id: string) => Promise<ResendReceivedEmail> } }).receiving.get(emailId);
     } catch (err) {
       if (env.SENTRY_DSN) {
         Sentry.captureException(err, {
