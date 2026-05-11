@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Q3ik Mail',
+  title: 'q3ik-mail',
   description: 'Email inbox powered by Cloudflare D1',
 };
 
