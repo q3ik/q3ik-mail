@@ -16,6 +16,7 @@ crons = ["*/5 * * * *"]
 binding = "DB"
 database_name = "q3ik-mail-db"
 database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+migrations_dir = "../../packages/database/migrations"
 
 [vars]
 ENVIRONMENT = "production"
