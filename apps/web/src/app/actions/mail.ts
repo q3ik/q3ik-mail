@@ -5,6 +5,7 @@ import {
   getLatestEmails,
   getEmailsByThread,
   getThreadList,
+  getThreadListPage,
   markAsRead,
   getEmailById,
 } from '@q3ik-mail/database';
@@ -12,6 +13,11 @@ import {
 export async function fetchThreadList(limit = 50) {
   const { env } = getRequestContext();
   return getThreadList(env.DB, limit);
+}
+
+export async function fetchThreadListPage(limit = 50, cursor?: string) {
+  const { env } = getRequestContext();
+  return getThreadListPage(env.DB, { limit, cursor });
 }
 
 export async function fetchLatestEmails(limit = 50) {

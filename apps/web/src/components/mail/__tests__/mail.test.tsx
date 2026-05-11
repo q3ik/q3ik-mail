@@ -29,24 +29,40 @@ vi.mock('../mail-list', () => ({
   MailList: ({
     threads,
     onSelectThread,
+    onLoadMore,
+    isLoadingMore,
   }: {
     threads: EmailSummary[];
     onSelectThread: (id: string) => void;
+    onLoadMore?: () => void;
+    isLoadingMore?: boolean;
   }) => (
-    <ul>
-      {threads.map((t) => (
-        <li key={t.thread_id}>
-          <button
-            type="button"
-            data-testid={`thread-${t.thread_id}`}
-            data-is-read={t.is_read}
-            onClick={() => onSelectThread(t.thread_id)}
-          >
-            {t.subject}
-          </button>
-        </li>
-      ))}
-    </ul>
+    <div>
+      <ul>
+        {threads.map((t) => (
+          <li key={t.thread_id}>
+            <button
+              type="button"
+              data-testid={`thread-${t.thread_id}`}
+              data-is-read={t.is_read}
+              onClick={() => onSelectThread(t.thread_id)}
+            >
+              {t.subject}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {onLoadMore ? (
+        <button
+          type="button"
+          data-testid="load-more"
+          disabled={isLoadingMore}
+          onClick={onLoadMore}
+        >
+          Load more
+        </button>
+      ) : null}
+    </div>
   ),
 }));
 
@@ -137,6 +153,7 @@ describe('Mail — markAsRead error recovery', () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   it('reverts is_read to 0 when markEmailAsRead rejects', async () => {
@@ -210,5 +227,45 @@ describe('Mail — markAsRead error recovery', () => {
     // then assert markEmailAsRead was never invoked.
     await waitFor(() => expect(mailActions.fetchThread).toHaveBeenCalledWith(THREAD_ID));
     expect(mailActions.markEmailAsRead).not.toHaveBeenCalled();
+  });
+
+  it('appends threads from the next cursor page and hides load more when exhausted', async () => {
+    const nextThread = makeThread({
+      id: 'email-2',
+      thread_id: 'thread-def',
+      resend_id: 'resend-2',
+      subject: 'Later message',
+      created_at: '2024-01-02T00:00:00Z',
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        threads: [nextThread],
+        nextCursor: null,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <Mail
+        threads={[makeThread()]}
+        selectedThread={[]}
+        defaultSelectedId={undefined}
+        initialNextCursor="2024-01-01T00:00:00Z"
+      />
+    );
+
+    act(() => {
+      screen.getByTestId('load-more').click();
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('thread-thread-def')).not.toBeNull()
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/emails?cursor=2024-01-01T00%3A00%3A00Z'
+    );
+    expect(screen.queryByTestId('load-more')).toBeNull();
   });
 });

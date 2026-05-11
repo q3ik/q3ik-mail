@@ -1,17 +1,39 @@
 import { describe, it, expect } from 'vitest';
-import { getLatestEmails, getEmailsByThread, markAsRead, getEmailById, getThreadList } from '../index';
+import {
+  getLatestEmails,
+  getEmailsByThread,
+  markAsRead,
+  getEmailById,
+  getThreadList,
+  getThreadListPage,
+} from '../index';
 
 // Minimal in-memory D1 mock for unit testing query functions.
 // Real D1 binding tests run in the worker layer via @cloudflare/vitest-pool-workers.
-function createMockDb(rows: Record<string, unknown>[] = []) {
+function createMockDb(
+  rows: Record<string, unknown>[] = [],
+  {
+    onPrepare,
+    onBind,
+  }: {
+    onPrepare?: (sql: string) => void;
+    onBind?: (args: unknown[]) => void;
+  } = {}
+) {
   return {
-    prepare: (_sql: string) => ({
-      bind: (..._args: unknown[]) => ({
+    prepare: (sql: string) => {
+      onPrepare?.(sql);
+      return {
+        bind: (...args: unknown[]) => {
+          onBind?.(args);
+          return {
         all: async () => ({ results: rows }),
         first: async () => rows[0] ?? null,
         run: async () => ({ success: true }),
-      }),
-    }),
+          };
+        },
+      };
+    },
   } as unknown as D1Database;
 }
 
@@ -118,5 +140,50 @@ describe('getThreadList', () => {
     const db = createMockDb(rows);
     const result = await getThreadList(db, 1);
     expect(result[0].references).toBe('<root-001@example.com>');
+  });
+
+  it('supports cursor-based pagination and returns a next cursor when more rows exist', async () => {
+    let preparedSql = '';
+    let boundArgs: unknown[] = [];
+
+    const rows = [
+      {
+        id: '1',
+        thread_id: 'thread-1',
+        subject: 'Newest',
+        created_at: '2026-05-11T12:00:00Z',
+      },
+      {
+        id: '2',
+        thread_id: 'thread-2',
+        subject: 'Middle',
+        created_at: '2026-05-11T11:00:00Z',
+      },
+      {
+        id: '3',
+        thread_id: 'thread-3',
+        subject: 'Oldest',
+        created_at: '2026-05-11T10:00:00Z',
+      },
+    ];
+
+    const db = createMockDb(rows, {
+      onPrepare: (sql) => {
+        preparedSql = sql;
+      },
+      onBind: (args) => {
+        boundArgs = args;
+      },
+    });
+
+    const result = await getThreadListPage(db, {
+      limit: 2,
+      cursor: '2026-05-11T13:00:00Z',
+    });
+
+    expect(preparedSql).toContain('created_at < ?');
+    expect(boundArgs).toEqual(['2026-05-11T13:00:00Z', 3]);
+    expect(result.threads).toHaveLength(2);
+    expect(result.nextCursor).toBe('2026-05-11T11:00:00Z');
   });
 });
