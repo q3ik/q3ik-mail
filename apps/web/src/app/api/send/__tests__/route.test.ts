@@ -49,6 +49,7 @@ function getInsertCall(): { sql: string; boundValues: unknown[] } {
   );
   expect(insertIdx).toBeGreaterThanOrEqual(0);
 
+  // SELECTs use selectBind, so insertBind only records INSERT parameter lists.
   const firstInsertBindCall = routeMocks.insertBind.mock.calls[0];
   expect(firstInsertBindCall).toBeDefined();
   return {
