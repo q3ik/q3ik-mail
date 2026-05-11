@@ -18,9 +18,7 @@ vi.mock('resend', () => ({
   })),
 }));
 
-// These tests are placeholder — they will pass once apps/web/src/app/api/send/route.ts
-// is created by Issue q3ik/q3ik-mail#6. Remove .skip when the route lands.
-describe.skip('POST /api/send', () => {
+describe('POST /api/send', () => {
   it('returns 400 when "to" is missing', async () => {
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
@@ -43,6 +41,40 @@ describe.skip('POST /api/send', () => {
     expect(res.status).toBe(400);
   });
 
+  it('returns 400 when "to" is not a valid email address', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: 'not-an-email', subject: 'Hi', content: 'Hello' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('Invalid or missing email address');
+  });
+
+  // Boundary cases that the original indexOf-based check passed incorrectly
+  it.each([
+    ['trailing dot in domain', 'a@b.'],
+    ['leading dot in domain', 'a@.b.com'],
+    ['space in domain', 'a@ b.com'],
+    ['multiple @ signs', 'a@b@c.com'],
+    ['empty local part', '@b.com'],
+    ['empty string', ''],
+  ])('returns 400 for invalid email: %s (%s)', async (_label, address) => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: address, subject: 'Hi', content: 'Hello' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('Invalid or missing email address');
+  });
+
   it('returns 200 with email id on success', async () => {
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
@@ -54,6 +86,23 @@ describe.skip('POST /api/send', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.id).toBe('sent-id');
+  });
+
+  it('returns generic error message when Resend API returns an error', async () => {
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const resendError = { message: 'Rate limit exceeded', name: 'rate_limit_exceeded', statusCode: 429 };
+    const sendSpy = vi.fn().mockResolvedValue({ data: null, error: resendError });
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('Failed to send email');
   });
 
   it('sets In-Reply-To and References headers when replyToId is provided', async () => {
