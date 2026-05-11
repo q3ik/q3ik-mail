@@ -95,8 +95,8 @@ jobs:
 
       # Seed local D1 with schema and fixture data.
       # --persist-to pins the miniflare state directory to a fixed absolute
-      # path shared by all wrangler invocations in this job, so that the data
-      # seeded here is visible to wrangler pages dev below.
+      # path shared by all wrangler invocations in this job, including the
+      # wrangler pages dev process started by Playwright's webServer.
       - name: Initialize local D1 schema
         run: >
           npx wrangler d1 execute q3ik-mail-db
@@ -116,24 +116,17 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter @q3ik-mail/web exec playwright install chromium --with-deps
 
-      # Start local server in background, wait for port to be ready.
-      # --persist-to must match the path used by the seed steps above so that
-      # the dev server reads from the same miniflare state directory.
-      - name: Start wrangler pages dev
-        run: |
-          pnpm --filter @q3ik-mail/web exec wrangler pages dev .vercel/output/static \
-            --port 3000 \
-            --d1 DB=q3ik-mail-db \
-            --compatibility-flag nodejs_compat \
-            --persist-to $GITHUB_WORKSPACE/.wrangler/state &
-          pnpm --filter @q3ik-mail/web exec wait-on tcp:3000 --timeout 60000
-        working-directory: apps/web
-
+      # Playwright's webServer block (playwright.config.ts) starts wrangler
+      # pages dev and waits for a real HTTP 200 before running any test.
+      # No manual background server or wait-on needed here.
       - name: Run Playwright E2E
         run: pnpm --filter @q3ik-mail/web e2e
         env:
           BASE_URL: http://localhost:3000
           CI: true
+          # Tell playwright.config.ts where the seeded miniflare state lives
+          # so the --persist-to path resolves correctly from apps/web/.
+          GITHUB_WORKSPACE: ${{ github.workspace }}
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
