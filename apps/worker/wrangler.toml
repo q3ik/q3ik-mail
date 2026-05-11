@@ -17,6 +17,8 @@ binding = "DB"
 database_name = "q3ik-mail-db"
 database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
 migrations_dir = "../../packages/database/migrations"
+# ^ Path is relative to this wrangler.toml (apps/worker/).
+#   Always run `wrangler d1 migrations apply` from the apps/worker/ directory.
 
 [vars]
 ENVIRONMENT = "production"
