@@ -60,7 +60,7 @@ const handler: ExportedHandler<Env> = {
       return new Response('Method Not Allowed', { status: 405 });
     }
 
-    // Read raw body as text BE'FORE any parsing -- required for signature verification
+    // Read raw body as text BEFORE any parsing -- required for signature verification
     const rawBody = await request.text();
 
     // --- Step 1: Verify webhook signature via svix directly ---
