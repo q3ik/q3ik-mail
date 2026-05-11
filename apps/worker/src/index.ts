@@ -1,6 +1,5 @@
 import * as Sentry from '@sentry/cloudflare';
 import { Resend } from 'resend';
-import { Webhook } from 'svix';
 
 // Env interface — matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
@@ -8,37 +7,17 @@ export interface Env {
   DB: D1Database;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
-  SENTRY_DSN?: string;       // optional — worker degrades gracefully if not set
+  SENTRY_DSN: string;        // injected via wrangler secret
   ENVIRONMENT: string;       // set in wrangler.toml [vars]
 }
 
-// Shape of a verified Resend webhook event
-interface ResendWebhookEvent {
-  type: string;
-  data: { email_id: string };
-}
-
-// Shape of the inbound email payload from the Resend receiving API
-interface ReceivedEmail {
-  from?: string;
-  to?: string | string[];
-  subject?: string | null;
-  text?: string | null;
-  html?: string | null;
-  headers?: Array<{ name: string; value: string }>;
-}
-
-// Typed accessor for the Resend inbound-email receiving API.
-// resend.emails.receiving is a newer endpoint not yet reflected in the
-// published SDK type declarations; this wrapper avoids a blanket `any` cast.
-interface ResendReceiving {
-  get(emailId: string): Promise<ReceivedEmail>;
-}
-interface ResendEmailsWithReceiving {
-  receiving: ResendReceiving;
-}
-
-const handler: ExportedHandler<Env> = {
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    tracesSampleRate: 0.2,
+    environment: env.ENVIRONMENT ?? 'production',
+  }),
+  {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Only accept POST requests
     if (request.method !== 'POST') {
@@ -48,15 +27,23 @@ const handler: ExportedHandler<Env> = {
     // Read raw body as text BEFORE any parsing — required for signature verification
     const rawBody = await request.text();
 
-    // --- Step 1: Verify webhook signature via svix ---
-    let event: ResendWebhookEvent;
+    const resend = new Resend(env.RESEND_API_KEY);
+
+    // --- Step 1: Verify webhook signature ---
+    // Use Awaited<ReturnType<...>> because verify() is async
+    // @ts-expect-error — resend v4 types don't yet include webhooks; runtime API exists
+    let event: Awaited<ReturnType<typeof resend.webhooks.verify>>;
     try {
-      const wh = new Webhook(env.RESEND_WEBHOOK_SECRET);
-      event = wh.verify(rawBody, {
-        'svix-id': request.headers.get('svix-id') ?? '',
-        'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
-        'svix-signature': request.headers.get('svix-signature') ?? '',
-      }) as ResendWebhookEvent;
+      // @ts-expect-error — resend v4 types don't yet include webhooks; runtime API exists
+      event = await resend.webhooks.verify({
+        payload: rawBody,
+        headers: {
+          'svix-id': request.headers.get('svix-id') ?? '',
+          'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
+          'svix-signature': request.headers.get('svix-signature') ?? '',
+        },
+        webhookSecret: env.RESEND_WEBHOOK_SECRET,
+      });
     } catch {
       // Signature mismatch or missing headers
       return new Response('Unauthorized', { status: 401 });
@@ -71,19 +58,18 @@ const handler: ExportedHandler<Env> = {
     const emailId = event.data.email_id;
 
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
-    // Use resend.emails.receiving.get() — NOT resend.emails.get()
-    // resend.emails.get() is for sent mail; receiving.get() is for inbound
-    const resend = new Resend(env.RESEND_API_KEY);
-    let receivedEmail: ReceivedEmail;
+    // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
+    let receivedEmail: Awaited<ReturnType<typeof resend.emails.receiving.get>>;
     try {
-      receivedEmail = await (resend.emails as unknown as ResendEmailsWithReceiving).receiving.get(emailId);
+      // Use resend.emails.receiving.get() — NOT resend.emails.get()
+      // resend.emails.get() is for sent mail; receiving.get() is for inbound
+      // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
+      receivedEmail = await resend.emails.receiving.get(emailId);
     } catch (err) {
-      if (env.SENTRY_DSN) {
-        Sentry.captureException(err, {
-          tags: { layer: 'worker', operation: 'resend.receiving.get' },
-          extra: { emailId },
-        });
-      }
+      Sentry.captureException(err, {
+        tags: { layer: 'worker', operation: 'resend.receiving.get' },
+        extra: { emailId },
+      });
       return new Response('Failed to fetch email payload', { status: 502 });
     }
 
@@ -99,25 +85,46 @@ const handler: ExportedHandler<Env> = {
       (h) => h.name.toLowerCase() === 'message-id'
     )?.value ?? null;
 
-    // Look up the parent email's thread_id from D1 using the In-Reply-To
-    // Message-ID so multi-level reply chains share the same root thread_id.
+    // Fix: Look up the parent email's thread_id from D1 using the In-Reply-To
+    // Message-ID. This ensures multi-level reply chains all share the same
+    // root thread_id, rather than each reply forking into its own thread.
+    //
+    // Strategy:
+    //   1. If inReplyTo is set, query emails WHERE message_id = inReplyTo
+    //   2. If a parent row is found, reuse its thread_id (may itself be a reply)
+    //   3. If no parent found (out-of-order delivery), use inReplyTo as thread_id
+    //      and flag for re-threading once the parent arrives
+    //   4. New messages (no inReplyTo) start a new thread keyed on messageId ?? emailId
     let threadId: string;
+    let needsRethreading = 0;
     if (inReplyTo) {
       const parentRow = await env.DB
         .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
         .bind(inReplyTo)
         .first<{ thread_id: string }>();
-      threadId = parentRow?.thread_id ?? messageId ?? emailId;
+      if (parentRow) {
+        // Parent found — join existing thread
+        threadId = parentRow.thread_id;
+      } else {
+        // Parent not yet received — use In-Reply-To value as thread_id for now
+        // and flag for re-threading once the parent arrives
+        threadId = inReplyTo;
+        needsRethreading = 1;
+        console.warn(`[threading] Parent not found for In-Reply-To: ${inReplyTo}. Flagged for re-threading.`);
+      }
     } else {
+      // Root message — start a new thread
       threadId = messageId ?? emailId;
     }
 
     // --- Step 5: Parse from_name and from_address ---
+    // Resend returns from as "Display Name <email@example.com>" or just "email@example.com"
     const fromRaw: string = receivedEmail.from ?? '';
     const fromMatch = fromRaw.match(/^(.+?)\s*<(.+?)>$/);
     const fromName = fromMatch ? fromMatch[1].trim() : null;
     const fromAddress = fromMatch ? fromMatch[2].trim() : fromRaw.trim();
 
+    // to_address may be an array — store as comma-separated string
     const toAddress = Array.isArray(receivedEmail.to)
       ? receivedEmail.to.join(', ')
       : (receivedEmail.to ?? '');
@@ -126,52 +133,34 @@ const handler: ExportedHandler<Env> = {
     try {
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
-          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, is_read, is_sent)
+          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, is_read, is_sent, needs_rethreading)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
       `)
         .bind(
-          crypto.randomUUID(),
-          emailId,
-          threadId,
-          fromAddress,
-          fromName,
-          toAddress,
+          crypto.randomUUID(),        // id
+          emailId,                    // resend_id
+          threadId,                   // thread_id (looked up or new)
+          fromAddress,                // from_address
+          fromName,                   // from_name (nullable)
+          toAddress,                  // to_address
           receivedEmail.subject ?? null,
           receivedEmail.text ?? null,
           receivedEmail.html ?? null,
-          messageId,
-          inReplyTo,
+          messageId,                  // message_id (nullable)
+          inReplyTo,                  // in_reply_to (nullable)
+          needsRethreading,           // needs_rethreading (0 or 1)
         )
         .run();
     } catch (err) {
-      if (env.SENTRY_DSN) {
-        Sentry.captureException(err, {
-          tags: { layer: 'worker', operation: 'db.insert' },
-          extra: { emailId },
-        });
-      }
+      Sentry.captureException(err, {
+        tags: { layer: 'worker', operation: 'db.insert' },
+        extra: { emailId },
+      });
       return new Response('Database error', { status: 500 });
     }
 
     return new Response('OK', { status: 200 });
   },
-};
-
-// Wrap with Sentry only when SENTRY_DSN is configured.
-// This lets the worker run in local dev and CI without the secret being set.
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    if (!env.SENTRY_DSN) {
-      return handler.fetch!(request, env, ctx);
-    }
-    return Sentry.withSentry(
-      () => ({
-        dsn: env.SENTRY_DSN as string,
-        tracesSampleRate: 0.2,
-        environment: env.ENVIRONMENT ?? 'production',
-      }),
-      handler,
-    ).fetch!(request, env, ctx);
-  },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env>
+);

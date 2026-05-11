@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS emails (
   in_reply_to TEXT,                  -- Reference for threading
   is_read INTEGER DEFAULT 0,         -- Boolean (0 or 1)
   is_sent INTEGER DEFAULT 0,         -- Distinguish inbound vs outbound
+  needs_rethreading INTEGER DEFAULT 0, -- 1 if thread_id couldn't be resolved at ingest
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
