@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/cloudflare';
 import { Webhook } from 'svix';
 import { Resend } from 'resend';
 import { resolveOrphanedThreads } from '@q3ik-mail/database';
+import { parseFrom } from './utils/parseFrom';
 
 // Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
 // Field names verified against https://resend.com/docs/api-reference/inbound
@@ -166,10 +167,14 @@ const handler: ExportedHandler<Env> = {
 
     // --- Step 5: Parse from_name and from_address ---
     // Resend returns from as "Display Name <email@example.com>" or just "email@example.com"
-    const fromRaw: string = receivedEmail.from ?? '';
-    const fromMatch = fromRaw.match(/^(.+?)\s*<(.+?)>$/);
-    const fromName = fromMatch ? fromMatch[1].trim() : null;
-    const fromAddress = fromMatch ? fromMatch[2].trim() : fromRaw.trim();
+    const { name: fromName, address: fromAddress } = parseFrom(receivedEmail.from ?? '');
+
+    // Guard: a missing or unparseable from field must not silently write an empty
+    // string into the NOT NULL from_address column — reject the webhook instead.
+    if (!fromAddress) {
+      console.warn('[worker] Received email with missing or unparseable from address; rejecting.', { emailId });
+      return new Response('Missing from address', { status: 400 });
+    }
 
     // Normalise `to` to a string regardless of whether the API returns a bare
     // string or an array — both branches are now handled explicitly.
@@ -185,6 +190,11 @@ const handler: ExportedHandler<Env> = {
     // ingestion wins and subsequent duplicates are discarded. If idempotent
     // upsert semantics are ever needed, replace with INSERT OR REPLACE or add
     // an ON CONFLICT DO UPDATE clause.
+    // All 14 columns use bound ? parameters so that the column list and the
+    // .bind() argument list are always the same length. Hardcoding literals
+    // (e.g. 0, 0 for is_read/is_sent) shifts the value indices relative to the
+    // column indices, which breaks any test or tooling that maps columns to
+    // bind args by position.
     try {
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
@@ -204,7 +214,10 @@ const handler: ExportedHandler<Env> = {
           receivedEmail.html ?? null,
           messageId,                  // message_id (nullable)
           inReplyTo,                  // in_reply_to (nullable)
+        // !!!TODO: Fix - broken from merge conflict resolution
           referencesHeader,           // references (nullable)
+          0,                          // is_read
+          0,                          // is_sent
           needsRethreading,           // needs_rethreading (0 or 1)
         )
         .run();
