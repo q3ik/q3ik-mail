@@ -5,6 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = ".vercel/output/static"
 
 # D1 database binding
+# Run `npx wrangler d1 create q3ik-mail-db` and replace the placeholder below
 [[d1_databases]]
 binding = "DB"
 database_name = "q3ik-mail-db"
