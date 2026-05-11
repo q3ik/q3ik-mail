@@ -47,3 +47,5 @@ dist/
 **/test-results/
 **/playwright-report/
 **/coverage/
+apps/web/wrangler.toml
+apps/worker/wrangler.toml
