@@ -11,7 +11,11 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    Sentry.captureException(error);
+    // Guard: captureException may be undefined if the Sentry Node SDK was
+    // stubbed out at build time (CF Workers runtime incompatibility).
+    if (typeof Sentry.captureException === 'function') {
+      Sentry.captureException(error);
+    }
   }, [error]);
 
   return (
