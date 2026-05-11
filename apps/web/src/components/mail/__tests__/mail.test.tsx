@@ -1,6 +1,10 @@
 // @vitest-environment happy-dom
+// NOTE: This file intentionally overrides the global `environment: 'node'` setting
+// in vitest.config.ts. React component rendering requires a DOM environment.
+// Be aware that happy-dom has known differences from jsdom (CSS, custom elements)
+// and from the actual Cloudflare Workers runtime.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, cleanup } from '@testing-library/react';
+import { render, screen, act, cleanup, waitFor } from '@testing-library/react';
 import type { Email, EmailSummary } from '@q3ik-mail/database';
 import { Mail } from '../mail';
 
@@ -76,6 +80,10 @@ import * as mailActions from '@/app/actions/mail';
 
 const THREAD_ID = 'thread-abc';
 
+/**
+ * Factory for EmailSummary (thread list rows).
+ * EmailSummary omits body_html and body_text from the full Email type.
+ */
 const makeThread = (overrides: Partial<EmailSummary> = {}): EmailSummary => ({
   id: 'email-1',
   thread_id: THREAD_ID,
@@ -84,16 +92,19 @@ const makeThread = (overrides: Partial<EmailSummary> = {}): EmailSummary => ({
   from_name: 'Sender',
   to_address: 'me@example.com',
   subject: 'Hello',
-  body_text: 'Hi there',
-  body_html: null,
   message_id: '<msg-1>',
   in_reply_to: null,
   is_read: 0,
+  is_sent: 0,
   needs_rethreading: 0,
   created_at: '2024-01-01T00:00:00Z',
   ...overrides,
 });
 
+/**
+ * Factory for full Email objects (thread detail rows).
+ * Email includes body_html and body_text in addition to all EmailSummary fields.
+ */
 const makeEmail = (overrides: Partial<Email> = {}): Email => ({
   id: 'email-1',
   thread_id: THREAD_ID,
@@ -107,6 +118,7 @@ const makeEmail = (overrides: Partial<Email> = {}): Email => ({
   message_id: '<msg-1>',
   in_reply_to: null,
   is_read: 0,
+  is_sent: 0,
   needs_rethreading: 0,
   created_at: '2024-01-01T00:00:00Z',
   ...overrides,
@@ -143,16 +155,13 @@ describe('Mail — markAsRead error recovery', () => {
     expect(btn.getAttribute('data-is-read')).toBe('0');
 
     // Select the thread — triggers the optimistic update then the failing write
-    await act(async () => {
-      btn.click();
-      // Allow microtask queue to drain so the .catch() runs
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    act(() => { btn.click(); });
 
     // The optimistic update fires but markEmailAsRead rejects, so is_read
-    // must be reverted to 0.
-    expect(screen.getByTestId(`thread-${THREAD_ID}`).getAttribute('data-is-read')).toBe('0');
+    // must be reverted to 0. Use waitFor to poll until the revert settles.
+    await waitFor(() =>
+      expect(screen.getByTestId(`thread-${THREAD_ID}`).getAttribute('data-is-read')).toBe('0')
+    );
   });
 
   it('leaves is_read as 1 (read) when markEmailAsRead succeeds', async () => {
@@ -170,13 +179,11 @@ describe('Mail — markAsRead error recovery', () => {
       />
     );
 
-    await act(async () => {
-      screen.getByTestId(`thread-${THREAD_ID}`).click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    act(() => { screen.getByTestId(`thread-${THREAD_ID}`).click(); });
 
-    expect(screen.getByTestId(`thread-${THREAD_ID}`).getAttribute('data-is-read')).toBe('1');
+    await waitFor(() =>
+      expect(screen.getByTestId(`thread-${THREAD_ID}`).getAttribute('data-is-read')).toBe('1')
+    );
   });
 
   it('does not call markEmailAsRead when all emails are already read', async () => {
@@ -193,11 +200,11 @@ describe('Mail — markAsRead error recovery', () => {
       />
     );
 
-    await act(async () => {
-      screen.getByTestId(`thread-${THREAD_ID}`).click();
-      await Promise.resolve();
-    });
+    act(() => { screen.getByTestId(`thread-${THREAD_ID}`).click(); });
 
+    // Wait for fetchThread to have been called (handleSelectThread completed),
+    // then assert markEmailAsRead was never invoked.
+    await waitFor(() => expect(mailActions.fetchThread).toHaveBeenCalledWith(THREAD_ID));
     expect(mailActions.markEmailAsRead).not.toHaveBeenCalled();
   });
 });
