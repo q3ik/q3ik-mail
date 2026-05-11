@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import worker from '../index';
 
+type WorkerFetch = NonNullable<typeof worker.fetch>;
+type WorkerRequest = Parameters<WorkerFetch>[0];
+
 // Mock svix — the worker uses `new Webhook(secret).verify()` directly.
 // Mocking resend.webhooks.verify has no effect because the worker never calls it.
 vi.mock('svix', () => ({
@@ -44,6 +47,11 @@ const mockEnv = {
   },
 } as unknown as import('../index').Env;
 
+const mockCtx = {
+  waitUntil: vi.fn(),
+  passThroughOnException: vi.fn(),
+} as unknown as ExecutionContext;
+
 function makeRequest(body: string, headers: Record<string, string> = {}) {
   return new Request('https://worker.example.com/', {
     method: 'POST',
@@ -52,10 +60,14 @@ function makeRequest(body: string, headers: Record<string, string> = {}) {
   });
 }
 
+function fetchWorker(req: Request) {
+  return worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
+}
+
 describe('webhook handler', () => {
   it('returns 405 for non-POST requests', async () => {
     const req = new Request('https://worker.example.com/', { method: 'GET' });
-    const res = await worker.fetch(req, mockEnv);
+    const res = await fetchWorker(req);
     expect(res.status).toBe(405);
   });
 
@@ -67,7 +79,7 @@ describe('webhook handler', () => {
     const req = makeRequest('{"type":"email.received"}', {
       'svix-id': 'x', 'svix-timestamp': 'x', 'svix-signature': 'x',
     });
-    const res = await worker.fetch(req, mockEnv);
+    const res = await fetchWorker(req);
     expect(res.status).toBe(401);
   });
 
@@ -79,7 +91,7 @@ describe('webhook handler', () => {
     const req = makeRequest('{}', {
       'svix-id': 'x', 'svix-timestamp': 'x', 'svix-signature': 'x',
     });
-    const res = await worker.fetch(req, mockEnv);
+    const res = await fetchWorker(req);
     expect(res.status).toBe(200);
   });
 
@@ -87,7 +99,7 @@ describe('webhook handler', () => {
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
-    const res = await worker.fetch(req, mockEnv);
+    const res = await fetchWorker(req);
     expect(res.status).toBe(200);
   });
 });
