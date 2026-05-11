@@ -12,8 +12,19 @@ export interface Env {
   ENVIRONMENT: string;       // set in wrangler.toml [vars]
 }
 
-const worker: ExportedHandler<Env> = {
+export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // Initialise Sentry lazily when DSN is available.
+    // Avoids wrapping the entire handler with withSentry() which causes Env
+    // namespace conflicts between the local Env interface and Cloudflare.Env.
+    if (env.SENTRY_DSN) {
+      Sentry.init({
+        dsn: env.SENTRY_DSN,
+        tracesSampleRate: 0.2,
+        environment: env.ENVIRONMENT ?? 'production',
+      });
+    }
+
     // Only accept POST requests
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });
@@ -155,23 +166,4 @@ const worker: ExportedHandler<Env> = {
 
     return new Response('OK', { status: 200 });
   },
-};
-
-// Wrap with Sentry only when SENTRY_DSN is provided at runtime.
-// This allows the worker to run in local dev / environments where
-// SENTRY_DSN is not set without throwing at startup.
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    if (env.SENTRY_DSN) {
-      return Sentry.withSentry(
-        () => ({
-          dsn: env.SENTRY_DSN as string,
-          tracesSampleRate: 0.2,
-          environment: env.ENVIRONMENT ?? 'production',
-        }),
-        worker,
-      ).fetch(request, env, ctx);
-    }
-    return worker.fetch(request, env, ctx);
-  },
-};
+} satisfies ExportedHandler<Env>;
