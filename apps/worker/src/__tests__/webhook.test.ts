@@ -64,6 +64,48 @@ function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
   return worker.fetch!(req as WorkerRequest, env, ctx);
 }
 
+/**
+ * Creates a spy-instrumented Env whose DB.prepare / .bind calls are recorded.
+ * Use `prepareSpy` to assert which SQL was executed and `bindSpy` to inspect
+ * the bound parameter values.
+ */
+function makeEnvWithSpy() {
+  const bindSpy = vi.fn().mockReturnValue({
+    first: async () => null,
+    run: async () => ({ success: true }),
+  });
+  const prepareSpy = vi.fn().mockReturnValue({ bind: bindSpy });
+  const env = {
+    ...mockEnv,
+    DB: { prepare: prepareSpy },
+  } as unknown as import('../index').Env;
+  return { env, prepareSpy, bindSpy };
+}
+
+/**
+ * Given a prepareSpy and bindSpy (from makeEnvWithSpy), finds the INSERT
+ * call for the emails table and returns the column names + bound values.
+ * Throws if no INSERT is found.
+ */
+function getInsertArgs(
+  prepareSpy: ReturnType<typeof vi.fn>,
+  bindSpy: ReturnType<typeof vi.fn>,
+) {
+  const insertIdx = prepareSpy.mock.calls.findIndex((args: unknown[]) =>
+    (args[0] as string).includes('INSERT OR IGNORE INTO emails')
+  );
+  expect(insertIdx).toBeGreaterThanOrEqual(0);
+
+  const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
+  const insertBindArgs = bindSpy.mock.calls[insertIdx] as unknown[];
+
+  const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
+  expect(colMatch).not.toBeNull();
+  const columns = colMatch![1].split(',').map((c) => c.trim().replace(/["'`]/g, ''));
+
+  return { columns, insertBindArgs };
+}
+
 describe('webhook handler', () => {
   it('returns 405 for non-POST requests', async () => {
     const req = new Request('https://worker.example.com/', { method: 'GET' });
@@ -105,15 +147,7 @@ describe('webhook handler', () => {
 
   it('extracts and persists References header from inbound email', async () => {
     const { Resend } = await import('resend');
-    const bindSpy = vi.fn().mockReturnValue({
-      first: async () => null,
-      run: async () => ({ success: true }),
-    });
-    const prepareSpy = vi.fn().mockReturnValue({ bind: bindSpy });
-    const envWithSpy = {
-      ...mockEnv,
-      DB: { prepare: prepareSpy },
-    } as unknown as import('../index').Env;
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -137,39 +171,18 @@ describe('webhook handler', () => {
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
-    const res = await fetchWorker(req as WorkerRequest, envWithSpy, mockCtx);
+    const res = await fetchWorker(req, env);
     expect(res.status).toBe(200);
 
-    // Find the INSERT prepare call and its corresponding bind args
-    const insertIdx = prepareSpy.mock.calls.findIndex((args: unknown[]) =>
-      (args[0] as string).includes('INSERT OR IGNORE INTO emails')
-    );
-    expect(insertIdx).toBeGreaterThanOrEqual(0);
-
-    const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
-    const insertBindArgs = bindSpy.mock.calls[insertIdx] as unknown[];
-
-    // Parse column names from the INSERT SQL to find the "references" position
-    const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
-    expect(colMatch).not.toBeNull();
-    const columns = colMatch![1].split(',').map((c) => c.trim().replace(/["'`]/g, ''));
+    const { columns, insertBindArgs } = getInsertArgs(prepareSpy, bindSpy);
     const referencesIdx = columns.indexOf('references');
     expect(referencesIdx).toBeGreaterThanOrEqual(0);
-
     expect(insertBindArgs[referencesIdx]).toBe('<root-456@mail.example.com>');
   });
 
   it('stores null for references when References header is absent', async () => {
     const { Resend } = await import('resend');
-    const bindSpy = vi.fn().mockReturnValue({
-      first: async () => null,
-      run: async () => ({ success: true }),
-    });
-    const prepareSpy = vi.fn().mockReturnValue({ bind: bindSpy });
-    const envWithSpy = {
-      ...mockEnv,
-      DB: { prepare: prepareSpy },
-    } as unknown as import('../index').Env;
+    const { env, prepareSpy, bindSpy } = makeEnvWithSpy();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -191,25 +204,12 @@ describe('webhook handler', () => {
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
-    const res = await fetchWorker(req as WorkerRequest, envWithSpy, mockCtx);
+    const res = await fetchWorker(req, env);
     expect(res.status).toBe(200);
 
-    // Find the INSERT prepare call and its corresponding bind args
-    const insertIdx = prepareSpy.mock.calls.findIndex((args: unknown[]) =>
-      (args[0] as string).includes('INSERT OR IGNORE INTO emails')
-    );
-    expect(insertIdx).toBeGreaterThanOrEqual(0);
-
-    const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
-    const insertBindArgs = bindSpy.mock.calls[insertIdx] as unknown[];
-
-    // Parse column names from the INSERT SQL to find the "references" position
-    const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
-    expect(colMatch).not.toBeNull();
-    const columns = colMatch![1].split(',').map((c) => c.trim().replace(/["'`]/g, ''));
+    const { columns, insertBindArgs } = getInsertArgs(prepareSpy, bindSpy);
     const referencesIdx = columns.indexOf('references');
     expect(referencesIdx).toBeGreaterThanOrEqual(0);
-
     expect(insertBindArgs[referencesIdx]).toBeNull();
   });
 });
