@@ -87,7 +87,11 @@ export async function POST(req: NextRequest) {
     if (result.error) {
       // Log only non-sensitive error metadata — never log .message which may
       // echo back user input or contain PII-adjacent rate-limit/account details.
-      console.error('[api/send] Resend error:', result.error.name, result.error.statusCode);
+      const statusCode =
+        'statusCode' in result.error && typeof result.error.statusCode === 'number'
+          ? result.error.statusCode
+          : undefined;
+      console.error('[api/send] Resend error:', result.error.name, statusCode);
       return Response.json({ error: 'Failed to send email' }, { status: 500 });
     }
 
