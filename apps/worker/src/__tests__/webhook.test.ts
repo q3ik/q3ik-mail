@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import worker from '../index';
+import { parseFrom } from '../utils/parseFrom';
 
 type WorkerFetch = NonNullable<typeof worker.fetch>;
 type WorkerRequest = Parameters<WorkerFetch>[0];
 
 // Mock svix — the worker uses `new Webhook(secret).verify()` directly.
-// Mocking resend.webhooks.verify has no effect because the worker never calls it.
 vi.mock('svix', () => ({
   Webhook: vi.fn().mockImplementation(() => ({
     verify: vi.fn().mockReturnValue({
@@ -64,6 +64,69 @@ function fetchWorker(req: Request) {
   return worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
 }
 
+// ---------------------------------------------------------------------------
+// DB spy helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a spy-instrumented Env whose DB.prepare / .bind calls are recorded.
+ * The SELECT branch (thread lookup) returns `selectFirstResult`; all other
+ * statements (INSERT) use the spy so bind args can be inspected.
+ */
+function makeThreadEnv(
+  selectFirstResult: unknown = null,
+): {
+  env: import('../index').Env;
+  prepareSpy: ReturnType<typeof vi.fn>;
+  bindSpy: ReturnType<typeof vi.fn>;
+} {
+  const bindSpy = vi.fn().mockReturnValue({
+    first: async () => null,
+    run: async () => ({ success: true }),
+  });
+  const prepareSpy = vi.fn().mockImplementation((sql: string) => {
+    if (sql.includes('SELECT')) {
+      return { bind: () => ({ first: async () => selectFirstResult }) };
+    }
+    return { bind: bindSpy };
+  });
+  const env = {
+    RESEND_API_KEY: 'test-key',
+    RESEND_WEBHOOK_SECRET: 'test-secret',
+    DB: { prepare: prepareSpy },
+  } as unknown as import('../index').Env;
+  return { env, prepareSpy, bindSpy };
+}
+
+/**
+ * Parses the INSERT OR IGNORE INTO emails statement captured by prepareSpy
+ * and returns the column names alongside the corresponding bound values from
+ * bindSpy — making assertions immune to future column additions/reorderings.
+ */
+function getInsertArgs(
+  prepareSpy: ReturnType<typeof vi.fn>,
+  bindSpy: ReturnType<typeof vi.fn>,
+): { columns: string[]; values: unknown[] } {
+  const insertIdx = (prepareSpy.mock.calls as unknown[][]).findIndex(
+    (args) => (args[0] as string).includes('INSERT OR IGNORE INTO emails'),
+  );
+  expect(insertIdx).toBeGreaterThanOrEqual(0);
+
+  const insertSql = prepareSpy.mock.calls[insertIdx][0] as string;
+  const colMatch = insertSql.match(/INSERT[^(]*\(([^)]+)\)/);
+  expect(colMatch).not.toBeNull();
+  const columns = colMatch![1]
+    .split(',')
+    .map((c) => c.trim().replace(/["'`]/g, ''));
+
+  const values = bindSpy.mock.calls[0] as unknown[];
+  return { columns, values };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 describe('webhook handler', () => {
   it('returns 405 for non-POST requests', async () => {
     const req = new Request('https://worker.example.com/', { method: 'GET' });
@@ -101,5 +164,161 @@ describe('webhook handler', () => {
     });
     const res = await fetchWorker(req);
     expect(res.status).toBe(200);
+  });
+});
+
+describe('parseFrom', () => {
+  it('parses unquoted display name', () => {
+    expect(parseFrom('Alice <alice@example.com>')).toEqual({ name: 'Alice', address: 'alice@example.com' });
+  });
+
+  it('parses quoted display name with comma (RFC 5322)', () => {
+    expect(parseFrom('"Smith, John" <john@example.com>')).toEqual({ name: 'Smith, John', address: 'john@example.com' });
+  });
+
+  it('parses angle-bracket-only form with no display name', () => {
+    expect(parseFrom('<alice@example.com>')).toEqual({ name: null, address: 'alice@example.com' });
+  });
+
+  it('parses plain email address with no display name', () => {
+    expect(parseFrom('alice@example.com')).toEqual({ name: null, address: 'alice@example.com' });
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(parseFrom('  Alice <alice@example.com>  ')).toEqual({ name: 'Alice', address: 'alice@example.com' });
+  });
+
+  it('returns empty address for empty input', () => {
+    expect(parseFrom('')).toEqual({ name: null, address: '' });
+  });
+
+  it('returns null name for all-whitespace quoted display name', () => {
+    // "   " is a valid quoted string but semantically empty — name must be null, not ''
+    expect(parseFrom('"   " <alice@example.com>')).toEqual({ name: null, address: 'alice@example.com' });
+  });
+});
+
+describe('threading', () => {
+  it('joins existing thread when In-Reply-To parent is found', async () => {
+    const { Resend } = await import('resend');
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Re: Test',
+            text: 'Reply',
+            html: '<p>Reply</p>',
+            headers: [
+              { name: 'In-Reply-To', value: '<parent@example.com>' },
+              { name: 'Message-ID', value: '<reply@example.com>' },
+            ],
+          }),
+        },
+      },
+    }));
+
+    const { env, prepareSpy, bindSpy } = makeThreadEnv({ thread_id: 'existing-thread-id' });
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await worker.fetch!(req as WorkerRequest, env, mockCtx);
+    expect(res.status).toBe(200);
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    const threadIdIdx = columns.indexOf('thread_id');
+    expect(threadIdIdx).toBeGreaterThanOrEqual(0);
+    expect(values[threadIdIdx]).toBe('existing-thread-id');
+  });
+
+  it('sets needs_rethreading=1 when In-Reply-To parent is not found', async () => {
+    const { Resend } = await import('resend');
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Re: Orphan',
+            text: 'Reply',
+            html: '<p>Reply</p>',
+            headers: [
+              { name: 'In-Reply-To', value: '<missing@example.com>' },
+            ],
+          }),
+        },
+      },
+    }));
+
+    // selectFirstResult = null simulates parent not found
+    const { env, prepareSpy, bindSpy } = makeThreadEnv(null);
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await worker.fetch!(req as WorkerRequest, env, mockCtx);
+    expect(res.status).toBe(200);
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    const needsRethreadingIdx = columns.indexOf('needs_rethreading');
+    expect(needsRethreadingIdx).toBeGreaterThanOrEqual(0);
+    expect(values[needsRethreadingIdx]).toBe(1);
+  });
+
+  it('stores correct from_name and from_address for quoted display name with comma', async () => {
+    const { Resend } = await import('resend');
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: '"Smith, John" <john@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Hello',
+            text: 'Hi',
+            html: '<p>Hi</p>',
+            headers: [],
+          }),
+        },
+      },
+    }));
+
+    const { env, prepareSpy, bindSpy } = makeThreadEnv();
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await worker.fetch!(req as WorkerRequest, env, mockCtx);
+    expect(res.status).toBe(200);
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    expect(values[columns.indexOf('from_address')]).toBe('john@example.com');
+    expect(values[columns.indexOf('from_name')]).toBe('Smith, John');
+  });
+
+  it('returns 400 when from address is missing or unparseable', async () => {
+    const { Resend } = await import('resend');
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: '',
+            to: ['you@q3ik.com'],
+            subject: 'No Sender',
+            text: 'Hi',
+            html: '<p>Hi</p>',
+            headers: [],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    // Guard fires before DB — mockEnv is sufficient, no spy needed
+    const res = await worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
+    expect(res.status).toBe(400);
   });
 });
