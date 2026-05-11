@@ -36,7 +36,7 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>();
 
   function openCompose(payload?: ComposePayload) {
-    setComposePayload(payload);
+    setComposePayload(payload ?? undefined);
     setComposeOpen(true);
   }
 
@@ -104,7 +104,10 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
       </ResizablePanelGroup>
       <ComposeDialog
         open={composeOpen}
-        onOpenChange={setComposeOpen}
+        onOpenChange={(open) => {
+          setComposeOpen(open);
+          if (!open) setComposePayload(undefined);
+        }}
         initial={composePayload}
       />
     </>
