@@ -41,8 +41,19 @@ export async function POST(req: NextRequest) {
 
   const { to, subject, content, replyToId, references } = body;
 
-  if (!to || !subject || !content) {
-    return Response.json({ error: 'Missing required fields: to, subject, content' }, { status: 400 });
+  if (!subject || !content) {
+    return Response.json({ error: 'Missing required fields: subject, content' }, { status: 400 });
+  }
+
+  if (typeof to !== 'string' || to.length === 0) {
+    return Response.json({ error: 'Invalid or missing email address' }, { status: 400 });
+  }
+
+  // Validate email format: must have '@' not at start/end, and domain must contain a dot
+  const atIndex = to.indexOf('@');
+  const validEmail = atIndex > 0 && atIndex < to.length - 1 && to.slice(atIndex + 1).includes('.');
+  if (!validEmail) {
+    return Response.json({ error: 'Invalid or missing email address' }, { status: 400 });
   }
 
   try {
@@ -55,8 +66,8 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.error) {
-      console.error('Resend API error:', result.error);
-      return Response.json({ error: result.error.message }, { status: 500 });
+      console.error('[api/send] Resend error:', result.error);
+      return Response.json({ error: 'Failed to send email' }, { status: 500 });
     }
 
     return Response.json({ id: result.data?.id }, { status: 200 });
