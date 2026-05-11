@@ -1,12 +1,8 @@
--- Reference schema — mirrors 000_init.sql exactly.
--- This file is kept as human-readable documentation and for tooling that reads
--- the schema directly (e.g. DB GUIs, type generators).
--- The canonical source of truth for the live database is
--- packages/database/migrations/000_init.sql (and subsequent numbered migrations).
--- Do NOT apply this file directly to D1 — use:
---   cd apps/worker && npx wrangler d1 migrations apply q3ik-mail-db --local
+-- Migration 000: Initial schema — emails table and indexes
+-- Applied automatically via: npx wrangler d1 migrations apply q3ik-mail-db
+-- (run from the apps/worker directory, or any directory containing a wrangler.toml
+--  that declares this migrations_dir)
 
--- Table for storing individual email messages
 CREATE TABLE IF NOT EXISTS emails (
   id                TEXT PRIMARY KEY,                     -- UUID
   resend_id         TEXT UNIQUE NOT NULL,                 -- ID from Resend API
@@ -25,14 +21,6 @@ CREATE TABLE IF NOT EXISTS emails (
   created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes for fast inbox loading and threading lookups
 CREATE INDEX IF NOT EXISTS idx_emails_thread_id  ON emails(thread_id);
 CREATE INDEX IF NOT EXISTS idx_emails_created_at ON emails(created_at);
 CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
-
--- Optional: Table for simple contact management
-CREATE TABLE IF NOT EXISTS contacts (
-  email TEXT PRIMARY KEY,
-  name TEXT,
-  last_contacted DATETIME
-);
