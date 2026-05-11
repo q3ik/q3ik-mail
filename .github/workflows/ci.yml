@@ -7,9 +7,25 @@ on:
     branches: [trunk]
 
 jobs:
+  config-guard:
+    name: Config Validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check wrangler.toml database_id placeholder
+        run: |
+          if grep -q "REPLACE_WITH_YOUR_DATABASE_ID" apps/worker/wrangler.toml; then
+            echo "ERROR: database_id placeholder not replaced in apps/worker/wrangler.toml"
+            echo "Run 'npx wrangler d1 list' to find your database ID and update the file."
+            exit 1
+          fi
+
   typecheck:
     name: TypeScript
     runs-on: ubuntu-latest
+    needs: config-guard
     permissions:
       contents: read
     steps:
@@ -27,6 +43,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    needs: config-guard
     permissions:
       contents: read
     steps:
