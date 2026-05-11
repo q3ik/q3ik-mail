@@ -60,8 +60,8 @@ function makeRequest(body: string, headers: Record<string, string> = {}) {
   });
 }
 
-function fetchWorker(req: Request) {
-  return worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
+function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
+  return worker.fetch!(req as WorkerRequest, env, ctx);
 }
 
 describe('webhook handler', () => {
@@ -101,5 +101,110 @@ describe('webhook handler', () => {
     });
     const res = await fetchWorker(req);
     expect(res.status).toBe(200);
+  });
+
+  it('extracts and persists References header from inbound email', async () => {
+    const { Resend } = await import('resend');
+    const bindSpy = vi.fn().mockReturnValue({
+      first: async () => null,
+      run: async () => ({ success: true }),
+    });
+    const prepareSpy = vi.fn().mockReturnValue({ bind: bindSpy });
+    const envWithSpy = {
+      ...mockEnv,
+      DB: { prepare: prepareSpy },
+    } as unknown as import('../index').Env;
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Re: Hello',
+            text: 'Reply body',
+            html: null,
+            headers: [
+              { name: 'Message-ID', value: '<reply-123@mail.example.com>' },
+              { name: 'In-Reply-To', value: '<root-456@mail.example.com>' },
+              { name: 'References', value: '<root-456@mail.example.com>' },
+            ],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req as WorkerRequest, envWithSpy, mockCtx);
+    expect(res.status).toBe(200);
+
+    // The INSERT statement should have been called with references value
+    // Find the INSERT prepare call (not the SELECT for thread lookup)
+    const insertCall = prepareSpy.mock.calls.find((args: string[]) =>
+      (args[0] as string).includes('INSERT OR IGNORE INTO emails')
+    );
+    expect(insertCall).toBeDefined();
+
+    // bindSpy args for the INSERT: positional params include references at index 11
+    const insertBindArgs = bindSpy.mock.calls.find((_: unknown, i: number) => {
+      return prepareSpy.mock.calls[i]?.[0]?.includes('INSERT OR IGNORE INTO emails');
+    });
+    // Check that '<root-456@mail.example.com>' appears in the bind args
+    const allBindArgs = bindSpy.mock.calls.flat();
+    expect(allBindArgs).toContain('<root-456@mail.example.com>');
+  });
+
+  it('stores null for references when References header is absent', async () => {
+    const { Resend } = await import('resend');
+    const bindSpy = vi.fn().mockReturnValue({
+      first: async () => null,
+      run: async () => ({ success: true }),
+    });
+    const prepareSpy = vi.fn().mockReturnValue({ bind: bindSpy });
+    const envWithSpy = {
+      ...mockEnv,
+      DB: { prepare: prepareSpy },
+    } as unknown as import('../index').Env;
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Bob <bob@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'No References header',
+            text: 'Body',
+            html: null,
+            headers: [
+              { name: 'Message-ID', value: '<new-789@mail.example.com>' },
+            ],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req as WorkerRequest, envWithSpy, mockCtx);
+    expect(res.status).toBe(200);
+
+    // The INSERT call's bind args should contain null for the references position
+    const insertPrepareCalls = prepareSpy.mock.calls.filter((args: string[]) =>
+      (args[0] as string).includes('INSERT OR IGNORE INTO emails')
+    );
+    expect(insertPrepareCalls.length).toBe(1);
+
+    // Bind args for the INSERT contain null at the references position (index 11)
+    // positions: id(0) resend_id(1) thread_id(2) from_address(3) from_name(4)
+    //            to_address(5) subject(6) body_text(7) body_html(8) message_id(9)
+    //            in_reply_to(10) references(11) needs_rethreading(12)
+    const insertPrepareIndex = prepareSpy.mock.calls.findIndex((args: string[]) =>
+      (args[0] as string).includes('INSERT OR IGNORE INTO emails')
+    );
+    const insertBindCall = bindSpy.mock.calls[insertPrepareIndex];
+    expect(insertBindCall[11]).toBeNull(); // references should be null
   });
 });
