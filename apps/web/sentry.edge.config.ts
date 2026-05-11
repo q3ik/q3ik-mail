@@ -8,9 +8,13 @@
 // SDK (sentry.client.config.ts) for error reporting.
 import * as Sentry from '@sentry/nextjs';
 
-// EdgeRuntime is defined in Vercel Edge Functions but undefined in
+const edgeRuntime = (globalThis as typeof globalThis & {
+  EdgeRuntime?: string;
+}).EdgeRuntime;
+
+// EdgeRuntime is defined in Vercel Edge Functions but absent in
 // Cloudflare Workers — use that to gate the init.
-if (typeof EdgeRuntime === 'undefined') {
+if (typeof edgeRuntime === 'undefined') {
   // Running inside Cloudflare Workers — skip Sentry Node init.
 } else {
   Sentry.init({
