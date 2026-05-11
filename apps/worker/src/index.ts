@@ -19,7 +19,7 @@ const handler: ExportedHandler<Env> = {
   // Replaces the former /api/rethread HTTP endpoint (issue #31).
   // Runs every 5 minutes; resolves emails flagged with needs_rethreading=1.
   // ---------------------------------------------------------------------------
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       resolveOrphanedThreads(env.DB).then((resolved) => {
         if (resolved > 0) {
