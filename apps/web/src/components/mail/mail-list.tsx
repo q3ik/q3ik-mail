@@ -65,6 +65,7 @@ function ThreadRow({
   return (
     <button
       type="button"
+      data-testid="mail-list-item"
       onClick={onSelect}
       className={cn(
         'flex w-full flex-col gap-1 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground',
