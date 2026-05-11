@@ -9,7 +9,7 @@ import type { ComposePayload } from '@/components/mail/compose-dialog';
 
 const sanitizeOptions = {
   USE_PROFILES: { html: true },
-  FORBID_ATTR: ['style'],
+  FORBID_ATTR: ['style', 'class', 'id'],
 };
 
 let DOMPurifyPromise: Promise<typeof import('isomorphic-dompurify')> | undefined;
