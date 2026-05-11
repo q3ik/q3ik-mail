@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS emails (
   is_read           INTEGER NOT NULL DEFAULT 0,           -- Boolean (0 = unread, 1 = read)
   is_sent           INTEGER NOT NULL DEFAULT 0,           -- 0 = inbound, 1 = outbound
   needs_rethreading INTEGER NOT NULL DEFAULT 0,           -- 1 if thread_id couldn't be resolved at ingest
-  created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_emails_thread_id  ON emails(thread_id);
