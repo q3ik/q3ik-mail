@@ -3,6 +3,17 @@ import { Webhook } from 'svix';
 import { Resend } from 'resend';
 import { resolveOrphanedThreads } from '@q3ik-mail/database';
 
+// Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
+// When Resend ships official types, replace this interface with the proper import.
+interface ResendReceivedEmail {
+  from?: string;
+  to?: string | string[];
+  subject?: string;
+  text?: string;
+  html?: string;
+  headers?: Array<{ name: string; value: string }>;
+}
+
 // Env interface — matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
 export interface Env {
@@ -73,13 +84,13 @@ const handler: ExportedHandler<Env> = {
     const resend = new Resend(env.RESEND_API_KEY);
 
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
-    // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
-    let receivedEmail: Awaited<ReturnType<typeof resend.emails.receiving.get>>;
+    // resend v4 types don't yet include emails.receiving; cast to any to call it
+    // and assert the expected shape so all downstream field accesses are type-checked.
+    let receivedEmail: ResendReceivedEmail;
     try {
       // Use resend.emails.receiving.get() — NOT resend.emails.get()
       // resend.emails.get() is for sent mail; receiving.get() is for inbound
-      // @ts-expect-error — resend v4 types don't yet include emails.receiving; runtime API exists
-      receivedEmail = await resend.emails.receiving.get(emailId);
+      receivedEmail = await (resend.emails as any).receiving.get(emailId) as ResendReceivedEmail;
     } catch (err) {
       if (env.SENTRY_DSN) {
         Sentry.captureException(err, {
