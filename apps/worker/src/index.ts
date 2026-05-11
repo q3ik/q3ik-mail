@@ -27,6 +27,31 @@ export interface Env {
   ENVIRONMENT: string;       // set in wrangler.toml [vars]
 }
 
+/**
+ * Parse the RFC 5322 `From` header value into a display name and email address.
+ *
+ * Handles the following forms:
+ *   "Smith, John" <john@example.com>   → { name: "Smith, John", address: "john@example.com" }
+ *   Alice <alice@example.com>          → { name: "Alice",       address: "alice@example.com" }
+ *   alice@example.com                  → { name: null,          address: "alice@example.com" }
+ */
+export function parseFrom(raw: string): { name: string | null; address: string } {
+  // Quoted display name (handles commas and other special chars inside the quotes)
+  // Uses [^"]+ and [^>]+ to avoid polynomial backtracking (ReDoS).
+  const quotedMatch = raw.match(/^\s*"([^"]+)"\s*<([^>]+)>\s*$/);
+  if (quotedMatch) {
+    return { name: quotedMatch[1].trim() || null, address: quotedMatch[2].trim() };
+  }
+  // Unquoted display name — match everything before '<', then the address inside '<...>'
+  // Uses [^<]+ and [^>]+ to avoid polynomial backtracking (ReDoS).
+  const unquotedMatch = raw.match(/^([^<]+)<([^>]+)>\s*$/);
+  if (unquotedMatch) {
+    return { name: unquotedMatch[1].trim() || null, address: unquotedMatch[2].trim() };
+  }
+  // Plain email address with no display name
+  return { name: null, address: raw.trim() };
+}
+
 const handler: ExportedHandler<Env> = {
   // ---------------------------------------------------------------------------
   // Cron Trigger: re-thread orphaned emails on a schedule
@@ -159,10 +184,7 @@ const handler: ExportedHandler<Env> = {
 
     // --- Step 5: Parse from_name and from_address ---
     // Resend returns from as "Display Name <email@example.com>" or just "email@example.com"
-    const fromRaw: string = receivedEmail.from ?? '';
-    const fromMatch = fromRaw.match(/^(.+?)\s*<(.+?)>$/);
-    const fromName = fromMatch ? fromMatch[1].trim() : null;
-    const fromAddress = fromMatch ? fromMatch[2].trim() : fromRaw.trim();
+    const { name: fromName, address: fromAddress } = parseFrom(receivedEmail.from ?? '');
 
     // Normalise `to` to a string regardless of whether the API returns a bare
     // string or an array — both branches are now handled explicitly.
