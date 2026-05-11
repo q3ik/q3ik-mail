@@ -81,7 +81,7 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
                     ? email.subject
                     : `Re: ${email.subject ?? ''}`,
                   replyToId: email.message_id ?? email.id,
-                  references: email.references ?? email.thread_id,
+                  references: email.references ?? undefined,
                 })
               }
             >

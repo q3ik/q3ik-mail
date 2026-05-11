@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS emails (
   body_html TEXT,
   message_id TEXT UNIQUE,            -- Header Message-ID for threading
   in_reply_to TEXT,                  -- Reference for threading
-  references TEXT,                   -- RFC 2822 References header (space-separated Message-ID chain)
+  "references" TEXT,                 -- RFC 2822 References header (space-separated Message-ID chain)
+                                     -- NOTE: no index added yet — column is stored only, not queried.
+                                     -- Add idx_emails_references if thread-reconstruction queries land.
   is_read INTEGER DEFAULT 0,         -- Boolean (0 or 1)
   is_sent INTEGER DEFAULT 0,         -- Distinguish inbound vs outbound
   needs_rethreading INTEGER DEFAULT 0, -- 1 if thread_id couldn't be resolved at ingest
