@@ -1,1 +1,243 @@
-aW1wb3J0ICogYXMgU2VudHJ5IGZyb20gJ0BzZW50cnkvY2xvdWRmbGFyZSc7CmltcG9ydCB7IFdlYmhvb2sgfSBmcm9tICdzdml4JzsKaW1wb3J0IHsgUmVzZW5kIH0gZnJvbSAncmVzZW5kJzsKaW1wb3J0IHsgcmVzb2x2ZU9ycGhhbmVkVGhyZWFkcyB9IGZyb20gJ0BxM2lrLW1haWwvZGF0YWJhc2UnOwppbXBvcnQgeyBwYXJzZUZyb20gfSBmcm9tICcuL3V0aWxzL3BhcnNlRnJvbSc7CgovLyBTaGFwZSBvZiB0aGUgUmVzZW5kIFJlY2VpdmluZyBBUEkgcmVzcG9uc2UgKHJlc2VuZCB2NCB0eXBlcyBvbWl0IHRoaXMgZW5kcG9pbnQpLgovLyBGaWVsZCBuYW1lcyB2ZXJpZmllZCBhZ2FpbnN0IGh0dHBzOi8vcmVzZW5kLmNvbS9kb2NzL2FwaS1yZWZlcmVuY2UvaW5ib3VuZAovLyBXaGVuIFJlc2VuZCBzaGlwcyBvZmZpY2lhbCB0eXBlcywgcmVwbGFjZSB0aGlzIGludGVyZmFjZSB3aXRoIHRoZSBwcm9wZXIgU0RLIGltcG9ydC4KLy8gVE9ETzogY29uZmlybSBgdGV4dGAgdnMgYGJvZHlfdGV4dGAgZmllbGQgbmFtZSBhZ2FpbnN0IGxpdmUgQVBJIG9uY2UgUmVzZW5kIGRvY3Mgc3RhYmlsaXNlLgppbnRlcmZhY2UgUmVzZW5kUmVjZWl2ZWRFbWFpbCB7CiAgZnJvbT86IHN0cmluZzsKICAvLyBSZXNlbmQgbWF5IHJldHVybiBhIHNpbmdsZSBhZGRyZXNzIHN0cmluZyBvciBhbiBhcnJheTsgbm9ybWFsaXNlIGRvd25zdHJlYW0uCiAgdG8/OiBzdHJpbmcgfCBzdHJpbmdbXTsKICBzdWJqZWN0Pzogc3RyaW5nOwogIHRleHQ/OiBzdHJpbmc7CiAgaHRtbD86IHN0cmluZzsKICBoZWFkZXJzPzogQXJyYXk8eyBuYW1lOiBzdHJpbmc7IHZhbHVlOiBzdHJpbmcgfT47Cn0KCi8vIEVudiBpbnRlcmZhY2UgLS0gbWF0Y2hlcyB3cmFuZ2xlci50b21sIGJpbmRpbmdzIGFuZCBzZWNyZXRzCi8vIERCIGlzIHRoZSBEMSBiaW5kaW5nOyBzZWNyZXRzIGFyZSBzZXQgdmlhIGB3cmFuZ2xlciBzZWNyZXQgcHV0YApleHBvcnQgaW50ZXJmYWNlIEVudiB7CiAgREI6IEQxRGF0YWJhc2U7CiAgUkVTRU5EX0FQSV9LRVk6IHN0cmluZzsKICBSRVNFTkRfV0VCSE9PS19TRUNSRVQ6IHN0cmluZzsKICBTRU5UUllfRFNOPzogc3RyaW5nOyAgICAgICAvLyBvcHRpb25hbCAtLSB3b3JrZXIgcnVucyB3aXRob3V0IFNlbnRyeSBpZiB1bnNldAogIEVOVklST05NRU5UOiBzdHJpbmc7ICAgICAgIC8vIHNldCBpbiB3cmFuZ2xlci50b21sIFt2YXJzXQp9Cgpjb25zdCBoYW5kbGVyOiBFeHBvcnRlZEhhbmRsZXI8RW52PiA9IHsKICAvLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQogIC8vIENyb24gVHJpZ2dlcjogcmUtdGhyZWFkIG9ycGhhbmVkIGVtYWlscyBvbiBhIHNjaGVkdWxlCiAgLy8gUmVwbGFjZXMgdGhlIGZvcm1lciAvYXBpL3JldGhyZWFkIEhUVFAgZW5kcG9pbnQgKGlzc3VlICMzMSkuCiAgLy8gUnVucyBldmVyeSA1IG1pbnV0ZXM7IHJlc29sdmVzIGVtYWlscyBmbGFnZ2VkIHdpdGggbmVlZHNfcmV0aHJlYWRpbmc9MS4KICAvLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQogIGFzeW5jIHNjaGVkdWxlZChfY29udHJvbGxlcjogU2NoZWR1bGVkQ29udHJvbGxlciwgZW52OiBFbnYsIGN0eDogRXhlY3V0aW9uQ29udGV4dCk6IFByb21pc2U8dm9pZD4gewogICAgY3R4LndhaXRVbnRpbCgKICAgICAgcmVzb2x2ZU9ycGhhbmVkVGhyZWFkcyhlbnYuREIpLnRoZW4oKHJlc29sdmVkKSA9PiB7CiAgICAgICAgaWYgKHJlc29sdmVkID4gMCkgewogICAgICAgICAgY29uc29sZS5sb2coYFtjcm9uL3JldGhyZWFkXSBSZXNvbHZlZCAke3Jlc29sdmVkfSBvcnBoYW5lZCB0aHJlYWQocykuYCk7CiAgICAgICAgfQogICAgICB9KS5jYXRjaCgoZXJyKSA9PiB7CiAgICAgICAgY29uc29sZS5lcnJvcignW2Nyb24vcmV0aHJlYWRdIHJlc29sdmVPcnBoYW5lZFRocmVhZHMgZmFpbGVkOicsIGVycik7CiAgICAgICAgaWYgKGVudi5TRU5UUllfRFNOKSB7CiAgICAgICAgICBTZW50cnkuY2FwdHVyZUV4Y2VwdGlvbihlcnIsIHsKICAgICAgICAgICAgdGFnczogeyBsYXllcjogJ3dvcmtlcicsIG9wZXJhdGlvbjogJ2Nyb24ucmV0aHJlYWQnIH0sCiAgICAgICAgICB9KTsKICAgICAgICB9CiAgICAgIH0pCiAgICApOwogIH0sCgogIC8vIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiAgLy8gRmV0Y2ggaGFuZGxlcjogaW5ib3VuZCBlbWFpbCB3ZWJob29rIGZyb20gUmVzZW5kCiAgLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KICBhc3luYyBmZXRjaChyZXF1ZXN0OiBSZXF1ZXN0LCBlbnY6IEVudik6IFByb21pc2U8UmVzcG9uc2U+IHsKICAgIC8vIE9ubHkgYWNjZXB0IFBPU1QgcmVxdWVzdHMKICAgIGlmIChyZXF1ZXN0Lm1ldGhvZCAhPT0gJ1BPU1QnKSB7CiAgICAgIHJldHVybiBuZXcgUmVzcG9uc2UoJ01ldGhvZCBOb3QgQWxsb3dlZCcsIHsgc3RhdHVzOiA0MDUgfSk7CiAgICB9CgogICAgLy8gUmVhZCByYXcgYm9keSBhcyB0ZXh0IEJFJ0ZPUkUgYW55IHBhcnNpbmcgLS0gcmVxdWlyZWQgZm9yIHNpZ25hdHVyZSB2ZXJpZmljYXRpb24KICAgIGNvbnN0IHJhd0JvZHkgPSBhd2FpdCByZXF1ZXN0LnRleHQoKTsKCiAgICAvLyAtLS0gU3RlcCAxOiBWZXJpZnkgd2ViaG9vayBzaWduYXR1cmUgdmlhIHN2aXggZGlyZWN0bHkgLS0tCiAgICBsZXQgZXZlbnQ6IHsgdHlwZTogc3RyaW5nOyBkYXRhOiB7IGVtYWlsX2lkOiBzdHJpbmcgfSB9OwogICAgdHJ5IHsKICAgICAgY29uc3Qgd2ggPSBuZXcgV2ViaG9vayhlbnYuUkVTRU5EX1dFQkhPT0tfU0VDUkVUKTsKICAgICAgZXZlbnQgPSB3aC52ZXJpZnkocmF3Qm9keSwgewogICAgICAgICdzdml4LWlkJzogcmVxdWVzdC5oZWFkZXJzLmdldCgnc3ZpeC1pZCcpID8/ICcnLAogICAgICAgICdzdml4LXRpbWVzdGFtcCc6IHJlcXVlc3QuaGVhZGVycy5nZXQoJ3N2aXgtdGltZXN0YW1wJykgPz8gJycsCiAgICAgICAgJ3N2aXgtc2lnbmF0dXJlJzogcmVxdWVzdC5oZWFkZXJzLmdldCgnc3ZpeC1zaWduYXR1cmUnKSA/PyAnJywKICAgICAgfSkgYXMgeyB0eXBlOiBzdHJpbmc7IGRhdGE6IHsgZW1haWxfaWQ6IHN0cmluZyB9IH07CiAgICB9IGNhdGNoIHsKICAgICAgLy8gU2lnbmF0dXJlIG1pc21hdGNoIG9yIG1pc3NpbmcgaGVhZGVycwogICAgICByZXR1cm4gbmV3IFJlc3BvbnNlKCdVbmF1dGhvcml6ZWQnLCB7IHN0YXR1czogNDAxIH0pOwogICAgfQoKICAgIC8vIC0tLSBTdGVwIDI6IE9ubHkgcHJvY2VzcyBlbWFpbC5yZWNlaXZlZCBldmVudHMgLS0tCiAgICBpZiAoZXZlbnQudHlwZSAhPT0gJ2VtYWlsLnJlY2VpdmVkJykgewogICAgICAvLyBBY2tub3dsZWRnZSBvdGhlciBldmVudCB0eXBlcyB3aXRob3V0IHByb2Nlc3NpbmcKICAgICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnT0snLCB7IHN0YXR1czogMjAwIH0pOwogICAgfQoKICAgIGNvbnN0IGVtYWlsSWQgPSBldmVudC5kYXRhLmVtYWlsX2lkOwoKICAgIGNvbnN0IHJlc2VuZCA9IG5ldyBSZXNlbmQoZW52LlJFU0VORF9BUElfS0VZKTsKCiAgICAvLyAtLS0gU3RlcCAzOiBGZXRjaCBmdWxsIGVtYWlsIHBheWxvYWQgZnJvbSBSZXNlbmQgUmVjZWl2aW5nIEFQSSAtLS0KICAgIC8vIHJlc2VuZCB2NCB0eXBlcyBkb24ndCB5ZXQgaW5jbHVkZSBlbWFpbHMucmVjZWl2aW5nOyBjYXN0IHRocm91Z2ggdW5rbm93biB0byBjYWxsIGl0CiAgICAvLyBhbmQgYXNzZXJ0IHRoZSBleHBlY3RlZCBzaGFwZSBzbyBhbGwgZG93bnN0cmVhbSBmaWVsZCBhY2Nlc3NlcyBhcmUgdHlwZS1jaGVja2VkLgogICAgbGV0IHJlY2VpdmVkRW1haWw6IFJlc2VuZFJlY2VpdmVkRW1haWw7CiAgICB0cnkgewogICAgICAvLyBVc2UgcmVzZW5kLmVtYWlscy5yZWNlaXZpbmcuZ2V0KCkgLS0gTk9UIHJlc2VuZC5lbWFpbHMuZ2V0KCkKICAgICAgLy8gcmVzZW5kLmVtYWlscy5nZXQoKSBpcyBmb3Igc2VudCBtYWlsOyByZWNlaXZpbmcuZ2V0KCkgaXMgZm9yIGluYm91bmQKICAgICAgcmVjZWl2ZWRFbWFpbCA9IGF3YWl0IChyZXNlbmQuZW1haWxzIGFzIHVua25vd24gYXMgeyByZWNlaXZpbmc6IHsgZ2V0OiAoaWQ6IHN0cmluZykgPT4gUHJvbWlzZTxSZXNlbmRSZWNlaXZlZEVtYWlsPiB9IH0pLnJlY2VpdmluZy5nZXQoZW1haWxJZCk7CiAgICB9IGNhdGNoIChlcnIpIHsKICAgICAgaWYgKGVudi5TRU5UUllfRFNOKSB7CiAgICAgICAgU2VudHJ5LmNhcHR1cmVFeGNlcHRpb24oZXJyLCB7CiAgICAgICAgICB0YWdzOiB7IGxheWVyOiAnd29ya2VyJywgb3BlcmF0aW9uOiAncmVzZW5kLnJlY2VpdmluZy5nZXQnIH0sCiAgICAgICAgICBleHRyYTogeyBlbWFpbElkIH0sCiAgICAgICAgfSk7CiAgICAgIH0KICAgICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnRmFpbGVkIHRvIGZldGNoIGVtYWlsIHBheWxvYWQnLCB7IHN0YXR1czogNTAyIH0pOwogICAgfQoKICAgIC8vIC0tLSBSdW50aW1lIHNoYXBlIGd1YXJkIC0tLQogICAgLy8gVGhlIEFQSSByZXNwb25zZSBpcyBjYXN0IGZyb20gYGFueWA7IHZhbGlkYXRlIHRoZSBtaW5pbXVtIHJlcXVpcmVkIHNoYXBlCiAgICAvLyBiZWZvcmUgcHJvY2VlZGluZyBzbyB0aGF0IEFQSSB3aWxsIHN1cmZhY2UgaW1tZWRpYXRlbHkgYXMgYSA1MDIgcmF0aGVyCiAgICAvLyB0aGFuIHNpbGVudGx5IHdyaXRpbmcgbnVsbHMgaW50byBEMS4KICAgIGlmICghcmVjZWl2ZWRFbWFpbCB8fCB0eXBlb2YgcmVjZWl2ZWRFbWFpbCAhPT0gJ29iamVjdCcpIHsKICAgICAgY29uc29sZS5lcnJvcignW3dvcmtlcl0gUmVzZW5kIHJlY2VpdmluZyBBUEkgcmV0dXJuZWQgdW5leHBlY3RlZCBwYXlsb2FkIHR5cGU6JywgdHlwZW9mIHJlY2VpdmVkRW1haWwpOwogICAgICByZXR1cm4gbmV3IFJlc3BvbnNlKCdJbnZhbGlkIGVtYWlsIHBheWxvYWQgZnJvbSB1cHN0cmVhbScsIHsgc3RhdHVzOiA1MDIgfSk7CiAgICB9CgogICAgLy8gLS0tIFN0ZXAgNDogVGhyZWFkaW5nIGxvZ2ljIC0tLQogICAgLy8gUGFyc2UgaGVhZGVycyBhcnJheSBmb3IgSW4tUmVwbHktVG8gYW5kIE1lc3NhZ2UtSUQKICAgIGNvbnN0IGVtYWlsSGVhZGVyczogQXJyYXk8eyBuYW1lOiBzdHJpbmc7IHZhbHVlOiBzdHJpbmcgfT4gPSByZWNlaXZlZEVtYWlsLmhlYWRlcnMgPz8gW107CgogICAgY29uc3QgaW5SZXBseVRvID0gZW1haWxIZWFkZXJzLmZpbmQoCiAgICAgIChoKSA9PiBoLm5hbWUudG9Mb3dlckNhc2UoKSA9PT0gJ2luLXJlcGx5LXRvJwogICAgKT8udmFsdWUgPz8gbnVsbDsKCiAgICBjb25zdCBtZXNzYWdlSWQgPSBlbWFpbEhlYWRlcnMuZmluZCgKICAgICAgKGgpID0+IGgubmFtZS50b0xvd2VyQ2FzZSgpID09PSAnbWVzc2FnZS1pZCcKICAgICk/LnZhbHVlID8/IG51bGw7CgogICAgY29uc3QgcmVmZXJlbmNlc0hlYWRlciA9IChlbWFpbEhlYWRlcnMuZmluZCgKICAgICAgKGgpID0+IGgubmFtZS50b0xvd2VyQ2FzZSgpID09PSAncmVmZXJlbmNlcycKICAgICk/LnZhbHVlID8/IG51bGwpCiAgICAgIC8vIE5vcm1hbGlzZSBmb2xkZWQgd2hpdGVzcGFjZSAoQ1JMRiArIFdTUCkgaW50byBzaW5nbGUgc3BhY2VzIHNvCiAgICAgIC8vIGRvd25zdHJlYW0gY29uc3VtZXJzIHJlY2VpdmUgYSBjbGVhbiBzcGFjZS1zZXBhcmF0ZWQgTWVzc2FnZS1JRCBjaGFpbi4KICAgICAgPy5yZXBsYWNlKC9ccysvZywgJyAnKS50cmltKCkgPz8gbnVsbDsKCiAgICAvLyBGaXg6IExvb2sgdXAgdGhlIHBhcmVudCBlbWFpbCdzIHRocmVhZF9pZCBmcm9tIEQxIHVzaW5nIHRoZSBJbi1SZXBseS1UbwogICAgLy8gTWVzc2FnZS1JRC4gVGhpcyBlbnN1cmVzIG11bHRpLWxldmVsIHJlcGx5IGNoYWlucyBhbGwgc2hhcmUgdGhlIHNhbWUKICAgIC8vIHJvb3QgdGhyZWFkX2lkLCByYXRoZXIgdGhhbiBlYWNoIHJlcGx5IGZvcmtpbmcgaW50byBpdHMgb3duIHRocmVhZC4KICAgIC8vCiAgICAvLyBTdHJhdGVneToKICAgIC8vICAgMS4gSWYgaW5SZXBseVRvIGlzIHNldCwgcXVlcnkgZW1haWxzIFdIRVJFIG1lc3NhZ2VfaWQgPSBpblJlcGx5VG8KICAgIC8vICAgMi4gSWYgYSBwYXJlbnQgcm93IGlzIGZvdW5kLCByZXVzZSBpdHMgdGhyZWFkX2lkIChtYXkgaXRzZWxmIGJlIGEgcmVwbHkpCiAgICAvLyAgIDMuIElmIG5vIHBhcmVudCBmb3VuZCAob3V0LW9mLW9yZGVyIGRlbGl2ZXJ5KSwgdXNlIGluUmVwbHlUbyBhcyB0aHJlYWRfaWQKICAgIC8vICAgICAgYW5kIGZsYWcgZm9yIHJlLXRocmVhZGluZyBvbmNlIHRoZSBwYXJlbnQgYXJyaXZlcwogICAgLy8gICA0LiBOZXcgbWVzc2FnZXMgKG5vIGluUmVwbHlUbykgc3RhcnQgYSBuZXcgdGhyZWFkIGtleWVkIG9uIG1lc3NhZ2VJZCA/PyBlbWFpbElkCiAgICBsZXQgdGhyZWFkSWQ6IHN0cmluZzsKICAgIGxldCBuZWVkc1JldGhyZWFkaW5nID0gMDsKICAgIGlmIChpblJlcGx5VG8pIHsKICAgICAgY29uc3QgcGFyZW50Um93ID0gYXdhaXQgZW52LkRCCiAgICAgICAgLnByZXBhcmUoJ1NFTEVDVCB0aHJlYWRfaWQgRlJPTSBlbWFpbHMgV0hFUkUgbWVzc2FnZV9pZCA9ID8gTElNSVQgMScpCiAgICAgICAgLmJpbmQoaW5SZXBseVRvKQogICAgICAgIC5maXJzdDx7IHRocmVhZF9pZDogc3RyaW5nIH0+KCk7CiAgICAgIGlmIChwYXJlbnRSb3cpIHsKICAgICAgICAvLyBQYXJlbnQgZm91bmQgLS0gam9pbiBleGlzdGluZyB0aHJlYWQKICAgICAgICB0aHJlYWRJZCA9IHBhcmVudFJvdy50aHJlYWRfaWQ7CiAgICAgIH0gZWxzZSB7CiAgICAgICAgLy8gUGFyZW50IG5vdCB5ZXQgcmVjZWl2ZWQgLS0gdXNlIEluLVJlcGx5LVRvIHZhbHVlIGFzIHRocmVhZF9pZCBmb3Igbm93CiAgICAgICAgLy8gYW5kIGZsYWcgZm9yIHJlLXRocmVhZGluZyBvbmNlIHRoZSBwYXJlbnQgYXJyaXZlcwogICAgICAgIHRocmVhZElkID0gaW5SZXBseVRvOwogICAgICAgIG5lZWRzUmV0aHJlYWRpbmcgPSAxOwogICAgICAgIGNvbnNvbGUud2FybihgW3RocmVhZGluZ10gUGFyZW50IG5vdCBmb3VuZCBmb3IgSW4tUmVwbHktVG86ICR7aW5SZXBseVRvfS4gRmxhZ2dlZCBmb3IgcmUtdGhyZWFkaW5nLmApOwogICAgICB9CiAgICB9IGVsc2UgewogICAgICAvLyBSb290IG1lc3NhZ2UgLS0gc3RhcnQgYSBuZXcgdGhyZWFkCiAgICAgIHRocmVhZElkID0gbWVzc2FnZUlkID8/IGVtYWlsSWQ7CiAgICB9CgogICAgLy8gLS0tIFN0ZXAgNTogUGFyc2UgZnJvbV9uYW1lIGFuZCBmcm9tX2FkZHJlc3MgLS0tCiAgICAvLyBSZXNlbmQgcmV0dXJucyBmcm9tIGFzICJEaXNwbGF5IE5hbWUgPGVtYWlsQGV4YW1wbGUuY29tPiIgb3IganVzdCAiZW1haWxAZXhhbXBsZS5jb20iCiAgICBjb25zdCB7IG5hbWU6IGZyb21OYW1lLCBhZGRyZXNzOiBmcm9tQWRkcmVzcyB9ID0gcGFyc2VGcm9tKHJlY2VpdmVkRW1haWwuZnJvbSA/PyAnJyk7CgogICAgLy8gR3VhcmQ6IGEgbWlzc2luZyBvciB1bnBhcnNlYWJsZSBmcm9tIGZpZWxkIG11c3Qgbm90IHNpbGVudGx5IHdyaXRlIGFuIGVtcHR5CiAgICAvLyBzdHJpbmcgaW50byB0aGUgTk9UIE5VTEwgZnJvbV9hZGRyZXNzIGNvbHVtbiAtLSByZWplY3QgdGhlIHdlYmhvb2sgaW5zdGVhZC4KICAgIGlmICghZnJvbUFkZHJlc3MpIHsKICAgICAgY29uc29sZS53YXJuKCdbd29ya2VyXSBSZWNlaXZlZCBlbWFpbCB3aXRoIG1pc3Npbmcgb3IgdW5wYXJzZWFibGUgZnJvbSBhZGRyZXNzOyByZWplY3RpbmcuJywgeyBlbWFpbElkIH0pOwogICAgICByZXR1cm4gbmV3IFJlc3BvbnNlKCdNaXNzaW5nIGZyb20gYWRkcmVzcycsIHsgc3RhdHVzOiA0MDAgfSk7CiAgICB9CgogICAgLy8gTm9ybWFsaXNlIGB0b2AgdG8gYSBzdHJpbmcgcmVnYXJkbGVzcyBvZiB3aGV0aGVyIHRoZSBBUEkgcmV0dXJucyBhIGJhcmUKICAgIC8vIHN0cmluZyBvciBhbiBhcnJheSAtLSBib3RoIGJyYW5jaGVzIGFyZSBub3cgaGFuZGxlZCBleHBsaWNpdGx5LgogICAgY29uc3QgdG9SYXcgPSByZWNlaXZlZEVtYWlsLnRvOwogICAgY29uc3QgdG9BZGRyZXNzID0gQXJyYXkuaXNBcnJheSh0b1JhdykKICAgICAgPyB0b1Jhdy5qb2luKCcsICcpCiAgICAgIDogKHR5cGVvZiB0b1JhdyA9PT0gJ3N0cmluZycgPyB0b1JhdyA6ICcnKTsKCiAgICAvLyAtLS0gU3RlcCA2OiBQZXJzaXN0IHRvIEQxIC0tLQogICAgLy8gSU5TRVJUIE9SIElHTk9SRTogUmVzZW5kIGd1YXJhbnRlZXMgYXQtbGVhc3Qtb25jZSBkZWxpdmVyeSwgc28gZHVwbGljYXRlCiAgICAvLyB3ZWJob29rIGRlbGl2ZXJpZXMgYXJlIGV4cGVjdGVkLiBJR05PUkUgc2lsZW50bHkgc2tpcHMgdGhlIGVudGlyZSByb3cgaWYKICAgIC8vIHJlc2VuZF9pZCBvciBtZXNzYWdlX2lkIGFscmVhZHkgZXhpc3RzLiBUaGlzIGlzIGludGVudGlvbmFsIC0tIHRoZSBmaXJzdAogICAgLy8gaW5nZXN0aW9uIHdpbnMgYW5kIHN1YnNlcXVlbnQgZHVwbGljYXRlcyBhcmUgZGlzY2FyZGVkLiBJZiBpZGVtcG90ZW50CiAgICAvLyB1cHNlcnQgc2VtYW50aWNzIGFyZSBldmVyIG5lZWRlZCwgcmVwbGFjZSB3aXRoIElOU0VSVCBPUiBSRVBMQUNFIG9yIGFkZAogICAgLy8gYW4gT04gQ09ORkxJQ1QgRE8gVVBEQVRFIGNsYXVzZS4KICAgIC8vCiAgICAvLyBDb2x1bW4gb3JkZXIgaW4gdGhlIElOU0VSVCBhbmQgLmJpbmQoKSBhcmUga2VwdCBpbiBzeW5jOgogICAgLy8gICAxMyBib3VuZCA/IHBsYWNlaG9sZGVycyArIDIgbGl0ZXJhbCAwcyAoaXNfcmVhZCwgaXNfc2VudCkgPSAxNSBjb2x1bW5zLgogICAgLy8gICBBbGwgMTMgYm91bmQgYXJncyBiZWxvdyBtYXAgMS0xIHRvIHRoZSAxMyBgP2AgcGxhY2Vob2xkZXJzLgogICAgdHJ5IHsKICAgICAgYXdhaXQgZW52LkRCLnByZXBhcmUoYAogICAgICAgIElOU0VSVCBPUiBJR05PUkUgSU5UTyBlbWFpbHMKICAgICAgICAgIChpZCwgcmVzZW5kX2lkLCB0aHJlYWRfaWQsIGZyb21fYWRkcmVzcywgZnJvbV9uYW1lLCB0b19hZGRyZXNzLCBzdWJqZWN0LCBib2R5X3RleHQsIGJvZHlfaHRtbCwgbWVzc2FnZV9pZCwgaW5fcmVwbHlfdG8sICJyZWZlcmVuY2VzIiwgaXNfcmVhZCwgaXNfc2VudCwgbmVlZHNfcmV0aHJlYWRpbmcpCiAgICAgICAgVkFMVUVTCiAgICAgICAgICAoPywgPywgPywgPywgPywgPywgPywgPywgPywgPywgPywgPywgMCwgMCwgPykKICAgICAgYCkKICAgICAgICAuYmluZCgKICAgICAgICAgIGNyeXB0by5yYW5kb21VVUlEKCksICAgICAgICAvLyBpZAogICAgICAgICAgZW1haWxJZCwgICAgICAgICAgICAgICAgICAgIC8vIHJlc2VuZF9pZAogICAgICAgICAgdGhyZWFkSWQsICAgICAgICAgICAgICAgICAgIC8vIHRocmVhZF9pZCAobG9va2VkIHVwIG9yIG5ldykKICAgICAgICAgIGZyb21BZGRyZXNzLCAgICAgICAgICAgICAgICAvLyBmcm9tX2FkZHJlc3MKICAgICAgICAgIGZyb21OYW1lLCAgICAgICAgICAgICAgICAgICAvLyBmcm9tX25hbWUgKG51bGxhYmxlKQogICAgICAgICAgdG9BZGRyZXNzLCAgICAgICAgICAgICAgICAgIC8vIHRvX2FkZHJlc3MKICAgICAgICAgIHJlY2VpdmVkRW1haWwuc3ViamVjdCA/PyBudWxsLAogICAgICAgICAgcmVjZWl2ZWRFbWFpbC50ZXh0ID8/IG51bGwsCiAgICAgICAgICByZWNlaXZlZEVtYWlsLmh0bWwgPz8gbnVsbCwKICAgICAgICAgIG1lc3NhZ2VJZCwgICAgICAgICAgICAgICAgICAvLyBtZXNzYWdlX2lkIChudWxsYWJsZSkKICAgICAgICAgIGluUmVwbHlUbywgICAgICAgICAgICAgICAgICAvLyBpbl9yZXBseV90byAobnVsbGFibGUpCiAgICAgICAgICByZWZlcmVuY2VzSGVhZGVyLCAgICAgICAgICAgLy8gcmVmZXJlbmNlcyAobnVsbGFibGUpCiAgICAgICAgICBuZWVkc1JldGhyZWFkaW5nLCAgICAgICAgICAgLy8gbmVlZHNfcmV0aHJlYWRpbmcgKDAgb3IgMSkKICAgICAgICApCiAgICAgICAgLnJ1bigpOwogICAgfSBjYXRjaCAoZXJyKSB7CiAgICAgIGlmIChlbnYuU0VOVFJZX0RTTikgewogICAgICAgIFNlbnRyeS5jYXB0dXJlRXhjZXB0aW9uKGVyciwgewogICAgICAgICAgdGFnczogeyBsYXllcjogJ3dvcmtlcicsIG9wZXJhdGlvbjogJ2RiLmluc2VydCcgfSwKICAgICAgICAgIGV4dHJhOiB7IGVtYWlsSWQgfSwKICAgICAgICB9KTsKICAgICAgfQogICAgICByZXR1cm4gbmV3IFJlc3BvbnNlKCdEYXRhYmFzZSBlcnJvcicsIHsgc3RhdHVzOiA1MDAgfSk7CiAgICB9CgogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnT0snLCB7IHN0YXR1czogMjAwIH0pOwogIH0sCn0gc2F0aXNmaWVzIEV4cG9ydGVkSGFuZGxlcjxFbnY+OwoKZXhwb3J0IGRlZmF1bHQgU2VudHJ5LndpdGhTZW50cnkoCiAgKGVudjogRW52KSA9PiBlbnYuU0VOVFJZX0RTTgogICAgPyB7CiAgICAgICAgZHNuOiBlbnYuU0VOVFJZX0RTTiwKICAgICAgICB0cmFjZXNTYW1wbGVSYXRlOiAwLjIsCiAgICAgICAgZW52aXJvbm1lbnQ6IGVudi5FTlZJUk9OTUVOVCA/PyAncHJvZHVjdGlvbicsCiAgICAgIH0KICAgIDogdW5kZWZpbmVkLAogIGhhbmRsZXIsCik7Cg==
+import * as Sentry from '@sentry/cloudflare';
+import { Webhook } from 'svix';
+import { Resend } from 'resend';
+import { resolveOrphanedThreads } from '@q3ik-mail/database';
+import { parseFrom } from './utils/parseFrom';
+
+// Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
+// Field names verified against https://resend.com/docs/api-reference/inbound
+// When Resend ships official types, replace this interface with the proper SDK import.
+// TODO: confirm `text` vs `body_text` field name against live API once Resend docs stabilise.
+interface ResendReceivedEmail {
+  from?: string;
+  // Resend may return a single address string or an array; normalise downstream.
+  to?: string | string[];
+  subject?: string;
+  text?: string;
+  html?: string;
+  headers?: Array<{ name: string; value: string }>;
+}
+
+// Env interface -- matches wrangler.toml bindings and secrets
+// DB is the D1 binding; secrets are set via `wrangler secret put`
+export interface Env {
+  DB: D1Database;
+  RESEND_API_KEY: string;
+  RESEND_WEBHOOK_SECRET: string;
+  SENTRY_DSN?: string;       // optional -- worker runs without Sentry if unset
+  ENVIRONMENT: string;       // set in wrangler.toml [vars]
+}
+
+const handler: ExportedHandler<Env> = {
+  // --------------------------------------------------------------------------
+  // Cron Trigger: re-thread orphaned emails on a schedule
+  // Replaces the former /api/rethread HTTP endpoint (issue #31).
+  // Runs every 5 minutes; resolves emails flagged with needs_rethreading=1.
+  // --------------------------------------------------------------------------
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      resolveOrphanedThreads(env.DB).then((resolved) => {
+        if (resolved > 0) {
+          console.log(`[cron/rethread] Resolved ${resolved} orphaned thread(s).`);
+        }
+      }).catch((err) => {
+        console.error('[cron/rethread] resolveOrphanedThreads failed:', err);
+        if (env.SENTRY_DSN) {
+          Sentry.captureException(err, {
+            tags: { layer: 'worker', operation: 'cron.rethread' },
+          });
+        }
+      })
+    );
+  },
+
+  // --------------------------------------------------------------------------
+  // Fetch handler: inbound email webhook from Resend
+  // --------------------------------------------------------------------------
+  async fetch(request: Request, env: Env): Promise<Response> {
+    // Only accept POST requests
+    if (request.method !== 'POST') {
+      return new Response('Method Not Allowed', { status: 405 });
+    }
+
+    // Read raw body as text BE'FORE any parsing -- required for signature verification
+    const rawBody = await request.text();
+
+    // --- Step 1: Verify webhook signature via svix directly ---
+    let event: { type: string; data: { email_id: string } };
+    try {
+      const wh = new Webhook(env.RESEND_WEBHOOK_SECRET);
+      event = wh.verify(rawBody, {
+        'svix-id': request.headers.get('svix-id') ?? '',
+        'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
+        'svix-signature': request.headers.get('svix-signature') ?? '',
+      }) as { type: string; data: { email_id: string } };
+    } catch {
+      // Signature mismatch or missing headers
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    // --- Step 2: Only process email.received events ---
+    if (event.type !== 'email.received') {
+      // Acknowledge other event types without processing
+      return new Response('OK', { status: 200 });
+    }
+
+    const emailId = event.data.email_id;
+
+    const resend = new Resend(env.RESEND_API_KEY);
+
+    // --- Step 3: Fetch full email payload from Resend Receiving API ---
+    // resend v4 types don't yet include emails.receiving; cast through unknown to call it
+    // and assert the expected shape so all downstream field accesses are type-checked.
+    let receivedEmail: ResendReceivedEmail;
+    try {
+      // Use resend.emails.receiving.get() -- NOT resend.emails.get()
+      // resend.emails.get() is for sent mail; receiving.get() is for inbound
+      receivedEmail = await (resend.emails as unknown as { receiving: { get: (id: string) => Promise<ResendReceivedEmail> } }).receiving.get(emailId);
+    } catch (err) {
+      if (env.SENTRY_DSN) {
+        Sentry.captureException(err, {
+          tags: { layer: 'worker', operation: 'resend.receiving.get' },
+          extra: { emailId },
+        });
+      }
+      return new Response('Failed to fetch email payload', { status: 502 });
+    }
+
+    // --- Runtime shape guard ---
+    // The API response is cast from `any`; validate the minimum required shape
+    // before proceeding so that API will surface immediately as a 502 rather
+    // than silently writing nulls into D1.
+    if (!receivedEmail || typeof receivedEmail !== 'object') {
+      console.error('[worker] Resend receiving API returned unexpected payload type:', typeof receivedEmail);
+      return new Response('Invalid email payload from upstream', { status: 502 });
+    }
+
+    // --- Step 4: Threading logic ---
+    // Parse headers array for In-Reply-To and Message-ID
+    const emailHeaders: Array<{ name: string; value: string }> = receivedEmail.headers ?? [];
+
+    const inReplyTo = emailHeaders.find(
+      (h) => h.name.toLowerCase() === 'in-reply-to'
+    )?.value ?? null;
+
+    const messageId = emailHeaders.find(
+      (h) => h.name.toLowerCase() === 'message-id'
+    )?.value ?? null;
+
+    const referencesHeader = (emailHeaders.find(
+      (h) => h.name.toLowerCase() === 'references'
+    )?.value ?? null)
+      // Normalise folded whitespace (CRLF + WSP) into single spaces so
+      // downstream consumers receive a clean space-separated Message-ID chain.
+      ?.replace(/\s+/g, ' ').trim() ?? null;
+
+    // Fix: Look up the parent email's thread_id from D1 using the In-Reply-To
+    // Message-ID. This ensures multi-level reply chains all share the same
+    // root thread_id, rather than each reply forking into its own thread.
+    //
+    // Strategy:
+    //   1. If inReplyTo is set, query emails WHERE message_id = inReplyTo
+    //   2. If a parent row is found, reuse its thread_id (may itself be a reply)
+    //   3. If no parent found (out-of-order delivery), use inReplyTo as thread_id
+    //      and flag for re-threading once the parent arrives
+    //   4. New messages (no inReplyTo) start a new thread keyed on messageId ?? emailId
+    let threadId: string;
+    let needsRethreading = 0;
+    if (inReplyTo) {
+      const parentRow = await env.DB
+        .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
+        .bind(inReplyTo)
+        .first<{ thread_id: string }>();
+      if (parentRow) {
+        // Parent found -- join existing thread
+        threadId = parentRow.thread_id;
+      } else {
+        // Parent not yet received -- use In-Reply-To value as thread_id for now
+        // and flag for re-threading once the parent arrives
+        threadId = inReplyTo;
+        needsRethreading = 1;
+        console.warn(`[threading] Parent not found for In-Reply-To: ${inReplyTo}. Flagged for re-threading.`);
+      }
+    } else {
+      // Root message -- start a new thread
+      threadId = messageId ?? emailId;
+    }
+
+    // --- Step 5: Parse from_name and from_address ---
+    // Resend returns from as "Display Name <email@example.com>" or just "email@example.com"
+    const { name: fromName, address: fromAddress } = parseFrom(receivedEmail.from ?? '');
+
+    // Guard: a missing or unparseable from field must not silently write an empty
+    // string into the NOT NULL from_address column -- reject the webhook instead.
+    if (!fromAddress) {
+      console.warn('[worker] Received email with missing or unparseable from address; rejecting.', { emailId });
+      return new Response('Missing from address', { status: 400 });
+    }
+
+    // Normalise `to` to a string regardless of whether the API returns a bare
+    // string or an array -- both branches are now handled explicitly.
+    const toRaw = receivedEmail.to;
+    const toAddress = Array.isArray(toRaw)
+      ? toRaw.join(', ')
+      : (typeof toRaw === 'string' ? toRaw : '');
+
+    // --- Step 6: Persist to D1 ---
+    // INSERT OR IGNORE: Resend guarantees at-least-once delivery, so duplicate
+    // webhook deliveries are expected. IGNORE silently skips the entire row if
+    // resend_id or message_id already exists. This is intentional -- the first
+    // ingestion wins and subsequent duplicates are discarded. If idempotent
+    // upsert semantics are ever needed, replace with INSERT OR REPLACE or add
+    // an ON CONFLICT DO UPDATE clause.
+    //
+    // Column order in the INSERT and .bind() are kept in sync:
+    //   13 bound ? placeholders + 2 literal 0s (is_read, is_sent) = 15 columns.
+    //   All 13 bound args below map 1-1 to the 13 `?` placeholders.
+    try {
+      await env.DB.prepare(`
+        INSERT OR IGNORE INTO emails
+          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+      `)
+        .bind(
+          crypto.randomUUID(),        // id
+          emailId,                    // resend_id
+          threadId,                   // thread_id (looked up or new)
+          fromAddress,                // from_address
+          fromName,                   // from_name (nullable)
+          toAddress,                  // to_address
+          receivedEmail.subject ?? null,
+          receivedEmail.text ?? null,
+          receivedEmail.html ?? null,
+          messageId,                  // message_id (nullable)
+          inReplyTo,                  // in_reply_to (nullable)
+          referencesHeader,           // references (nullable)
+          needsRethreading,           // needs_rethreading (0 or 1)
+        )
+        .run();
+    } catch (err) {
+      if (env.SENTRY_DSN) {
+        Sentry.captureException(err, {
+          tags: { layer: 'worker', operation: 'db.insert' },
+          extra: { emailId },
+        });
+      }
+      return new Response('Database error', { status: 500 });
+    }
+
+    return new Response('OK', { status: 200 });
+  },
+} satisfies ExportedHandler<Env>;
+
+export default Sentry.withSentry(
+  (env: Env) => env.SENTRY_DSN
+    ? {
+        dsn: env.SENTRY_DSN,
+        tracesSampleRate: 0.2,
+        environment: env.ENVIRONMENT ?? 'production',
+      }
+    : undefined,
+  handler,
+);
