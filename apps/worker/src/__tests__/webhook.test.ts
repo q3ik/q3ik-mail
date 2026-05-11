@@ -50,7 +50,6 @@ const mockEnv = {
 const mockCtx = {
   waitUntil: vi.fn(),
   passThroughOnException: vi.fn(),
-  props: undefined,
 } as unknown as ExecutionContext;
 
 function makeRequest(body: string, headers: Record<string, string> = {}) {
