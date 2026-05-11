@@ -145,6 +145,9 @@ export async function POST(req: NextRequest) {
         sentMessageId
       );
 
+      // Keep the INSERT column list aligned with the bound values below:
+      // `is_read` and `is_sent` are intentional literals because sent mail
+      // should always be persisted as read + outbound.
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
           (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
