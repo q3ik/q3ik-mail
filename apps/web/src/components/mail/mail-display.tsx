@@ -5,12 +5,6 @@ import type { Email } from '@q3ik-mail/database';
 import { ReplyIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import type { ComposePayload } from '@/components/mail/compose-dialog';
 
 const sanitizeOptions = {
@@ -81,42 +75,32 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
         <div className="flex items-center gap-2">
           <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
           {onReply && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  {/* span wrapper required: disabled buttons swallow pointer events,
-                      preventing Tooltip from firing on hover */}
-                  <span tabIndex={canReply ? undefined : 0}>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="shrink-0"
-                      disabled={!canReply}
-                      aria-disabled={!canReply}
-                      onClick={() =>
-                        canReply &&
-                        onReply({
-                          to: email.from_address,
-                          subject: email.subject?.startsWith('Re: ')
-                            ? email.subject
-                            : `Re: ${email.subject ?? ''}`,
-                          replyToId: email.message_id!,
-                          references: email.references ?? undefined,
-                        })
-                      }
-                    >
-                      <ReplyIcon className="h-4 w-4 mr-1" />
-                      Reply
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                {!canReply && (
-                  <TooltipContent>
-                    Cannot reply — this email has no Message-ID
-                  </TooltipContent>
-                )}
-              </Tooltip>
-            </TooltipProvider>
+            <span
+              tabIndex={canReply ? undefined : 0}
+              title={!canReply ? 'Cannot reply — this email has no Message-ID' : undefined}
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0"
+                disabled={!canReply}
+                aria-disabled={!canReply}
+                onClick={() =>
+                  canReply &&
+                  onReply({
+                    to: email.from_address,
+                    subject: email.subject?.startsWith('Re: ')
+                      ? email.subject
+                      : `Re: ${email.subject ?? ''}`,
+                    replyToId: email.message_id!,
+                    references: email.references ?? undefined,
+                  })
+                }
+              >
+                <ReplyIcon className="h-4 w-4 mr-1" />
+                Reply
+              </Button>
+            </span>
           )}
         </div>
       </div>

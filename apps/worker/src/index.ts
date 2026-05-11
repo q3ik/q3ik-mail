@@ -125,9 +125,12 @@ const handler: ExportedHandler<Env> = {
       (h) => h.name.toLowerCase() === 'message-id'
     )?.value ?? null;
 
-    const referencesHeader = emailHeaders.find(
+    const referencesHeader = (emailHeaders.find(
       (h) => h.name.toLowerCase() === 'references'
-    )?.value ?? null;
+    )?.value ?? null)
+      // Normalise folded whitespace (CRLF + WSP) into single spaces so
+      // downstream consumers receive a clean space-separated Message-ID chain.
+      ?.replace(/\s+/g, ' ').trim() ?? null;
 
     // Fix: Look up the parent email's thread_id from D1 using the In-Reply-To
     // Message-ID. This ensures multi-level reply chains all share the same
@@ -176,6 +179,12 @@ const handler: ExportedHandler<Env> = {
       : (typeof toRaw === 'string' ? toRaw : '');
 
     // --- Step 6: Persist to D1 ---
+    // INSERT OR IGNORE: Resend guarantees at-least-once delivery, so duplicate
+    // webhook deliveries are expected. IGNORE silently skips the entire row if
+    // resend_id or message_id already exists. This is intentional — the first
+    // ingestion wins and subsequent duplicates are discarded. If idempotent
+    // upsert semantics are ever needed, replace with INSERT OR REPLACE or add
+    // an ON CONFLICT DO UPDATE clause.
     try {
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
