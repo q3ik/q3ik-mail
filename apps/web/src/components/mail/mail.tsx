@@ -66,17 +66,23 @@ export function Mail({ threads: initialThreads, selectedThread, defaultSelectedI
       );
     });
 
-    // Persist the DB writes after UI is already updated. Use allSettled so
-    // individual failures are tracked: only revert the optimistic is_read update
-    // when at least one write failed (preserving correctly-read emails in the DB).
+    // Persist the DB writes after the UI is already updated.
+    // Non-blocking: this .then() callback runs after handleSelectThread returns
+    // and the component may have unmounted by the time it executes. Calling
+    // setThreads on an unmounted component in React 18+ is a safe no-op.
+    // Per-email tracking: allSettled preserves the optimistic update for emails
+    // that were successfully written; only a batch with ≥1 failure triggers a
+    // thread-level revert (the thread list holds one EmailSummary per thread,
+    // so a coarser thread-level revert is the correct granularity here).
     const unreadIds = emails.filter((e) => e.is_read === 0).map((e) => e.id);
     if (unreadIds.length > 0) {
       Promise.allSettled(unreadIds.map((id) => markEmailAsRead(id))).then((results) => {
-        const failedIds = new Set(
-          unreadIds.filter((_, i) => results[i].status === 'rejected')
-        );
-        if (failedIds.size > 0) {
-          console.error('[mail] markAsRead batch failed, reverting optimistic update', [...failedIds]);
+        const hasFailed = results.some((r) => r.status === 'rejected');
+        if (hasFailed) {
+          console.error(
+            '[mail] markAsRead batch failed, reverting optimistic update',
+            unreadIds.filter((_, i) => results[i].status === 'rejected'),
+          );
           setThreads((prev) =>
             prev.map((t) =>
               t.thread_id === threadId ? { ...t, is_read: 0 } : t

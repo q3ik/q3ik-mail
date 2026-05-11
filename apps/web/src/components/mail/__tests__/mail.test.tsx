@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-// NOTE: This file intentionally overrides the global `environment: 'node'` setting
-// in vitest.config.ts. React component rendering requires a DOM environment.
-// Be aware that happy-dom has known differences from jsdom (CSS, custom elements)
-// and from the actual Cloudflare Workers runtime.
+// NOTE: This file targets the happy-dom environment. With the environmentMatchGlobs
+// rule in vitest.config.ts, the pragma is now redundant for files in this directory
+// but is kept as explicit documentation. happy-dom has known differences from jsdom
+// (CSS, custom elements) and from the actual Cloudflare Workers runtime.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup, waitFor } from '@testing-library/react';
 import type { Email, EmailSummary } from '@q3ik-mail/database';
@@ -83,6 +83,7 @@ const THREAD_ID = 'thread-abc';
 /**
  * Factory for EmailSummary (thread list rows).
  * EmailSummary omits body_html and body_text from the full Email type.
+ * references is included (nullable) to stay in sync with the Email interface.
  */
 const makeThread = (overrides: Partial<EmailSummary> = {}): EmailSummary => ({
   id: 'email-1',
@@ -94,6 +95,7 @@ const makeThread = (overrides: Partial<EmailSummary> = {}): EmailSummary => ({
   subject: 'Hello',
   message_id: '<msg-1>',
   in_reply_to: null,
+  references: null,
   is_read: 0,
   is_sent: 0,
   needs_rethreading: 0,
@@ -104,6 +106,7 @@ const makeThread = (overrides: Partial<EmailSummary> = {}): EmailSummary => ({
 /**
  * Factory for full Email objects (thread detail rows).
  * Email includes body_html and body_text in addition to all EmailSummary fields.
+ * references is included (nullable) to stay in sync with the Email interface.
  */
 const makeEmail = (overrides: Partial<Email> = {}): Email => ({
   id: 'email-1',
@@ -117,6 +120,7 @@ const makeEmail = (overrides: Partial<Email> = {}): Email => ({
   body_html: null,
   message_id: '<msg-1>',
   in_reply_to: null,
+  references: null,
   is_read: 0,
   is_sent: 0,
   needs_rethreading: 0,
