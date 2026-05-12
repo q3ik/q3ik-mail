@@ -185,10 +185,15 @@ function sanitizeAttachmentFilename(filename: string, index: number): string {
 
   // Percent-encode non-ASCII characters to neutralise homoglyphs.
   // (Avoid control-character regex ranges to satisfy no-control-regex lint rule.)
-  const asciiSafe = Array.from(normalized, (ch) => {
+  let asciiSafe = '';
+  for (const ch of normalized) {
     const code = ch.codePointAt(0) ?? 0;
-    return code > 0x7f ? encodeURIComponent(ch) : ch;
-  }).join('');
+    const shouldEncode =
+      (code >= 0x00 && code <= 0x1f) ||
+      code === 0x7f ||
+      code > 0x7f;
+    asciiSafe += shouldEncode ? encodeURIComponent(ch) : ch;
+  }
 
   // Enforce max filename length (R2 key limit is 1024 bytes total; cap segment at 200)
   return asciiSafe.slice(0, 200);
