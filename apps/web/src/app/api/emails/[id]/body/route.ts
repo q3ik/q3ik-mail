@@ -1,5 +1,5 @@
 import { getRequestContext } from '@cloudflare/next-on-pages';
-import { getEmailById, markAsRead } from '@q3ik-mail/database';
+import { getEmailById } from '@q3ik-mail/database';
 
 export const runtime = 'edge';
 
@@ -9,19 +9,14 @@ export async function GET(
 ) {
   const { id } = await params;
   const { env } = getRequestContext();
+
+  // TODO: proxy this route through the worker once the dedicated worker body API is wired.
   const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
   const email = await getEmailById(env.DB, id, r2Bucket);
   if (!email) return Response.json({ error: 'Not found' }, { status: 404 });
 
-  // markAsRead is a best-effort side-effect. A D1 write failure must not
-  // turn a successful GET into a 500 — the email data is already in memory.
-  if (!email.is_read) {
-    try {
-      await markAsRead(env.DB, id);
-    } catch (err) {
-      console.error('[emails/[id]] markAsRead failed:', err);
-    }
-  }
-
-  return Response.json(email);
+  return Response.json({
+    body_html: email.body_html,
+    body_text: email.body_text,
+  });
 }

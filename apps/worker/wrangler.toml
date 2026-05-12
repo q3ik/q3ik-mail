@@ -20,6 +20,10 @@ migrations_dir = "../../packages/database/migrations"
 # ^ Path is relative to this wrangler.toml (apps/worker/).
 #   Always run `wrangler d1 migrations apply` from the apps/worker/ directory.
 
+[[r2_buckets]]
+binding = "EMAIL_BODIES"
+bucket_name = "q3ik-mail-bodies"
+
 [vars]
 ENVIRONMENT = "production"
 # RESEND_API_KEY, RESEND_WEBHOOK_SECRET, and SENTRY_DSN are set via wrangler secret put

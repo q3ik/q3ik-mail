@@ -82,6 +82,27 @@ function createMockDb(
   } as unknown as D1Database;
 }
 
+function createMockR2Bucket(
+  objects: Record<string, string>
+): { bucket: R2Bucket; getSpy: ReturnType<typeof vi.fn> } {
+  const getSpy = vi.fn(async (key: string) => {
+    const value = objects[key];
+    if (value === undefined) {
+      return null;
+    }
+    return {
+      text: async () => value,
+    } as R2ObjectBody;
+  });
+
+  return {
+    bucket: {
+      get: getSpy,
+    } as unknown as R2Bucket,
+    getSpy,
+  };
+}
+
 type ThreadRow = {
   id: string;
   thread_id: string;
@@ -202,6 +223,31 @@ describe('getEmailsByThread', () => {
     const result = await getEmailsByThread(db, 'thread-abc');
     expect(result).toHaveLength(2);
   });
+
+  it('hydrates body_html and body_text from R2 when keys are present', async () => {
+    const rows = [
+      {
+        id: '1',
+        thread_id: 'thread-abc',
+        body_html: null,
+        body_text: null,
+        body_html_key: 'emails/1/body.html',
+        body_text_key: 'emails/1/body.txt',
+      },
+    ];
+    const db = createMockDb(rows);
+    const { bucket, getSpy } = createMockR2Bucket({
+      'emails/1/body.html': '<p>HTML from R2</p>',
+      'emails/1/body.txt': 'Text from R2',
+    });
+
+    const result = await getEmailsByThread(db, 'thread-abc', bucket);
+
+    expect(result[0].body_html).toBe('<p>HTML from R2</p>');
+    expect(result[0].body_text).toBe('Text from R2');
+    expect(getSpy).toHaveBeenCalledWith('emails/1/body.html');
+    expect(getSpy).toHaveBeenCalledWith('emails/1/body.txt');
+  });
 });
 
 describe('markAsRead', () => {
@@ -223,6 +269,27 @@ describe('getEmailById', () => {
     const db = createMockDb([email]);
     const result = await getEmailById(db, 'abc');
     expect(result?.subject).toBe('Hello');
+  });
+
+  it('hydrates body fields from R2 when key columns are set', async () => {
+    const email = {
+      id: 'abc',
+      subject: 'Hello',
+      body_html: null,
+      body_text: null,
+      body_html_key: 'emails/abc/body.html',
+      body_text_key: 'emails/abc/body.txt',
+    };
+    const db = createMockDb([email]);
+    const { bucket } = createMockR2Bucket({
+      'emails/abc/body.html': '<p>Hydrated</p>',
+      'emails/abc/body.txt': 'Hydrated text',
+    });
+
+    const result = await getEmailById(db, 'abc', bucket);
+
+    expect(result?.body_html).toBe('<p>Hydrated</p>');
+    expect(result?.body_text).toBe('Hydrated text');
   });
 
   it('surfaces the references field when present', async () => {
