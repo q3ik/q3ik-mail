@@ -109,6 +109,7 @@ type ThreadRow = {
   thread_id: string;
   message_id: string | null;
   in_reply_to: string | null;
+  references?: string | null;
   needs_rethreading: number;
   created_at: string;
   subject?: string | null;
@@ -119,6 +120,7 @@ function createThreadDb(seedRows: ThreadRow[]) {
   const rows = seedRows.map((row) => ({ ...row }));
   const preparedSqls: string[] = [];
   const bindCalls: Array<{ sql: string; args: unknown[] }> = [];
+  const batchCalls: Array<Array<{ sql: string; args: unknown[] }>> = [];
 
   const db = {
     prepare: (sql: string) => {
@@ -138,7 +140,25 @@ function createThreadDb(seedRows: ThreadRow[]) {
                   .filter((row) => row.needs_rethreading === 1 && row.in_reply_to !== null)
                   .sort((a, b) => a.created_at.localeCompare(b.created_at))
                   .slice(0, limit)
-                  .map((row) => ({ id: row.id, in_reply_to: row.in_reply_to! })),
+                  .map((row) => ({
+                    id: row.id,
+                    in_reply_to: row.in_reply_to!,
+                    references: row.references ?? null,
+                  })),
+              };
+            }
+
+            if (normalizedSql.includes('WHERE message_id IN (')) {
+              const messageIds = new Set(args as string[]);
+
+              return {
+                results: rows
+                  .filter((row) => row.message_id !== null && messageIds.has(row.message_id))
+                  .map((row) => ({
+                    id: row.id,
+                    message_id: row.message_id!,
+                    thread_id: row.thread_id,
+                  })),
               };
             }
 
@@ -149,7 +169,7 @@ function createThreadDb(seedRows: ThreadRow[]) {
 
             if (normalizedSql.includes('WHERE message_id = ? LIMIT 1')) {
               const parent = rows.find((row) => row.message_id === args[0]);
-              return parent ? { thread_id: parent.thread_id } : null;
+              return parent ? { id: parent.id, thread_id: parent.thread_id } : null;
             }
 
             throw new Error(`Unexpected SQL in first(): ${normalizedSql}`);
@@ -157,14 +177,19 @@ function createThreadDb(seedRows: ThreadRow[]) {
           run: async () => {
             bindCalls.push({ sql: normalizedSql, args });
 
-            if (normalizedSql.includes('SET thread_id = ?, needs_rethreading = 0')) {
+            if (
+              normalizedSql.includes('SET thread_id = ?, needs_rethreading = 0') &&
+              normalizedSql.includes('WHERE id = ? AND needs_rethreading = 1')
+            ) {
               const [threadId, orphanId] = args;
               const orphan = rows.find((row) => row.id === orphanId);
-              if (orphan) {
+              if (orphan && orphan.needs_rethreading === 1) {
                 orphan.thread_id = threadId as string;
                 orphan.needs_rethreading = 0;
                 return { success: true };
               }
+
+              return { success: true };
             }
 
             throw new Error(`Unexpected SQL in run(): ${normalizedSql}`);
@@ -172,9 +197,24 @@ function createThreadDb(seedRows: ThreadRow[]) {
         }),
       };
     },
+    batch: async (statements: D1PreparedStatement[]) => {
+      const batchStatementCalls: Array<{ sql: string; args: unknown[] }> = [];
+
+      for (const statement of statements as unknown as Array<{ run: () => Promise<unknown> }>) {
+        const bindCallCountBeforeRun = bindCalls.length;
+        await statement.run();
+        const latestBindCall = bindCalls.at(-1);
+        if (latestBindCall && bindCalls.length > bindCallCountBeforeRun) {
+          batchStatementCalls.push(latestBindCall);
+        }
+      }
+
+      batchCalls.push(batchStatementCalls);
+      return [];
+    },
   } as unknown as D1Database;
 
-  return { db, rows, preparedSqls, bindCalls };
+  return { db, rows, preparedSqls, bindCalls, batchCalls };
 }
 
 describe('getLatestEmails', () => {
@@ -638,7 +678,7 @@ describe('searchEmails', () => {
 
 describe('resolveOrphanedThreads', () => {
   it('joins an orphan to the existing parent thread by message_id', async () => {
-    const { db, rows } = createThreadDb([
+    const { db, rows, preparedSqls, batchCalls } = createThreadDb([
       {
         id: 'parent-1',
         thread_id: 'thread-root',
@@ -669,6 +709,9 @@ describe('resolveOrphanedThreads', () => {
       thread_id: 'thread-root',
       needs_rethreading: 0,
     });
+    expect(preparedSqls.some((sql) => sql.includes('WHERE message_id IN ('))).toBe(true);
+    expect(batchCalls).toHaveLength(1);
+    expect(batchCalls[0]).toHaveLength(1);
   });
 
   it('leaves an orphan on its own thread when no parent message_id exists', async () => {
@@ -777,6 +820,84 @@ describe('resolveOrphanedThreads', () => {
       thread_id: 'thread-root',
       needs_rethreading: 0,
     });
+  });
+
+  it('falls back to references chain when direct in_reply_to parent is missing', async () => {
+    const { db, rows } = createThreadDb([
+      {
+        id: 'root-1',
+        thread_id: 'thread-root',
+        message_id: '<root@example.com>',
+        in_reply_to: null,
+        needs_rethreading: 0,
+        created_at: '2026-05-09T09:58:00Z',
+      },
+      {
+        id: 'orphan-1',
+        thread_id: '<missing-parent@example.com>',
+        message_id: '<reply@example.com>',
+        in_reply_to: '<missing-parent@example.com>',
+        references: '<root@example.com> <missing-parent@example.com>',
+        needs_rethreading: 1,
+        created_at: '2026-05-09T10:00:00Z',
+      },
+    ]);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      await expect(resolveOrphanedThreads(db)).resolves.toBe(1);
+      expect(logSpy).toHaveBeenCalledWith('[rethread] resolved 1 orphaned rows');
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    expect(rows.find((row) => row.id === 'orphan-1')).toMatchObject({
+      thread_id: 'thread-root',
+      needs_rethreading: 0,
+    });
+  });
+
+  it('uses idempotent update predicate with needs_rethreading = 1', async () => {
+    const { db, preparedSqls } = createThreadDb([
+      {
+        id: 'parent-1',
+        thread_id: 'thread-root',
+        message_id: '<parent@example.com>',
+        in_reply_to: null,
+        needs_rethreading: 0,
+        created_at: '2026-05-09T10:00:00Z',
+      },
+      {
+        id: 'orphan-1',
+        thread_id: '<parent@example.com>',
+        message_id: '<reply@example.com>',
+        in_reply_to: '<parent@example.com>',
+        needs_rethreading: 1,
+        created_at: '2026-05-09T10:01:00Z',
+      },
+      {
+        id: 'already-resolved',
+        thread_id: 'thread-root',
+        message_id: '<reply2@example.com>',
+        in_reply_to: '<parent@example.com>',
+        needs_rethreading: 0,
+        created_at: '2026-05-09T10:02:00Z',
+      },
+    ]);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      await expect(resolveOrphanedThreads(db)).resolves.toBe(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const updateQuery = preparedSqls.find((sql) =>
+      sql.includes('SET thread_id = ?, needs_rethreading = 0')
+    );
+    expect(updateQuery).toContain('WHERE id = ? AND needs_rethreading = 1');
   });
 
   it('only processes the first 100 orphaned rows per run', async () => {

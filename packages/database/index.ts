@@ -485,7 +485,7 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
   // orphan on its current thread_id so it is not silently merged by subject.
   const { results: orphans } = await db
     .prepare(
-      `SELECT id, in_reply_to
+      `SELECT id, in_reply_to, "references"
        FROM emails
        WHERE needs_rethreading = 1
           AND in_reply_to IS NOT NULL
@@ -493,31 +493,67 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
         LIMIT ?`
     )
     .bind(ORPHAN_RETHREAD_BATCH_SIZE)
-    .all<{ id: string; in_reply_to: string }>();
+    .all<{ id: string; in_reply_to: string; references: string | null }>();
 
-  let resolvedCount = 0;
+  const parentMessageIds = [...new Set(orphans.map((orphan) => orphan.in_reply_to))];
+  const inReplyToPlaceholders = parentMessageIds.map(() => '?').join(', ');
+  const { results: parentCandidates } =
+    parentMessageIds.length > 0
+      ? await db
+          .prepare(
+            `SELECT id, message_id, thread_id
+             FROM emails
+             WHERE message_id IN (${inReplyToPlaceholders})`
+          )
+          .bind(...parentMessageIds)
+          .all<{ id: string; message_id: string; thread_id: string }>()
+      : { results: [] };
+
+  const parentMap = new Map(
+    parentCandidates.map((parent) => [parent.message_id, parent] as const)
+  );
+  const updates: D1PreparedStatement[] = [];
 
   for (const orphan of orphans) {
-    // Look up the parent by its message_id
-    const parent = await db
-      .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
-      .bind(orphan.in_reply_to)
-      .first<{ thread_id: string }>();
+    let parent:
+      | {
+          id: string;
+          thread_id: string;
+        }
+      | null = parentMap.get(orphan.in_reply_to) ?? null;
+
+    if (!parent && orphan.references) {
+      const refs = orphan.references.trim().split(/\s+/).reverse();
+      for (const ref of refs) {
+        const ancestor = await db
+          .prepare('SELECT id, thread_id FROM emails WHERE message_id = ? LIMIT 1')
+          .bind(ref)
+          .first<{ id: string; thread_id: string }>();
+        if (ancestor) {
+          parent = ancestor;
+          break;
+        }
+      }
+    }
 
     if (!parent) continue; // Parent still hasn't arrived
 
-    // Update the orphan's thread_id and clear the flag
-    await db
+    updates.push(
+      db
       .prepare(
         `UPDATE emails
          SET thread_id = ?, needs_rethreading = 0
-         WHERE id = ?`
+         WHERE id = ? AND needs_rethreading = 1`
       )
       .bind(parent.thread_id, orphan.id)
-      .run();
-
-    resolvedCount++;
+    );
   }
+
+  if (updates.length > 0) {
+    await db.batch(updates);
+  }
+
+  const resolvedCount = updates.length;
 
   if (resolvedCount > 0) {
     console.log(`[rethread] resolved ${resolvedCount} orphaned rows`);
