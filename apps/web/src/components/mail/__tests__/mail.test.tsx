@@ -268,9 +268,7 @@ describe('Mail — markAsRead error recovery', () => {
       />
     );
 
-    act(() => {
-      screen.getByTestId('load-more').click();
-    });
+    screen.getByTestId('load-more').click();
 
     await waitFor(() =>
       expect(screen.queryByTestId('thread-thread-def')).not.toBeNull()
