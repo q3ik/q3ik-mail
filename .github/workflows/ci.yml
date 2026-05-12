@@ -6,6 +6,22 @@ on:
   pull_request:
     branches: [trunk]
 
+# Cancel any in-progress run for the same branch/PR the moment a newer commit
+# is pushed. This prevents redundant runs from queuing up and wasting runner
+# minutes — only the latest commit on a given ref ever runs to completion.
+#
+# Group key breakdown:
+#   - github.workflow  : isolates this workflow from any future ones added
+#   - github.ref       : one slot per branch (e.g. refs/heads/trunk,
+#                        refs/pull/61/merge) so parallel PRs never cancel
+#                        each other
+#
+# cancel-in-progress: true  — kill the running workflow immediately rather
+# than waiting for it to finish before starting the replacement.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   config-guard:
     name: Config Validation
