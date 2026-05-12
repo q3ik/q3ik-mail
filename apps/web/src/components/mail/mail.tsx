@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState, useTransition } from 'react';
+import type { FormEvent } from 'react';
 import type { Email, EmailSummary } from '@q3ik-mail/database';
 import {
   ResizablePanelGroup,
@@ -8,6 +9,7 @@ import {
   ResizableHandle,
 } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { PenSquareIcon } from 'lucide-react';
 import { MailList } from './mail-list';
 import { MailDisplay } from './mail-display';
@@ -35,10 +37,25 @@ export function Mail({
   const [threads, setThreads] = useState<EmailSummary[]>(initialThreads);
   const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
   const [isPending, startTransition] = useTransition();
 
-  // Bug #3 fix: monotonically-increasing token to guard against out-of-order responses
+  // Bug #3 fix: monotonically-increasing token for handleSelectThread to guard
+  // against out-of-order fetchThread responses. Kept separate from searchTokenRef
+  // so that a concurrent thread-selection cannot cancel an in-flight search result
+  // (or vice-versa) by incrementing the wrong counter.
   const requestTokenRef = useRef(0);
+
+  // Dedicated token for handleSearch. Isolated from requestTokenRef so that
+  // thread-selections and searches never race against each other's counters.
+  const searchTokenRef = useRef(0);
+
+  // Stable ref for initialThreads/initialNextCursor so that handleSearch's dep
+  // array does not capture the prop snapshot at mount time. This prevents the
+  // search-clear path from reverting threads to stale pre-load-more state.
+  const initialThreadsRef = useRef(initialThreads);
+  const initialNextCursorRef = useRef(initialNextCursor);
 
   const [composeOpen, setComposeOpen] = useState(false);
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>();
@@ -47,6 +64,49 @@ export function Mail({
     setComposePayload(payload ?? undefined);
     setComposeOpen(true);
   }
+
+  const handleSearch = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) {
+      setThreads(initialThreadsRef.current);
+      setNextCursor(initialNextCursorRef.current);
+      return;
+    }
+
+    // Race-condition guard: capture a token before the async fetch.
+    // If a newer search fires before this one resolves, discard this result
+    // without touching isSearching — the newer search owns that state.
+    const token = ++searchTokenRef.current;
+
+    setIsSearching(true);
+    try {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}`);
+      if (!response.ok) {
+        throw new Error(`Failed to search emails (${response.status})`);
+      }
+
+      const payload = (await response.json()) as EmailSummary[];
+
+      // Stale response: a newer search has already been dispatched.
+      // Do NOT call setIsSearching(false) here — the active search is still
+      // in flight and owns the spinner. Clearing it here would hide the
+      // loading indicator prematurely.
+      if (token !== searchTokenRef.current) return;
+
+      setThreads(payload);
+      setNextCursor(null);
+      setIsSearching(false);
+    } catch (err) {
+      // Only clear the spinner if this is still the active search.
+      // A stale error must not cancel the loading state of a newer request.
+      if (token === searchTokenRef.current) {
+        setIsSearching(false);
+      }
+      console.error('[mail] search failed:', err);
+    }
+  }, [searchQuery]);
 
   const handleLoadMore = useCallback(async function handleLoadMore() {
     if (!nextCursor || isLoadingMore) return;
@@ -115,7 +175,7 @@ export function Mail({
     // and the component may have unmounted by the time it executes. Calling
     // setThreads on an unmounted component in React 18+ is a safe no-op.
     // Per-email tracking: allSettled preserves the optimistic update for emails
-    // that were successfully written; only a batch with ≥1 failure triggers a
+    // that were successfully written; only a batch with >=1 failure triggers a
     // thread-level revert (the thread list holds one EmailSummary per thread,
     // so a coarser thread-level revert is the correct granularity here).
     const unreadIds = emails.filter((e) => e.is_read === 0).map((e) => e.id);
@@ -149,12 +209,26 @@ export function Mail({
                 Compose
               </Button>
             </div>
+            <form className="border-b p-3" onSubmit={handleSearch}>
+              <div className="flex gap-2">
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search"
+                  aria-label="Search emails"
+                />
+                <Button type="submit" variant="outline" size="sm" disabled={isSearching}>
+                  {isSearching ? 'Searching…' : 'Search'}
+                </Button>
+              </div>
+            </form>
             <MailList
               threads={threads}
               selectedThreadId={selectedThreadId}
               onSelectThread={handleSelectThread}
               onLoadMore={nextCursor ? handleLoadMore : undefined}
               isLoadingMore={isLoadingMore}
+              isSearching={isSearching}
             />
           </div>
         </ResizablePanel>

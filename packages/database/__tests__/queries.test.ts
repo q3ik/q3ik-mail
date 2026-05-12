@@ -5,6 +5,7 @@ import { getLatestEmails,
         getEmailById, 
         getThreadList, 
         getThreadListPage,
+        searchEmails,
         resolveOrphanedThreads 
        } from '../index';
 
@@ -515,6 +516,123 @@ describe('getThreadListPage', () => {
 
     expect(result.threads).toEqual([]);
     expect(result.nextCursor).toBeNull();
+  });
+});
+
+describe('searchEmails', () => {
+  it('returns an empty array for blank queries', async () => {
+    const db = createMockDb([
+      { id: '1', thread_id: 'thread-1', subject: 'Hello' },
+    ]);
+    const result = await searchEmails(db, '   ');
+    expect(result).toEqual([]);
+  });
+
+  it('returns an empty array for a whitespace-only string with mixed spaces', async () => {
+    const db = createMockDb([{ id: '1', thread_id: 'thread-1', subject: 'Hello' }]);
+    const result = await searchEmails(db, '  \t  ');
+    expect(result).toEqual([]);
+  });
+
+  it('queries FTS5 with AND semantics (space-separated phrases) for multi-word queries', async () => {
+    let preparedSql = '';
+    let boundArgs: unknown[] = [];
+    const db = createMockDb(
+      [
+        {
+          id: '1',
+          thread_id: 'thread-1',
+          subject: 'Hello FTS',
+          references: null,
+        },
+      ],
+      {
+        onPrepare: (sql) => {
+          preparedSql = sql;
+        },
+        onBind: (args) => {
+          boundArgs = args;
+        },
+      }
+    );
+
+    const result = await searchEmails(db, 'hello "world');
+
+    expect(preparedSql).toContain('JOIN emails_fts ON emails.rowid = emails_fts.rowid');
+    expect(preparedSql).toContain('WHERE emails_fts MATCH ?');
+    // AND semantics: terms joined by space, not OR
+    expect(boundArgs).toEqual(['"hello" """world"']);
+    expect(result).toHaveLength(1);
+    expect(result[0].subject).toBe('Hello FTS');
+  });
+
+  it('produces a single quoted phrase for a single-term query', async () => {
+    let boundArgs: unknown[] = [];
+    const db = createMockDb(
+      [{ id: '1', thread_id: 'thread-1', subject: 'Hello', references: null }],
+      { onBind: (args) => { boundArgs = args; } }
+    );
+
+    await searchEmails(db, 'hello');
+    expect(boundArgs).toEqual(['"hello"']);
+  });
+
+  it('preserves hyphens and colons inside search terms (not stripped)', async () => {
+    let boundArgs: unknown[] = [];
+    const db = createMockDb(
+      [{ id: '1', thread_id: 'thread-1', subject: 're: Smith-Jones', references: null }],
+      { onBind: (args) => { boundArgs = args; } }
+    );
+
+    await searchEmails(db, 're: Smith-Jones');
+    // Hyphens and colons must be preserved inside FTS5 double-quoted phrases
+    expect(boundArgs).toEqual(['"re:" "Smith-Jones"']);
+  });
+
+  it('strips wildcard * characters (not valid inside double-quoted FTS5 phrases)', async () => {
+    // The old sanitizer used to allow * through; double-quoting a term containing
+    // * causes an FTS5 syntax error. Verify it is escaped via double-quote wrapping,
+    // which neutralises * as a literal character inside the phrase.
+    let boundArgs: unknown[] = [];
+    const db = createMockDb(
+      [{ id: '1', thread_id: 'thread-1', subject: 'hello world', references: null }],
+      { onBind: (args) => { boundArgs = args; } }
+    );
+
+    await searchEmails(db, 'hel*');
+    // * is kept as a literal inside the double-quoted phrase — no FTS5 prefix search.
+    expect(boundArgs).toEqual(['"hel*"']);
+  });
+
+  it('applies a LIMIT clause to prevent unbounded FTS result sets', async () => {
+    let preparedSql = '';
+    const db = createMockDb(
+      [{ id: '1', thread_id: 'thread-1', subject: 'Hello', references: null }],
+      { onPrepare: (sql) => { preparedSql = sql; } }
+    );
+
+    await searchEmails(db, 'hello');
+    expect(preparedSql).toContain('LIMIT 50');
+  });
+
+  it('matches against from_name field', async () => {
+    let boundArgs: unknown[] = [];
+    const db = createMockDb(
+      [
+        {
+          id: '1',
+          thread_id: 'thread-1',
+          subject: 'Meeting notes',
+          from_name: 'Alice Bob',
+          references: null,
+        },
+      ],
+      { onBind: (args) => { boundArgs = args; } }
+    );
+
+    await searchEmails(db, 'Alice Bob');
+    // Both terms must be present (AND semantics)
+    expect(boundArgs).toEqual(['"Alice" "Bob"']);
   });
 });
 

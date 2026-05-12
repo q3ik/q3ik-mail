@@ -4,7 +4,7 @@
 // but is kept as explicit documentation. happy-dom has known differences from jsdom
 // (CSS, custom elements) and from the actual Cloudflare Workers runtime.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, act, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import type { Email, EmailSummary } from '@q3ik-mail/database';
 import { Mail } from '../mail';
 
@@ -31,13 +31,16 @@ vi.mock('../mail-list', () => ({
     onSelectThread,
     onLoadMore,
     isLoadingMore,
+    isSearching,
   }: {
     threads: EmailSummary[];
     onSelectThread: (id: string) => void;
     onLoadMore?: () => void;
     isLoadingMore?: boolean;
+    isSearching?: boolean;
   }) => (
     <div>
+      {isSearching ? <div data-testid="mail-list-searching">Searching…</div> : null}
       <ul>
         {threads.map((t) => (
           <li key={t.thread_id}>
@@ -78,11 +81,13 @@ vi.mock('@/components/ui/button', () => ({
   Button: ({
     children,
     onClick,
+    ...props
   }: {
     children: React.ReactNode;
     onClick?: () => void;
+    [key: string]: unknown;
   }) => (
-    <button type="button" onClick={onClick}>
+    <button type="button" onClick={onClick} {...props}>
       {children}
     </button>
   ),
@@ -230,6 +235,115 @@ describe('Mail — markAsRead error recovery', () => {
     // then assert markEmailAsRead was never invoked.
     await waitFor(() => expect(mailActions.fetchThread).toHaveBeenCalledWith(THREAD_ID));
     expect(mailActions.markEmailAsRead).not.toHaveBeenCalled();
+  });
+
+  it('searches via /api/search and replaces the thread list with results', async () => {
+    const initialThread = makeThread({ thread_id: 'thread-initial', subject: 'Initial' });
+    const searchedThread = makeThread({
+      id: 'email-2',
+      thread_id: 'thread-search',
+      resend_id: 'resend-2',
+      subject: 'Found by search',
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [searchedThread],
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <Mail
+        threads={[initialThread]}
+        selectedThread={[]}
+        defaultSelectedId={undefined}
+      />
+    );
+
+    const searchInput = screen.getByLabelText('Search emails');
+    fireEvent.change(searchInput, { target: { value: 'search' } });
+    act(() => { screen.getByRole('button', { name: 'Search' }).click(); });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('thread-thread-search')).not.toBeNull()
+    );
+    expect(fetchMock).toHaveBeenCalledWith('/api/search?q=search');
+    expect(screen.queryByTestId('thread-thread-initial')).toBeNull();
+  });
+
+  it('keeps newest search results when an older search resolves later', async () => {
+    const initialThread = makeThread({ thread_id: 'thread-initial', subject: 'Initial' });
+    const slowSearchThread = makeThread({
+      id: 'email-2',
+      thread_id: 'thread-slow',
+      resend_id: 'resend-2',
+      subject: 'Slow result',
+    });
+    const fastSearchThread = makeThread({
+      id: 'email-3',
+      thread_id: 'thread-fast',
+      resend_id: 'resend-3',
+      subject: 'Fast result',
+    });
+
+    let resolveSlow: ((value: unknown) => void) | undefined;
+    let resolveFast: ((value: unknown) => void) | undefined;
+    const slowPromise = new Promise((resolve) => {
+      resolveSlow = resolve;
+    });
+    const fastPromise = new Promise((resolve) => {
+      resolveFast = resolve;
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(slowPromise)
+      .mockReturnValueOnce(fastPromise);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <Mail
+        threads={[initialThread]}
+        selectedThread={[]}
+        defaultSelectedId={undefined}
+      />
+    );
+
+    const searchInput = screen.getByLabelText('Search emails');
+    const searchForm = searchInput.closest('form');
+    expect(searchForm).not.toBeNull();
+
+    // Submit first (slow) search — spinner should appear
+    fireEvent.change(searchInput, { target: { value: 'slow' } });
+    act(() => { fireEvent.submit(searchForm!); });
+    expect(screen.queryByTestId('mail-list-searching')).not.toBeNull();
+
+    // Submit second (fast) search before slow resolves — spinner must stay up
+    fireEvent.change(searchInput, { target: { value: 'fast' } });
+    act(() => { fireEvent.submit(searchForm!); });
+    expect(screen.queryByTestId('mail-list-searching')).not.toBeNull();
+
+    // Fast search resolves first — results applied, spinner cleared
+    resolveFast?.({
+      ok: true,
+      json: async () => [fastSearchThread],
+    });
+    await waitFor(() => expect(screen.queryByTestId('thread-thread-fast')).not.toBeNull());
+    // Spinner must be gone now that the active search has settled
+    expect(screen.queryByTestId('mail-list-searching')).toBeNull();
+
+    // Slow search resolves late — must be discarded; fast results stay
+    resolveSlow?.({
+      ok: true,
+      json: async () => [slowSearchThread],
+    });
+    await Promise.resolve();
+
+    expect(screen.queryByTestId('thread-thread-fast')).not.toBeNull();
+    expect(screen.queryByTestId('thread-thread-slow')).toBeNull();
+    // Spinner must still be gone (slow result must not re-clear it to an
+    // unexpected state or trigger an extra render)
+    expect(screen.queryByTestId('mail-list-searching')).toBeNull();
   });
 
   it('appends threads from the next cursor page and hides load more when exhausted', async () => {
