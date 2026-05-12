@@ -469,33 +469,45 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     .bind(ORPHAN_RETHREAD_BATCH_SIZE)
     .all<{ id: string; in_reply_to: string }>();
 
-  let resolvedCount = 0;
+  if (orphans.length === 0) {
+    return 0;
+  }
+
+  // Batch lookup parents for all orphans in this batch
+  const uniqueInReplyTo = [...new Set(orphans.map((o) => o.in_reply_to))];
+  const placeholders = uniqueInReplyTo.map(() => '?').join(',');
+
+  const { results: parents } = await db
+    .prepare(
+      `SELECT message_id, thread_id
+       FROM emails
+       WHERE message_id IN (${placeholders})`
+    )
+    .bind(...uniqueInReplyTo)
+    .all<{ message_id: string; thread_id: string }>();
+
+  const parentThreadMap = new Map(parents.map((p) => [p.message_id, p.thread_id]));
+  const statements: D1PreparedStatement[] = [];
 
   for (const orphan of orphans) {
-    // Look up the parent by its message_id
-    const parent = await db
-      .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
-      .bind(orphan.in_reply_to)
-      .first<{ thread_id: string }>();
-
-    if (!parent) continue; // Parent still hasn't arrived
-
-    // Update the orphan's thread_id and clear the flag
-    await db
-      .prepare(
-        `UPDATE emails
-         SET thread_id = ?, needs_rethreading = 0
-         WHERE id = ?`
-      )
-      .bind(parent.thread_id, orphan.id)
-      .run();
-
-    resolvedCount++;
+    const threadId = parentThreadMap.get(orphan.in_reply_to);
+    if (threadId) {
+      statements.push(
+        db
+          .prepare(
+            `UPDATE emails
+             SET thread_id = ?, needs_rethreading = 0
+             WHERE id = ?`
+          )
+          .bind(threadId, orphan.id)
+      );
+    }
   }
 
-  if (resolvedCount > 0) {
-    console.log(`[rethread] resolved ${resolvedCount} orphaned rows`);
+  if (statements.length > 0) {
+    await db.batch(statements);
+    console.log(`[rethread] resolved ${statements.length} orphaned rows`);
   }
 
-  return resolvedCount;
+  return statements.length;
 }

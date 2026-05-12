@@ -142,6 +142,25 @@ function createThreadDb(seedRows: ThreadRow[]) {
               };
             }
 
+            if (normalizedSql.includes('SELECT message_id, thread_id FROM emails WHERE message_id IN')) {
+              const messageIds = new Set(args);
+              return {
+                results: rows
+                  .filter((row) => row.message_id !== null && messageIds.has(row.message_id))
+                  .map((row) => ({ message_id: row.message_id!, thread_id: row.thread_id })),
+              };
+            }
+
+            if (normalizedSql.includes('UPDATE emails SET thread_id = ?, needs_rethreading = 0')) {
+              const [threadId, orphanId] = args;
+              const orphan = rows.find((row) => row.id === orphanId);
+              if (orphan) {
+                orphan.thread_id = threadId as string;
+                orphan.needs_rethreading = 0;
+                return { results: [] };
+              }
+            }
+
             throw new Error(`Unexpected SQL in all(): ${normalizedSql}`);
           },
           first: async () => {
@@ -167,10 +186,27 @@ function createThreadDb(seedRows: ThreadRow[]) {
               }
             }
 
+            if (normalizedSql.includes('UPDATE emails SET thread_id = ?, needs_rethreading = 0')) {
+               const [threadId, orphanId] = args;
+               const orphan = rows.find((row) => row.id === orphanId);
+               if (orphan) {
+                 orphan.thread_id = threadId as string;
+                 orphan.needs_rethreading = 0;
+                 return { success: true };
+               }
+            }
+
             throw new Error(`Unexpected SQL in run(): ${normalizedSql}`);
           },
         }),
       };
+    },
+    batch: async (statements: any[]) => {
+      for (const stmt of statements) {
+        // This is a bit of a hack to execute the bound statements in the mock
+        await stmt.all();
+      }
+      return [];
     },
   } as unknown as D1Database;
 
