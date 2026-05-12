@@ -4,10 +4,31 @@ import { getRequestContext } from '@cloudflare/next-on-pages';
 import { captureException } from '@/lib/sentry';
 import { z } from 'zod';
 
+/**
+ * All 400 responses share this shape so clients have one code path:
+ *   { error: { message: string; fieldErrors?: Record<string, string[]> } }
+ *
+ * - JSON parse failures: message set, fieldErrors absent.
+ * - Schema validation failures: message set to a human summary, fieldErrors
+ *   populated with Zod's flatten() output for per-field detail.
+ */
+function errorResponse(
+  message: string,
+  fieldErrors?: Record<string, string[]>,
+  status = 400
+): Response {
+  return Response.json(
+    { error: { message, ...(fieldErrors ? { fieldErrors } : {}) } },
+    { status }
+  );
+}
+
 const SendSchema = z.object({
   to: z.string().trim().email(),
   subject: z.string().trim().min(1),
   content: z.string().trim().min(1),
+  // nullish() accepts both null and undefined from JSON clients;
+  // the transform normalises both to undefined for downstream functions.
   replyToId: z.string().trim().min(1).nullish().transform((v) => v ?? undefined),
   references: z.string().trim().min(1).nullish().transform((v) => v ?? undefined),
 });
@@ -79,12 +100,16 @@ export async function POST(req: NextRequest) {
   try {
     rawBody = await req.json();
   } catch {
-    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return errorResponse('Invalid JSON body');
   }
 
   const parsed = SendSchema.safeParse(rawBody);
   if (!parsed.success) {
-    return Response.json({ error: parsed.error.flatten() }, { status: 400 });
+    const flat = parsed.error.flatten();
+    return errorResponse(
+      'Validation failed',
+      flat.fieldErrors as Record<string, string[]>
+    );
   }
 
   // Resend client instantiated after validation so the allocation is skipped
