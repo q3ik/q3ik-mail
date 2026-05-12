@@ -263,7 +263,7 @@ function EmailBody({ email }: { email: Email }) {
     );
   }
 
-  if (sanitizedHtml) {
+  if (sanitizedHtml && sanitizedForId.current === email.id) {
     return (
       // sandbox="" (no flags) blocks: scripts, same-origin access, forms,
       // plugins, top-level navigation, and pointer-lock inside the frame.
