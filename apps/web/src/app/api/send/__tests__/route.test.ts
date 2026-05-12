@@ -4,6 +4,7 @@ import { Resend } from 'resend';
 import type { CreateEmailOptions } from 'resend';
 
 const routeMocks = vi.hoisted(() => {
+  const captureException = vi.fn().mockResolvedValue(undefined);
   const insertRun = vi.fn().mockResolvedValue({ success: true });
   const insertBind = vi.fn().mockReturnValue({ run: insertRun });
   const selectFirst = vi.fn().mockResolvedValue(null);
@@ -16,6 +17,7 @@ const routeMocks = vi.hoisted(() => {
   });
 
   return {
+    captureException,
     insertRun,
     insertBind,
     selectFirst,
@@ -43,6 +45,10 @@ vi.mock('resend', () => ({
   })),
 }));
 
+vi.mock('@/lib/sentry', () => ({
+  captureException: routeMocks.captureException,
+}));
+
 function getInsertCall(): { sql: string; boundValues: unknown[] } {
   const insertIdx = (routeMocks.prepare.mock.calls as unknown[][]).findIndex(
     (args) => (args[0] as string).includes('INSERT OR IGNORE INTO emails')
@@ -50,8 +56,8 @@ function getInsertCall(): { sql: string; boundValues: unknown[] } {
   expect(insertIdx).toBeGreaterThanOrEqual(0);
 
   // SELECTs use selectBind, so insertBind only records INSERT parameter lists.
+  expect(routeMocks.insertBind).toHaveBeenCalledTimes(1);
   const firstInsertBindCall = routeMocks.insertBind.mock.calls[0];
-  expect(firstInsertBindCall).toBeDefined();
   return {
     sql: routeMocks.prepare.mock.calls[insertIdx][0] as string,
     boundValues: firstInsertBindCall as unknown[],
@@ -60,7 +66,9 @@ function getInsertCall(): { sql: string; boundValues: unknown[] } {
 
 describe('POST /api/send', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
+    routeMocks.captureException.mockResolvedValue(undefined);
     routeMocks.insertRun.mockResolvedValue({ success: true });
     routeMocks.selectFirst.mockResolvedValue(null);
   });
@@ -159,6 +167,7 @@ describe('POST /api/send', () => {
         null,
         0,
       ]);
+      expect(routeMocks.selectBind).toHaveBeenCalledTimes(0);
     } finally {
       randomUuidSpy.mockRestore();
     }
@@ -179,6 +188,37 @@ describe('POST /api/send', () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe('Failed to send email');
+  });
+
+  it('returns 500 without sending when thread lookup fails before send', async () => {
+    routeMocks.selectFirst.mockRejectedValueOnce(new Error('thread lookup failed'));
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'sent-id' }, error: null });
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { POST } = await import('../route');
+      const req = new Request('http://localhost/api/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          to: 'a@b.com',
+          subject: 'Re: Hi',
+          content: 'Hi back',
+          replyToId: '<msg-1@example.com>',
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const res = await POST(req as unknown as NextRequest);
+
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: 'Failed to send email' });
+      expect(sendSpy).not.toHaveBeenCalled();
+      expect(routeMocks.insertBind).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith('Failed to send email:', expect.any(Error));
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('sets In-Reply-To and References headers when replyToId is provided', async () => {
@@ -226,6 +266,7 @@ describe('POST /api/send', () => {
         '<root@example.com> <msg-1@example.com>',
         0,
       ]);
+      expect(routeMocks.selectBind).toHaveBeenCalledTimes(1);
     } finally {
       randomUuidSpy.mockRestore();
     }
@@ -250,8 +291,35 @@ describe('POST /api/send', () => {
         '[api/send] Failed to persist sent email to D1:',
         expect.any(Error)
       );
+      expect(routeMocks.captureException).toHaveBeenCalledWith(expect.any(Error));
     } finally {
       errorSpy.mockRestore();
+    }
+  });
+
+  it('skips persistence when Resend returns success without an id', async () => {
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const sendSpy = vi.fn().mockResolvedValue({ data: {}, error: null });
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
+    try {
+      const { POST } = await import('../route');
+      const req = new Request('http://localhost/api/send', {
+        method: 'POST',
+        body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const res = await POST(req as unknown as NextRequest);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ id: null });
+      expect(routeMocks.insertBind).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[api/send] Resend returned success without an id; skipping sent-email persistence'
+      );
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 });
