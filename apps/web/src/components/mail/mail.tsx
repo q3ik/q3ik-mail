@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useRef } from 'react';
+import { useCallback, useRef, useState, useTransition } from 'react';
 import type { Email, EmailSummary } from '@q3ik-mail/database';
 import {
   ResizablePanelGroup,
@@ -48,7 +48,7 @@ export function Mail({
     setComposeOpen(true);
   }
 
-  async function handleLoadMore() {
+  const handleLoadMore = useCallback(async function handleLoadMore() {
     if (!nextCursor || isLoadingMore) return;
 
     setIsLoadingMore(true);
@@ -67,14 +67,20 @@ export function Mail({
         nextCursor: string | null;
       };
 
-      setThreads((prev) => [...prev, ...payload.threads]);
+      setThreads((prev) => {
+        const seenThreadIds = new Set(prev.map((thread) => thread.thread_id));
+        return [
+          ...prev,
+          ...payload.threads.filter((thread) => !seenThreadIds.has(thread.thread_id)),
+        ];
+      });
       setNextCursor(payload.nextCursor);
     } catch (err) {
       console.error('[mail] load more failed:', err);
     } finally {
       setIsLoadingMore(false);
     }
-  }
+  }, [isLoadingMore, nextCursor]);
 
   async function handleSelectThread(threadId: string) {
     if (threadId === selectedThreadId) return;

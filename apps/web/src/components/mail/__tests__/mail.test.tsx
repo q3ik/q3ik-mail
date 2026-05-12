@@ -96,6 +96,9 @@ import * as mailActions from '@/app/actions/mail';
 
 const THREAD_ID = 'thread-abc';
 
+const encodeCursor = (createdAt: string, id: string) =>
+  btoa(JSON.stringify({ createdAt, id }));
+
 /**
  * Factory for EmailSummary (thread list rows).
  * EmailSummary omits body_html and body_text from the full Email type.
@@ -237,11 +240,16 @@ describe('Mail — markAsRead error recovery', () => {
       subject: 'Later message',
       created_at: '2024-01-02T00:00:00Z',
     });
+    const duplicateThread = makeThread({
+      id: 'email-1',
+      thread_id: THREAD_ID,
+      created_at: '2024-01-02T00:00:00Z',
+    });
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        threads: [nextThread],
+        threads: [duplicateThread, nextThread],
         nextCursor: null,
       }),
     });
@@ -256,7 +264,7 @@ describe('Mail — markAsRead error recovery', () => {
         ]}
         selectedThread={[]}
         defaultSelectedId={undefined}
-        initialNextCursor="2024-01-02T00:00:00Z"
+        initialNextCursor={encodeCursor('2024-01-02T00:00:00Z', 'email-1')}
       />
     );
 
@@ -268,8 +276,11 @@ describe('Mail — markAsRead error recovery', () => {
       expect(screen.queryByTestId('thread-thread-def')).not.toBeNull()
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/emails?cursor=2024-01-02T00%3A00%3A00Z'
+      `/api/emails?cursor=${encodeURIComponent(
+        encodeCursor('2024-01-02T00:00:00Z', 'email-1')
+      )}`
     );
+    expect(screen.getAllByTestId(`thread-${THREAD_ID}`)).toHaveLength(1);
     expect(screen.queryByTestId('load-more')).toBeNull();
   });
 });
