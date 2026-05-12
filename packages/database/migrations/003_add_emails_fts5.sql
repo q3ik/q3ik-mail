@@ -30,4 +30,5 @@ END;
 -- Backfill existing rows into the FTS index.
 INSERT INTO emails_fts(rowid, subject, body_text, from_address, from_name)
 SELECT rowid, subject, body_text, from_address, from_name
-FROM emails;
+FROM emails
+WHERE NOT EXISTS (SELECT 1 FROM emails_fts LIMIT 1);

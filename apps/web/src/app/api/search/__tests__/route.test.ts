@@ -32,6 +32,24 @@ describe('GET /api/search', () => {
     await expect(res.json()).resolves.toEqual([{ id: '1', thread_id: 'thread-1' }]);
   });
 
+  it('returns 400 when q is missing or blank', async () => {
+    const { GET } = await import('../route');
+
+    const missingReq = new Request('http://localhost/api/search', { method: 'GET' });
+    const missingRes = await GET(missingReq as unknown as NextRequest);
+    expect(missingRes.status).toBe(400);
+    await expect(missingRes.json()).resolves.toEqual({ error: 'q is required' });
+
+    const blankReq = new Request('http://localhost/api/search?q=%20%20%20', {
+      method: 'GET',
+    });
+    const blankRes = await GET(blankReq as unknown as NextRequest);
+    expect(blankRes.status).toBe(400);
+    await expect(blankRes.json()).resolves.toEqual({ error: 'q is required' });
+
+    expect(searchEmails).not.toHaveBeenCalled();
+  });
+
   it('returns a structured 500 response when search fails', async () => {
     searchEmails.mockRejectedValue(new Error('D1 exploded'));
 

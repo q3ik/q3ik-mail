@@ -453,7 +453,7 @@ describe('getThreadListPage', () => {
 });
 
 describe('searchEmails', () => {
-  it('returns an empty array for blank queries', async () => {
+  it('returns an empty array for whitespace-only queries', async () => {
     const db = createMockDb([
       { id: '1', thread_id: 'thread-1', subject: 'Hello' },
     ]);
@@ -461,7 +461,7 @@ describe('searchEmails', () => {
     expect(result).toEqual([]);
   });
 
-  it('queries FTS5 with a sanitized MATCH query', async () => {
+  it('queries FTS5 with implicit AND semantics and a fixed result limit', async () => {
     let preparedSql = '';
     let boundArgs: unknown[] = [];
     const db = createMockDb(
@@ -487,9 +487,52 @@ describe('searchEmails', () => {
 
     expect(preparedSql).toContain('JOIN emails_fts ON emails.rowid = emails_fts.rowid');
     expect(preparedSql).toContain('WHERE emails_fts MATCH ?');
-    expect(boundArgs).toEqual(['"hello" OR "world"']);
+    expect(preparedSql).toContain('LIMIT 50');
+    expect(boundArgs).toEqual(['"hello" """world"']);
     expect(result).toHaveLength(1);
     expect(result[0].subject).toBe('Hello FTS');
+  });
+
+  it('preserves non-quote characters (including *) by phrase-quoting terms', async () => {
+    let boundArgs: unknown[] = [];
+    const db = createMockDb([], {
+      onBind: (args) => {
+        boundArgs = args;
+      },
+    });
+
+    await searchEmails(db, 'john*');
+
+    expect(boundArgs).toEqual(['"john*"']);
+  });
+
+  it('builds a single-term query without join operators', async () => {
+    let boundArgs: unknown[] = [];
+    const db = createMockDb([], {
+      onBind: (args) => {
+        boundArgs = args;
+      },
+    });
+
+    await searchEmails(db, 'sender@example.com');
+
+    expect(boundArgs).toEqual(['"sender@example.com"']);
+  });
+
+  it('returns rows containing from_name in results', async () => {
+    const db = createMockDb([
+      {
+        id: '1',
+        thread_id: 'thread-1',
+        from_name: 'Smith-Jones',
+        subject: 'Hello',
+      },
+    ]);
+
+    const result = await searchEmails(db, 'Smith-Jones');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].from_name).toBe('Smith-Jones');
   });
 });
 

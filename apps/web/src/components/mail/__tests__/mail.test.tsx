@@ -31,13 +31,16 @@ vi.mock('../mail-list', () => ({
     onSelectThread,
     onLoadMore,
     isLoadingMore,
+    isSearching,
   }: {
     threads: EmailSummary[];
     onSelectThread: (id: string) => void;
     onLoadMore?: () => void;
     isLoadingMore?: boolean;
+    isSearching?: boolean;
   }) => (
     <div>
+      {isSearching ? <div data-testid="mail-list-searching">Searching…</div> : null}
       <ul>
         {threads.map((t) => (
           <li key={t.thread_id}>
@@ -266,6 +269,71 @@ describe('Mail — markAsRead error recovery', () => {
     );
     expect(fetchMock).toHaveBeenCalledWith('/api/search?q=search');
     expect(screen.queryByTestId('thread-thread-initial')).toBeNull();
+  });
+
+  it('keeps newest search results when an older search resolves later', async () => {
+    const initialThread = makeThread({ thread_id: 'thread-initial', subject: 'Initial' });
+    const slowSearchThread = makeThread({
+      id: 'email-2',
+      thread_id: 'thread-slow',
+      resend_id: 'resend-2',
+      subject: 'Slow result',
+    });
+    const fastSearchThread = makeThread({
+      id: 'email-3',
+      thread_id: 'thread-fast',
+      resend_id: 'resend-3',
+      subject: 'Fast result',
+    });
+
+    let resolveSlow: ((value: unknown) => void) | undefined;
+    let resolveFast: ((value: unknown) => void) | undefined;
+    const slowPromise = new Promise((resolve) => {
+      resolveSlow = resolve;
+    });
+    const fastPromise = new Promise((resolve) => {
+      resolveFast = resolve;
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(slowPromise)
+      .mockReturnValueOnce(fastPromise);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <Mail
+        threads={[initialThread]}
+        selectedThread={[]}
+        defaultSelectedId={undefined}
+      />
+    );
+
+    const searchInput = screen.getByLabelText('Search emails');
+    const searchForm = searchInput.closest('form');
+    expect(searchForm).not.toBeNull();
+
+    fireEvent.change(searchInput, { target: { value: 'slow' } });
+    act(() => { fireEvent.submit(searchForm!); });
+    expect(screen.queryByTestId('mail-list-searching')).not.toBeNull();
+
+    fireEvent.change(searchInput, { target: { value: 'fast' } });
+    act(() => { fireEvent.submit(searchForm!); });
+
+    resolveFast?.({
+      ok: true,
+      json: async () => [fastSearchThread],
+    });
+    await waitFor(() => expect(screen.queryByTestId('thread-thread-fast')).not.toBeNull());
+
+    resolveSlow?.({
+      ok: true,
+      json: async () => [slowSearchThread],
+    });
+    await Promise.resolve();
+
+    expect(screen.queryByTestId('thread-thread-fast')).not.toBeNull();
+    expect(screen.queryByTestId('thread-thread-slow')).toBeNull();
   });
 
   it('appends threads from the next cursor page and hides load more when exhausted', async () => {

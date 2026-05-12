@@ -43,6 +43,10 @@ export function Mail({
 
   // Bug #3 fix: monotonically-increasing token to guard against out-of-order responses
   const requestTokenRef = useRef(0);
+  const preSearchStateRef = useRef<{
+    threads: EmailSummary[];
+    nextCursor: string | null;
+  } | null>(null);
 
   const [composeOpen, setComposeOpen] = useState(false);
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>();
@@ -57,11 +61,23 @@ export function Mail({
 
     const trimmedQuery = searchQuery.trim();
     if (!trimmedQuery) {
-      setThreads(initialThreads);
-      setNextCursor(initialNextCursor);
+      requestTokenRef.current += 1;
+      if (preSearchStateRef.current) {
+        setThreads(preSearchStateRef.current.threads);
+        setNextCursor(preSearchStateRef.current.nextCursor);
+        preSearchStateRef.current = null;
+      }
       return;
     }
 
+    if (!preSearchStateRef.current) {
+      preSearchStateRef.current = {
+        threads,
+        nextCursor,
+      };
+    }
+
+    const token = ++requestTokenRef.current;
     setIsSearching(true);
     try {
       const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}`);
@@ -70,14 +86,17 @@ export function Mail({
       }
 
       const payload = (await response.json()) as EmailSummary[];
+      if (token !== requestTokenRef.current) return;
       setThreads(payload);
       setNextCursor(null);
     } catch (err) {
       console.error('[mail] search failed:', err);
     } finally {
-      setIsSearching(false);
+      if (token === requestTokenRef.current) {
+        setIsSearching(false);
+      }
     }
-  }, [initialNextCursor, initialThreads, searchQuery]);
+  }, [nextCursor, searchQuery, threads]);
 
   const handleLoadMore = useCallback(async function handleLoadMore() {
     if (!nextCursor || isLoadingMore) return;
@@ -199,6 +218,7 @@ export function Mail({
               onSelectThread={handleSelectThread}
               onLoadMore={nextCursor ? handleLoadMore : undefined}
               isLoadingMore={isLoadingMore}
+              isSearching={isSearching}
             />
           </div>
         </ResizablePanel>
