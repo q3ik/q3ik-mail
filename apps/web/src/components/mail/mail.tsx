@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState, useTransition } from 'react';
+import type { FormEvent } from 'react';
 import type { Email, EmailSummary } from '@q3ik-mail/database';
 import {
   ResizablePanelGroup,
@@ -8,6 +9,7 @@ import {
   ResizableHandle,
 } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { PenSquareIcon } from 'lucide-react';
 import { MailList } from './mail-list';
 import { MailDisplay } from './mail-display';
@@ -35,6 +37,8 @@ export function Mail({
   const [threads, setThreads] = useState<EmailSummary[]>(initialThreads);
   const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   // Bug #3 fix: monotonically-increasing token to guard against out-of-order responses
@@ -47,6 +51,33 @@ export function Mail({
     setComposePayload(payload ?? undefined);
     setComposeOpen(true);
   }
+
+  const handleSearch = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) {
+      setThreads(initialThreads);
+      setNextCursor(initialNextCursor);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}`);
+      if (!response.ok) {
+        throw new Error(`Failed to search emails (${response.status})`);
+      }
+
+      const payload = (await response.json()) as EmailSummary[];
+      setThreads(payload);
+      setNextCursor(null);
+    } catch (err) {
+      console.error('[mail] search failed:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [initialNextCursor, initialThreads, searchQuery]);
 
   const handleLoadMore = useCallback(async function handleLoadMore() {
     if (!nextCursor || isLoadingMore) return;
@@ -149,6 +180,19 @@ export function Mail({
                 Compose
               </Button>
             </div>
+            <form className="border-b p-3" onSubmit={handleSearch}>
+              <div className="flex gap-2">
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search"
+                  aria-label="Search emails"
+                />
+                <Button type="submit" variant="outline" size="sm" disabled={isSearching}>
+                  {isSearching ? 'Searching…' : 'Search'}
+                </Button>
+              </div>
+            </form>
             <MailList
               threads={threads}
               selectedThreadId={selectedThreadId}
