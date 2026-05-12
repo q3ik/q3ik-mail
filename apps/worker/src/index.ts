@@ -12,53 +12,102 @@ interface ResendReceivedEmail {
   // Resend may return a single address string or an array; normalise downstream.
   to?: string | string[];
   subject?: string;
-  text: string | null;
+  // `text` is nullable but not guaranteed present on every event (HTML-only senders
+  // may omit the key entirely). Treat as optional; normalise to null downstream.
+  text?: string | null;
   html?: string | null;
   headers?: Array<{ name: string; value: string }>;
 }
 
-function parseResendReceivedEmail(payload: unknown): ResendReceivedEmail | null {
-  if (!payload || typeof payload !== 'object') return null;
-  const email = payload as Record<string, any>;
-
-  if (!('text' in email) || (email.text !== null && typeof email.text !== 'string')) {
-    return null;
+/**
+ * Validates and narrows an unknown Resend receiving-API payload to
+ * `ResendReceivedEmail`. Returns `null` plus the name of the offending field
+ * when validation fails so callers can emit a diagnostic log entry.
+ *
+ * Key invariants:
+ * - Only `object` payloads are accepted.
+ * - `text` is optional (HTML-only emails may omit the key), but when present
+ *   it must be `string | null`. Do NOT require its presence — that would cause
+ *   a 502 for every HTML-only inbound message.
+ * - All other fields are individually optional and type-checked when present.
+ * - Inner collection types (headers array) use `Record<string, unknown>` to
+ *   preserve exhaustiveness checking as the interface evolves.
+ */
+function parseResendReceivedEmail(
+  payload: unknown,
+): { ok: true; email: ResendReceivedEmail } | { ok: false; field: string } {
+  if (!payload || typeof payload !== 'object') {
+    return { ok: false, field: '(root)' };
   }
-  if (email.from !== undefined && typeof email.from !== 'string') return null;
+
+  // Use `unknown` (not `any`) so the compiler enforces explicit narrowing on
+  // every property access and exhaustiveness checks remain intact.
+  const email = payload as Record<string, unknown>;
+
+  // `text` — optional; when present must be string | null
+  if ('text' in email && email.text !== null && typeof email.text !== 'string') {
+    return { ok: false, field: 'text' };
+  }
+
+  if (email.from !== undefined && typeof email.from !== 'string') {
+    return { ok: false, field: 'from' };
+  }
+
   if (
     email.to !== undefined &&
     typeof email.to !== 'string' &&
-    !(Array.isArray(email.to) && email.to.every((item) => typeof item === 'string'))
-  ) {
-    return null;
-  }
-  if (email.subject !== undefined && typeof email.subject !== 'string') return null;
-  if (email.html !== undefined && email.html !== null && typeof email.html !== 'string') return null;
-  if (
-    email.headers !== undefined &&
     !(
-      Array.isArray(email.headers) &&
-      email.headers.every(
-        (header) =>
-          header &&
-          typeof header === 'object' &&
-          typeof (header as { name?: unknown }).name === 'string' &&
-          typeof (header as { value?: unknown }).value === 'string',
-      )
+      Array.isArray(email.to) &&
+      (email.to as unknown[]).every((item) => typeof item === 'string')
     )
   ) {
-    return null;
+    return { ok: false, field: 'to' };
+  }
+
+  if (email.subject !== undefined && typeof email.subject !== 'string') {
+    return { ok: false, field: 'subject' };
+  }
+
+  if (email.html !== undefined && email.html !== null && typeof email.html !== 'string') {
+    return { ok: false, field: 'html' };
+  }
+
+  if (email.headers !== undefined) {
+    if (!Array.isArray(email.headers)) {
+      return { ok: false, field: 'headers' };
+    }
+    for (const header of email.headers as unknown[]) {
+      if (!header || typeof header !== 'object') {
+        return { ok: false, field: 'headers[*]' };
+      }
+      const h = header as Record<string, unknown>;
+      if (typeof h.name !== 'string' || typeof h.value !== 'string') {
+        return { ok: false, field: 'headers[*].name/value' };
+      }
+    }
   }
 
   return {
-    from: typeof email.from === 'string' ? email.from : undefined,
-    to: typeof email.to === 'string' || Array.isArray(email.to) ? email.to as string | string[] : undefined,
-    subject: typeof email.subject === 'string' ? email.subject : undefined,
-    text: email.text as string | null,
-    html: typeof email.html === 'string' || email.html === null ? email.html : undefined,
-    headers: Array.isArray(email.headers)
-      ? email.headers as Array<{ name: string; value: string }>
-      : undefined,
+    ok: true,
+    email: {
+      from: typeof email.from === 'string' ? email.from : undefined,
+      to:
+        typeof email.to === 'string' || Array.isArray(email.to)
+          ? (email.to as string | string[])
+          : undefined,
+      subject: typeof email.subject === 'string' ? email.subject : undefined,
+      text:
+        typeof email.text === 'string' || email.text === null
+          ? (email.text as string | null)
+          : undefined,
+      html:
+        typeof email.html === 'string' || email.html === null
+          ? (email.html as string | null)
+          : undefined,
+      headers: Array.isArray(email.headers)
+        ? (email.headers as Array<{ name: string; value: string }>)
+        : undefined,
+    },
   };
 }
 
@@ -145,7 +194,11 @@ const handler: ExportedHandler<Env> = {
     try {
       // Use resend.emails.receiving.get() -- NOT resend.emails.get()
       // resend.emails.get() is for sent mail; receiving.get() is for inbound
-      receivedEmailPayload = await (resend.emails as unknown as { receiving: { get: (id: string) => Promise<unknown> } }).receiving.get(emailId);
+      receivedEmailPayload = await (
+        resend.emails as unknown as {
+          receiving: { get: (id: string) => Promise<unknown> };
+        }
+      ).receiving.get(emailId);
     } catch (err) {
       if (env.SENTRY_DSN) {
         Sentry.captureException(err, {
@@ -157,14 +210,18 @@ const handler: ExportedHandler<Env> = {
     }
 
     // --- Runtime shape guard ---
-    // The API response is cast from `any`; validate the minimum required shape
-    // before proceeding so that API will surface immediately as a 502 rather
-    // than silently writing nulls into D1.
-    const receivedEmail = parseResendReceivedEmail(receivedEmailPayload);
-    if (!receivedEmail) {
-      console.error('[worker] Resend receiving API returned unexpected payload shape');
+    // The API response is cast from `unknown`; validate the minimum required shape
+    // before proceeding so that a malformed API response surfaces immediately as a
+    // 502 rather than silently writing nulls into D1.
+    const parseResult = parseResendReceivedEmail(receivedEmailPayload);
+    if (!parseResult.ok) {
+      console.error(
+        `[worker] Resend receiving API returned unexpected payload shape: field="${parseResult.field}"`,
+        { emailId },
+      );
       return new Response('Invalid email payload from upstream', { status: 502 });
     }
+    const receivedEmail = parseResult.email;
 
     // --- Step 4: Threading logic ---
     // Parse headers array for In-Reply-To and Message-ID
