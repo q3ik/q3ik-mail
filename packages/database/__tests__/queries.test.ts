@@ -1,17 +1,86 @@
+
+// TODO: !!! Possibly broken after merge conflict resolution
 import { describe, it, expect, vi } from 'vitest';
-import { getLatestEmails, getEmailsByThread, markAsRead, getEmailById, getThreadList, resolveOrphanedThreads } from '../index';
+import { getLatestEmails, 
+        getEmailsByThread, 
+        markAsRead, 
+        getEmailById, 
+        getThreadList, 
+        getThreadListPage,
+        resolveOrphanedThreads 
+       } from '../index';
 
 // Minimal in-memory D1 mock for unit testing query functions.
 // Real D1 binding tests run in the worker layer via @cloudflare/vitest-pool-workers.
-function createMockDb(rows: Record<string, unknown>[] = []) {
+function createMockDb(
+  rows: Record<string, unknown>[] = [],
+  {
+    onPrepare,
+    onBind,
+  }: {
+    onPrepare?: (sql: string) => void;
+    onBind?: (args: unknown[]) => void;
+  } = {}
+) {
   return {
-    prepare: (_sql: string) => ({
-      bind: (..._args: unknown[]) => ({
-        all: async () => ({ results: rows }),
-        first: async () => rows[0] ?? null,
-        run: async () => ({ success: true }),
-      }),
-    }),
+    prepare: (sql: string) => {
+      onPrepare?.(sql);
+      return {
+        bind: (...args: unknown[]) => {
+          onBind?.(args);
+          return {
+            all: async () => {
+              let results = [...rows];
+
+              if (sql.includes('created_at < ?') && args.length >= 4) {
+                const [createdAt, equalCreatedAt, id] = args as [
+                  string,
+                  string,
+                  string,
+                  number,
+                ];
+
+                results = results.filter((row) => {
+                  const rowCreatedAt = row.created_at;
+                  const rowId = row.id;
+
+                  return (
+                    typeof rowCreatedAt === 'string' &&
+                    typeof rowId === 'string' &&
+                    (rowCreatedAt < createdAt ||
+                      (rowCreatedAt === equalCreatedAt && rowId > id))
+                  );
+                });
+              }
+
+              if (sql.includes('ORDER BY created_at DESC, id ASC')) {
+                results.sort((a, b) => {
+                  const aCreatedAt = typeof a.created_at === 'string' ? a.created_at : '';
+                  const bCreatedAt = typeof b.created_at === 'string' ? b.created_at : '';
+
+                  if (aCreatedAt !== bCreatedAt) {
+                    return bCreatedAt.localeCompare(aCreatedAt);
+                  }
+
+                  const aId = typeof a.id === 'string' ? a.id : '';
+                  const bId = typeof b.id === 'string' ? b.id : '';
+                  return aId.localeCompare(bId);
+                });
+              }
+
+              const limit = args.at(-1);
+              if (typeof limit === 'number') {
+                results = results.slice(0, limit);
+              }
+
+              return { results };
+            },
+            first: async () => rows[0] ?? null,
+            run: async () => ({ success: true }),
+          };
+        },
+      };
+    },
   } as unknown as D1Database;
 }
 
@@ -191,6 +260,82 @@ describe('getThreadList', () => {
     const db = createMockDb(rows);
     const result = await getThreadList(db, 1);
     expect(result[0].references).toBe('<root-001@example.com>');
+  });
+
+  it('supports cursor-based pagination and returns a next cursor when more rows exist', async () => {
+    let preparedSql = '';
+    let boundArgs: unknown[] = [];
+    const cursor = btoa(
+      JSON.stringify({
+        createdAt: '2026-05-11T12:00:00Z',
+        id: '2',
+      })
+    );
+
+    const rows = [
+      {
+        id: '1',
+        thread_id: 'thread-1',
+        subject: 'Newest',
+        created_at: '2026-05-11T13:00:00Z',
+      },
+      {
+        id: '2',
+        thread_id: 'thread-2',
+        subject: 'Middle',
+        created_at: '2026-05-11T12:00:00Z',
+      },
+      {
+        id: '3',
+        thread_id: 'thread-3',
+        subject: 'Same second, later id',
+        created_at: '2026-05-11T12:00:00Z',
+      },
+      {
+        id: '4',
+        thread_id: 'thread-4',
+        subject: 'Older',
+        created_at: '2026-05-11T10:00:00Z',
+      },
+      {
+        id: '5',
+        thread_id: 'thread-5',
+        subject: 'Oldest',
+        created_at: '2026-05-11T09:00:00Z',
+      },
+    ];
+
+    const db = createMockDb(rows, {
+      onPrepare: (sql) => {
+        preparedSql = sql;
+      },
+      onBind: (args) => {
+        boundArgs = args;
+      },
+    });
+
+    const result = await getThreadListPage(db, {
+      limit: 2,
+      cursor,
+    });
+
+    expect(preparedSql).toContain('created_at < ?');
+    expect(boundArgs).toEqual([
+      '2026-05-11T12:00:00Z',
+      '2026-05-11T12:00:00Z',
+      '2',
+      3,
+    ]);
+    expect(result.threads).toHaveLength(2);
+    expect(result.threads.map((thread) => thread.id)).toEqual(['3', '4']);
+    expect(result.nextCursor).toBe(
+      btoa(
+        JSON.stringify({
+          createdAt: '2026-05-11T10:00:00Z',
+          id: '4',
+        })
+      )
+    );
   });
 });
 

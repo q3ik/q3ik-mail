@@ -1,10 +1,10 @@
 export const runtime = 'edge';
 
-import { fetchThreadList, fetchThread } from '@/app/actions/mail';
+import { fetchThreadListPage, fetchThread } from '@/app/actions/mail';
 import { Mail } from '@/components/mail/mail';
 
 export default async function InboxPage() {
-  const threads = await fetchThreadList(50);
+  const { threads, nextCursor } = await fetchThreadListPage(50);
 
   const firstThreadId = threads[0]?.thread_id ?? null;
   const initialThread = firstThreadId ? await fetchThread(firstThreadId) : [];
@@ -15,6 +15,7 @@ export default async function InboxPage() {
         threads={threads}
         selectedThread={initialThread}
         defaultSelectedId={firstThreadId ?? undefined}
+        initialNextCursor={nextCursor}
       />
     </main>
   );
