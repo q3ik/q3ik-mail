@@ -1,5 +1,4 @@
 
-// TODO: !!! Possibly broken after merge conflict resolution
 import { describe, it, expect, vi } from 'vitest';
 import { getLatestEmails, 
         getEmailsByThread, 
@@ -262,6 +261,9 @@ describe('getThreadList', () => {
     expect(result[0].references).toBe('<root-001@example.com>');
   });
 
+});
+
+describe('getThreadListPage', () => {
   it('supports cursor-based pagination and returns a next cursor when more rows exist', async () => {
     let preparedSql = '';
     let boundArgs: unknown[] = [];
@@ -336,6 +338,72 @@ describe('getThreadList', () => {
         })
       )
     );
+  });
+
+  it('does not skip or duplicate rows when two threads share the same created_at timestamp', async () => {
+    // All five threads: two share the same timestamp at the page boundary.
+    // Page 1 (limit=2): threads A and B (both at '2026-05-11T12:00:00Z').
+    // Page 2 cursor encodes { createdAt: '2026-05-11T12:00:00Z', id: 'b' }.
+    // Page 2 must return C (same timestamp, id > 'b') and D — no skip, no duplicate.
+    const allRows = [
+      { id: 'a', thread_id: 'thread-a', subject: 'A', created_at: '2026-05-11T12:00:00Z' },
+      { id: 'b', thread_id: 'thread-b', subject: 'B', created_at: '2026-05-11T12:00:00Z' },
+      { id: 'c', thread_id: 'thread-c', subject: 'C', created_at: '2026-05-11T12:00:00Z' },
+      { id: 'd', thread_id: 'thread-d', subject: 'D', created_at: '2026-05-11T10:00:00Z' },
+      { id: 'e', thread_id: 'thread-e', subject: 'E', created_at: '2026-05-11T09:00:00Z' },
+    ];
+
+    // Fetch page 1 (no cursor) — should return rows a, b.
+    const page1 = await getThreadListPage(createMockDb(allRows), { limit: 2 });
+    expect(page1.threads.map((t) => t.id)).toEqual(['a', 'b']);
+    expect(page1.nextCursor).not.toBeNull();
+
+    // Fetch page 2 using the cursor from page 1 — should return rows c, d (no skip/duplicate).
+    const page2 = await getThreadListPage(createMockDb(allRows), {
+      limit: 2,
+      cursor: page1.nextCursor!,
+    });
+    expect(page2.threads.map((t) => t.id)).toEqual(['c', 'd']);
+    expect(page2.nextCursor).not.toBeNull();
+
+    // Fetch page 3 — should return row e only and no further cursor.
+    const page3 = await getThreadListPage(createMockDb(allRows), {
+      limit: 2,
+      cursor: page2.nextCursor!,
+    });
+    expect(page3.threads.map((t) => t.id)).toEqual(['e']);
+    expect(page3.nextCursor).toBeNull();
+
+    // Verify no row appears more than once across all pages.
+    const allIds = [
+      ...page1.threads.map((t) => t.id),
+      ...page2.threads.map((t) => t.id),
+      ...page3.threads.map((t) => t.id),
+    ];
+    expect(allIds).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('returns an empty page and null nextCursor for a malformed cursor string', async () => {
+    const db = createMockDb([
+      { id: '1', thread_id: 'thread-1', subject: 'Hello', created_at: '2026-05-11T12:00:00Z' },
+    ]);
+
+    const result = await getThreadListPage(db, { limit: 50, cursor: 'not-valid-base64!!!{' });
+
+    expect(result.threads).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('returns an empty page and null nextCursor for a base64 cursor that lacks required fields', async () => {
+    const db = createMockDb([
+      { id: '1', thread_id: 'thread-1', subject: 'Hello', created_at: '2026-05-11T12:00:00Z' },
+    ]);
+    const malformedCursor = btoa(JSON.stringify({ foo: 'bar' }));
+
+    const result = await getThreadListPage(db, { limit: 50, cursor: malformedCursor });
+
+    expect(result.threads).toEqual([]);
+    expect(result.nextCursor).toBeNull();
   });
 });
 

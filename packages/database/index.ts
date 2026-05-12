@@ -171,7 +171,14 @@ export async function getThreadListPage(
 ): Promise<ThreadListPage> {
   const pageSize = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
   const fetchLimit = pageSize + 1;
-  const decodedCursor = cursor ? decodeThreadListCursor(cursor) : null;
+  let decodedCursor: ThreadListCursorPayload | null = null;
+  if (cursor) {
+    try {
+      decodedCursor = decodeThreadListCursor(cursor);
+    } catch {
+      return { threads: [], nextCursor: null };
+    }
+  }
   const whereClause = decodedCursor
     ? `WHERE thread_rank = 1
          AND (
