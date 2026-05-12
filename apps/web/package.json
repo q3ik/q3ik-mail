@@ -35,6 +35,7 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@q3ik-mail/testing": "workspace:*",
     "@cloudflare/workers-types": "^4.20250508.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
