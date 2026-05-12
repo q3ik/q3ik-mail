@@ -25,6 +25,30 @@ async function readBodyFromR2(
 }
 
 /**
+ * Captures an R2 read failure to Sentry via the globalThis hook.
+ * Encapsulates the globalThis type assertion and optional chaining so
+ * individual catch blocks stay clean.
+ */
+function captureR2ReadError(
+  err: unknown,
+  ctx: { operation: string; key: string | null },
+): void {
+  const sentryCapture = (
+    globalThis as { Sentry?: { captureException?: (error: unknown, context?: unknown) => void } }
+  ).Sentry?.captureException;
+  if (!sentryCapture) return;
+
+  const tags: Record<string, string> = {
+    layer: 'database',
+    storage_provider: 'r2',
+    operation: ctx.operation,
+  };
+  if (ctx.key) tags.r2_object_key = ctx.key;
+
+  sentryCapture(err, { tags });
+}
+
+/**
  * Hydrates body_html and body_text on an Email from R2 when key columns are set.
  *
  * Each R2 read failure is caught individually so one transient error does not
@@ -40,26 +64,12 @@ async function hydrateEmailBodyFromR2(
   const [bodyHtml, bodyText] = await Promise.all([
     readBodyFromR2(r2Bucket, email.body_html_key, email.body_html).catch((err) => {
       console.warn('[database] R2 read failed for body_html; using fallback', { key: email.body_html_key, err });
-      (globalThis as { Sentry?: { captureException?: (error: unknown, context?: unknown) => void } }).Sentry?.captureException?.(err, {
-        tags: {
-          layer: 'database',
-          storage_provider: 'r2',
-          operation: 'r2.get.body_html',
-          ...(email.body_html_key ? { r2_object_key: email.body_html_key } : {}),
-        },
-      });
+      captureR2ReadError(err, { operation: 'r2.get.body_html', key: email.body_html_key });
       return email.body_html;
     }),
     readBodyFromR2(r2Bucket, email.body_text_key, email.body_text).catch((err) => {
       console.warn('[database] R2 read failed for body_text; using fallback', { key: email.body_text_key, err });
-      (globalThis as { Sentry?: { captureException?: (error: unknown, context?: unknown) => void } }).Sentry?.captureException?.(err, {
-        tags: {
-          layer: 'database',
-          storage_provider: 'r2',
-          operation: 'r2.get.body_text',
-          ...(email.body_text_key ? { r2_object_key: email.body_text_key } : {}),
-        },
-      });
+      captureR2ReadError(err, { operation: 'r2.get.body_text', key: email.body_text_key });
       return email.body_text;
     }),
   ]);
