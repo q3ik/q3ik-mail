@@ -37,6 +37,7 @@ interface JwtPayload {
   sub: string;
   iat: number;
   exp: number;
+  nbf?: number;
   email?: string;
   [key: string]: unknown;
 }
