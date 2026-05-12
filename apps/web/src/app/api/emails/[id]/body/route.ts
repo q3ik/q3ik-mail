@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare';
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { getEmailById } from '@q3ik-mail/database';
 
@@ -25,6 +26,11 @@ export async function GET(
   // Reject any request missing this header — it means Access was bypassed or
   // the route is being hit directly without the Access policy in front of it.
   if (!hasAccessJwt(req)) {
+    Sentry.captureMessage('[api/email-body] missing or malformed Cloudflare Access JWT', {
+      level: 'warning',
+      tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
+      extra: { path: new URL(req.url).pathname },
+    });
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
