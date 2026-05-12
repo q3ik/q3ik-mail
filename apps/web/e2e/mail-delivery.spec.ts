@@ -42,8 +42,12 @@ test.describe('agentmail delivery', () => {
   let mailbox: { id: string; email: string } | null = null;
 
   test.beforeAll(async () => {
-    test.skip(!agentmailApiKey, 'AGENTMAIL_API_KEY is not configured; skipping agentmail E2E tests');
-    client = new AgentMailClient(agentmailApiKey!);
+    // Guard with early return so subsequent lines never execute with undefined key.
+    if (!agentmailApiKey) {
+      test.skip(true, 'AGENTMAIL_API_KEY is not configured; skipping agentmail E2E tests');
+      return;
+    }
+    client = new AgentMailClient(agentmailApiKey);
     mailbox = await client.createMailbox();
     if (!mailbox) throw new Error('AgentMail createMailbox() returned null — cannot proceed with suite');
   });
@@ -61,6 +65,13 @@ test.describe('agentmail delivery', () => {
       'E2E_INBOUND_FROM is required for inbound routing E2E — set it to a Resend sandbox sender'
     );
 
+    // E2E_TEST_SECRET must be set; an empty string would yield a misleading 401
+    // from the trigger endpoint rather than a clear configuration error.
+    if (!e2eTestSecret) {
+      test.skip(true, 'E2E_TEST_SECRET is not set — Scenario A cannot run without a trigger secret');
+      return;
+    }
+
     const uniqueSubject = `AgentMail inbound ${Date.now()}`;
     const senderAddress = inboundFromAddress!;
 
@@ -69,7 +80,7 @@ test.describe('agentmail delivery', () => {
     // key out of Playwright's browser-context traces and HTML reports.
     const triggerResponse = await request.post('/api/trigger-inbound', {
       headers: {
-        TEST_SECRET: e2eTestSecret ?? '',
+        'x-e2e-test-secret': e2eTestSecret,
       },
       data: {
         from: senderAddress,

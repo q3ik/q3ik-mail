@@ -10,6 +10,11 @@ const TriggerInboundSchema = z.object({
   text: z.string().trim().min(1),
 });
 
+/** Loose email format check — rejects obviously malformed addresses before DB insert. */
+function isValidEmail(address: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address);
+}
+
 function parseFrom(raw: string): { name: string | null; address: string } {
   const quotedMatch = raw.match(/^\s*"([^"]+)"\s*<([^>]+)>\s*$/);
   if (quotedMatch) {
@@ -22,11 +27,17 @@ function parseFrom(raw: string): { name: string | null; address: string } {
   return { name: null, address: raw.trim() };
 }
 
+// TODO: Replace ingestInboundEmail with a shared utility (e.g. src/lib/ingest-inbound.ts)
+// once the real inbound handler's INSERT logic is extracted. Any schema change to the
+// `emails` table must currently be applied here and in the real inbound handler separately.
 async function ingestInboundEmail(
   db: D1Database,
   payload: { from: string; to: string; subject: string; text: string }
 ): Promise<void> {
   const resendId = `trigger-${crypto.randomUUID()}`;
+  // thread_id and message_id are intentionally separate UUIDs.
+  // thread_id groups messages into a conversation; message_id is the RFC 5322 identifier.
+  const threadId = crypto.randomUUID();
   const messageId = `<${crypto.randomUUID()}@q3ik-mail.test>`;
   const { name: fromName, address: fromAddress } = parseFrom(payload.from);
 
@@ -39,7 +50,7 @@ async function ingestInboundEmail(
     .bind(
       crypto.randomUUID(),
       resendId,
-      messageId,
+      threadId,
       fromAddress,
       fromName,
       payload.to,
@@ -54,14 +65,20 @@ async function ingestInboundEmail(
 }
 
 export async function POST(req: Request) {
-  if (process.env.NODE_ENV === 'production' || process.env.CF_PAGES_BRANCH === 'trunk') {
-    return Response.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
+  // Auth check runs first — the deployment guard runs second.
+  // Checking env vars before auth would leak the existence of this endpoint to
+  // unauthenticated callers via the distinct 401 vs 403 response codes.
   const expectedSecret = process.env.E2E_TEST_SECRET;
-  const providedSecret = req.headers.get('TEST_SECRET');
+  const providedSecret = req.headers.get('x-e2e-test-secret');
   if (!expectedSecret || !providedSecret || providedSecret !== expectedSecret) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // CF_PAGES_BRANCH is the authoritative signal on Cloudflare Pages.
+  // NODE_ENV is a secondary guard for local parity; it is not reliably set
+  // by the edge runtime and should not be relied upon alone.
+  if (process.env.CF_PAGES_BRANCH === 'trunk' || process.env.NODE_ENV === 'production') {
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   let rawBody: unknown;
@@ -74,6 +91,11 @@ export async function POST(req: Request) {
   const parsed = TriggerInboundSchema.safeParse(rawBody);
   if (!parsed.success) {
     return Response.json({ error: 'Validation failed' }, { status: 400 });
+  }
+
+  const { name: _name, address: fromAddress } = parseFrom(parsed.data.from);
+  if (!isValidEmail(fromAddress)) {
+    return Response.json({ error: 'Invalid from address' }, { status: 400 });
   }
 
   const { env } = getRequestContext();

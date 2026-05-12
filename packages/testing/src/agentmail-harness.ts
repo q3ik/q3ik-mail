@@ -140,6 +140,11 @@ export class AgentMailClient {
           'AgentMail listMessages failed, retrying:',
           err instanceof Error ? err.message : err
         );
+        // Back off on transient failure using the same interval as a successful-but-empty poll.
+        // Without this, a sustained failure busy-loops for the full timeoutMs budget.
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)));
         continue;
       }
       const message = filter ? messages.find(filter) : messages[0];
