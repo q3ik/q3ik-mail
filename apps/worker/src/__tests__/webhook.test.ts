@@ -426,6 +426,46 @@ describe('webhook handler', () => {
       })
     );
   });
+
+  it('decodes URL-safe, unpadded base64 attachment content and stores bytes in R2', async () => {
+    const { Resend } = await import('resend');
+    const { env, putSpy } = makeThreadEnv();
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Attachment URL-safe b64',
+            text: 'Body',
+            html: null,
+            headers: [],
+            attachments: [
+              {
+                filename: 'blob.bin',
+                content_type: 'application/octet-stream',
+                // URL-safe form of "++//" with padding stripped.
+                content: '--__',
+              },
+            ],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+    expect(res.status).toBe(200);
+
+    const attachmentPutCall = putSpy.mock.calls.find((call) =>
+      String(call[0]).includes('/attachments/blob.bin')
+    );
+    expect(attachmentPutCall).toBeDefined();
+    expect(Array.from(attachmentPutCall![1] as Uint8Array)).toEqual([251, 239, 255]);
+  });
 });
 
 describe('parseFrom', () => {
