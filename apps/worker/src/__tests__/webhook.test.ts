@@ -33,10 +33,19 @@ vi.mock('resend', () => ({
   })),
 }));
 
+vi.mock('../middleware/cfAccess', () => ({
+  validateCfAccessJwt: vi.fn().mockResolvedValue({
+    ok: true,
+    payload: { sub: 'test-user' },
+  }),
+}));
+
 // Minimal mock Env — matches the Env interface in apps/worker/src/index.ts
 const mockEnv = {
   RESEND_API_KEY: 'test-key',
   RESEND_WEBHOOK_SECRET: 'test-secret',
+  CLOUDFLARE_ACCESS_AUD: 'test-aud',
+  CLOUDFLARE_TEAM_DOMAIN: 'team.cloudflareaccess.com',
   EMAIL_BODIES: {
     put: async () => {},
   },
@@ -59,7 +68,11 @@ function makeRequest(body: string, headers: Record<string, string> = {}) {
   return new Request('https://worker.example.com/', {
     method: 'POST',
     body,
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: {
+      'Content-Type': 'application/json',
+      'CF_Access_Jwt_Assertion': 'test-jwt',
+      ...headers,
+    },
   });
 }
 
@@ -98,6 +111,8 @@ function makeThreadEnv(selectFirstResult: unknown = null) {
   const env = {
     RESEND_API_KEY: 'test-key',
     RESEND_WEBHOOK_SECRET: 'test-secret',
+    CLOUDFLARE_ACCESS_AUD: 'test-aud',
+    CLOUDFLARE_TEAM_DOMAIN: 'team.cloudflareaccess.com',
     EMAIL_BODIES: { put: putSpy },
     DB: { prepare: prepareSpy },
   } as unknown as import('../index').Env;
@@ -175,6 +190,20 @@ describe('webhook handler', () => {
     (Webhook as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       verify: vi.fn().mockImplementationOnce(() => { throw new Error('bad sig'); }),
     }));
+    const req = makeRequest('{"type":"email.received"}', {
+      'svix-id': 'x', 'svix-timestamp': 'x', 'svix-signature': 'x',
+    });
+    const res = await fetchWorker(req);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 when Cloudflare Access validation fails', async () => {
+    const { validateCfAccessJwt } = await import('../middleware/cfAccess');
+    (validateCfAccessJwt as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      error: 'Missing CF_Access_Jwt_Assertion header',
+    });
+
     const req = makeRequest('{"type":"email.received"}', {
       'svix-id': 'x', 'svix-timestamp': 'x', 'svix-signature': 'x',
     });
