@@ -145,7 +145,8 @@ function EmailBody({ email }: { email: Email }) {
           body_text: payload.body_text ?? null,
         });
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('[mail-display] failed to fetch email body:', err);
         setBodyLoadError(true);
         setBody({
           body_html: email.body_html,
@@ -159,7 +160,7 @@ function EmailBody({ email }: { email: Email }) {
     return () => {
       controller.abort();
     };
-  }, [email.id]);
+  }, [email.id, email.body_html, email.body_text]);
 
   useEffect(() => {
     let cancelled = false;
