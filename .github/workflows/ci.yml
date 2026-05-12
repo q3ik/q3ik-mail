@@ -5,12 +5,8 @@ on:
     branches: [trunk]
   pull_request:
     branches: [trunk]
-<<<<<<< copilot/implement-agentmail-to-integration
-  workflow_dispatch:
-
-=======
   workflow_dispatch: # manual trigger
->>>>>>> trunk
+  invalidate #TODO: Remove
 # Cancel any in-progress run for the same branch/PR the moment a newer commit
 # is pushed. This prevents redundant runs from queuing up and wasting runner
 # minutes — only the latest commit on a given ref ever runs to completion.
