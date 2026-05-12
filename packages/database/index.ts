@@ -2,6 +2,32 @@ import type { Email, EmailSummary } from './types';
 
 export type { Email, EmailSummary, NewEmail } from './types';
 
+export interface ThreadListPage {
+  threads: EmailSummary[];
+  nextCursor: string | null;
+}
+
+interface ThreadListCursorPayload {
+  createdAt: string;
+  id: string;
+}
+
+function encodeThreadListCursor(cursor: ThreadListCursorPayload): string {
+  return btoa(JSON.stringify(cursor));
+}
+
+function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
+  const payload = JSON.parse(atob(cursor)) as Partial<ThreadListCursorPayload>;
+
+  if (typeof payload.createdAt !== 'string' || typeof payload.id !== 'string') {
+    throw new Error('Invalid thread list cursor');
+  }
+
+  return {
+    createdAt: payload.createdAt,
+    id: payload.id,
+  };
+}
 const ORPHAN_RETHREAD_BATCH_SIZE = 100;
 
 /**
@@ -131,6 +157,73 @@ export async function getThreadList(
     .bind(limit)
     .all<EmailSummary>();
   return results;
+}
+
+export async function getThreadListPage(
+  db: D1Database,
+  {
+    limit = 50,
+    cursor,
+  }: {
+    limit?: number;
+    cursor?: string;
+  } = {}
+): Promise<ThreadListPage> {
+  const pageSize = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
+  const fetchLimit = pageSize + 1;
+  const decodedCursor = cursor ? decodeThreadListCursor(cursor) : null;
+  const whereClause = decodedCursor
+    ? `WHERE thread_rank = 1
+         AND (
+           created_at < ?
+           OR (created_at = ? AND id > ?)
+         )`
+    : 'WHERE thread_rank = 1';
+  const sql = `SELECT
+                 id, resend_id, thread_id, from_address, from_name,
+                 to_address, subject, message_id, in_reply_to, "references",
+                 is_read, is_sent, needs_rethreading, created_at
+               FROM (
+                 SELECT
+                   id, resend_id, thread_id, from_address, from_name,
+                   to_address, subject, message_id, in_reply_to, "references",
+                   is_read, is_sent, needs_rethreading, created_at,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY thread_id
+                     ORDER BY created_at DESC, resend_id ASC
+                   ) AS thread_rank
+                 FROM emails
+               ) ranked_emails
+               ${whereClause}
+               ORDER BY created_at DESC, id ASC
+               LIMIT ?`;
+  const bindArgs = decodedCursor
+    ? [
+        decodedCursor.createdAt,
+        decodedCursor.createdAt,
+        decodedCursor.id,
+        fetchLimit,
+      ]
+    : [fetchLimit];
+  const { results } = await db
+    .prepare(sql)
+    .bind(...bindArgs)
+    .all<EmailSummary>();
+
+  const threads = results.slice(0, pageSize);
+  const lastThread = threads.at(-1);
+  const nextCursor =
+    results.length > pageSize && lastThread
+      ? encodeThreadListCursor({
+          createdAt: lastThread.created_at,
+          id: lastThread.id,
+        })
+      : null;
+
+  return {
+    threads,
+    nextCursor,
+  };
 }
 
 /**
