@@ -15,6 +15,11 @@ vi.mock('jose/jwt/verify', () => ({
   jwtVerify: joseMocks.jwtVerify,
 }));
 
+vi.mock('@sentry/cloudflare', () => ({
+  captureException: vi.fn(),
+  captureMessage: vi.fn(),
+}));
+
 describe('Cloudflare Access middleware', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -60,6 +65,44 @@ describe('Cloudflare Access middleware', () => {
     await middleware(makeReq());
 
     expect(joseMocks.createRemoteJWKSet).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-reads CLOUDFLARE_ACCESS_AUD and CLOUDFLARE_TEAM_DOMAIN across requests', async () => {
+    const { middleware } = await import('../middleware');
+
+    process.env.CLOUDFLARE_TEAM_DOMAIN = 'team-one.cloudflareaccess.com';
+    process.env.CLOUDFLARE_ACCESS_AUD = 'aud-one';
+    await middleware(
+      new NextRequest('http://localhost/inbox', {
+        headers: { 'CF-Access-Jwt-Assertion': 'valid-token' },
+      }),
+    );
+
+    process.env.CLOUDFLARE_TEAM_DOMAIN = 'team-two.cloudflareaccess.com';
+    process.env.CLOUDFLARE_ACCESS_AUD = 'aud-two';
+    await middleware(
+      new NextRequest('http://localhost/inbox', {
+        headers: { 'CF-Access-Jwt-Assertion': 'valid-token' },
+      }),
+    );
+
+    expect(joseMocks.createRemoteJWKSet).toHaveBeenNthCalledWith(
+      1,
+      new URL('https://team-one.cloudflareaccess.com/cdn-cgi/access/certs'),
+    );
+    expect(joseMocks.createRemoteJWKSet).toHaveBeenNthCalledWith(
+      2,
+      new URL('https://team-two.cloudflareaccess.com/cdn-cgi/access/certs'),
+    );
+    expect(joseMocks.jwtVerify).toHaveBeenNthCalledWith(
+      2,
+      'valid-token',
+      joseMocks.remoteJwkSet,
+      {
+        audience: 'aud-two',
+        issuer: 'https://team-two.cloudflareaccess.com',
+      },
+    );
   });
 
   // ── Missing / invalid token ───────────────────────────────────────────────
