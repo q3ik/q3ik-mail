@@ -49,3 +49,6 @@ dist/
 **/coverage/
 apps/web/wrangler.toml
 apps/worker/wrangler.toml
+
+# Sentry Config File
+.env.sentry-build-plugin
