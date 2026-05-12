@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv env.d.ts"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv env.d.ts",
+    "build:cf": "npx @cloudflare/next-on-pages"
   },
   "dependencies": {
     "@cloudflare/next-on-pages": "^1.13.10",
@@ -38,6 +39,7 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@q3ik-mail/testing": "workspace:*",
     "@cloudflare/workers-types": "^4.20250508.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
@@ -53,6 +55,7 @@
     "postcss": "^8",
     "typescript": "^5",
     "vitest": "^3.1.3",
+    "wait-on": "^8.0.3",
     "wrangler": "^4.13.2"
   }
 }
