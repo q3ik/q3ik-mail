@@ -61,10 +61,7 @@ export async function middleware(req: NextRequest) {
   const accessConfig = getAccessConfig();
 
   if (!accessConfig) {
-    return new NextResponse(
-      'Cloudflare Access configuration incomplete: CLOUDFLARE_TEAM_DOMAIN and CLOUDFLARE_ACCESS_AUD must be set',
-      { status: 500 },
-    );
+    return new NextResponse('Service unavailable', { status: 503 });
   }
 
   const token = req.headers.get('CF-Access-Jwt-Assertion');
