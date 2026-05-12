@@ -75,6 +75,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250508.0
         version: 4.20260509.1
+      '@q3ik-mail/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
       '@testing-library/jest-dom':
         specifier: ^6.6.3
         version: 6.9.1
@@ -191,6 +194,8 @@ importers:
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
+
+  packages/testing: {}
 
   packages/ts-config: {}
 
