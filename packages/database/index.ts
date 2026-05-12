@@ -205,13 +205,13 @@ export async function migrateEmailBodiesToR2(
           ? (row.body_html_key ?? `emails/${row.id}/body.html`)
           : row.body_html_key;
 
-      if (row.body_text !== null && row.body_text_key === null) {
-        await r2Bucket.put(bodyTextKey!, row.body_text, {
+      if (row.body_text !== null && row.body_text_key === null && bodyTextKey !== null) {
+        await r2Bucket.put(bodyTextKey, row.body_text, {
           httpMetadata: { contentType: 'text/plain; charset=utf-8' },
         });
       }
-      if (row.body_html !== null && row.body_html_key === null) {
-        await r2Bucket.put(bodyHtmlKey!, row.body_html, {
+      if (row.body_html !== null && row.body_html_key === null && bodyHtmlKey !== null) {
+        await r2Bucket.put(bodyHtmlKey, row.body_html, {
           httpMetadata: { contentType: 'text/html; charset=utf-8' },
         });
       }
