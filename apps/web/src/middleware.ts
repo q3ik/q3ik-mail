@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server';
 const PUBLIC_PATHS = ['/api/webhook', '/favicon.ico'] as const;
 const PUBLIC_PREFIXES = ['/_next/static/', '/_next/image/'] as const;
 const PUBLIC_PATH_SET = new Set<string>(PUBLIC_PATHS);
+const TEAM_DOMAIN_PATTERN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.cloudflareaccess\.com$/i;
 
 let cachedTeamDomain: string | undefined;
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | undefined;
@@ -35,11 +36,17 @@ function getAccessConfig():
     return null;
   }
 
+  const normalizedTeamDomain = teamDomain.trim().toLowerCase();
+
+  if (!TEAM_DOMAIN_PATTERN.test(normalizedTeamDomain)) {
+    return null;
+  }
+
   return {
     audience,
-    issuer: `https://${teamDomain}`,
-    loginUrl: new URL(`https://${teamDomain}`),
-    teamDomain,
+    issuer: `https://${normalizedTeamDomain}`,
+    loginUrl: new URL(`https://${normalizedTeamDomain}`),
+    teamDomain: normalizedTeamDomain,
   };
 }
 
@@ -61,7 +68,8 @@ export async function middleware(req: NextRequest) {
   const accessConfig = getAccessConfig();
 
   if (!accessConfig) {
-    return new NextResponse('Service unavailable', { status: 503 });
+    console.error('[middleware] Cloudflare Access is not configured correctly');
+    return new NextResponse('Internal Server Error', { status: 500 });
   }
 
   const token = req.headers.get('CF-Access-Jwt-Assertion');

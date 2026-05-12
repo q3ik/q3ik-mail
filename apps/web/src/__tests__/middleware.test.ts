@@ -56,6 +56,20 @@ describe('Cloudflare Access middleware', () => {
     expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
   });
 
+  it('fails closed when the Cloudflare Access team domain is invalid', async () => {
+    process.env.CLOUDFLARE_TEAM_DOMAIN = 'https://attacker.example';
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/inbox');
+
+    const res = await middleware(req);
+
+    expect(res.status).toBe(500);
+    expect(joseMocks.createRemoteJWKSet).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith('[middleware] Cloudflare Access is not configured correctly');
+    errorSpy.mockRestore();
+  });
+
   it('redirects requests with an invalid JWT', async () => {
     joseMocks.jwtVerify.mockRejectedValueOnce(new Error('signature verification failed'));
     const { middleware } = await import('../middleware');
