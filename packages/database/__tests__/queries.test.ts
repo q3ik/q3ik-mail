@@ -28,55 +28,64 @@ type ThreadRow = {
 
 function createThreadDb(seedRows: ThreadRow[]) {
   const rows = seedRows.map((row) => ({ ...row }));
+  const preparedSqls: string[] = [];
+  const bindCalls: Array<{ sql: string; args: unknown[] }> = [];
 
   const db = {
     prepare: (sql: string) => {
       const normalizedSql = sql.replace(/\s+/g, ' ').trim();
-
-      const all = async () => {
-        if (normalizedSql.startsWith('SELECT id, in_reply_to FROM emails')) {
-          return {
-            results: rows
-              .filter((row) => row.needs_rethreading === 1 && row.in_reply_to !== null)
-              .sort((a, b) => a.created_at.localeCompare(b.created_at))
-              .slice(0, 100)
-              .map((row) => ({ id: row.id, in_reply_to: row.in_reply_to! })),
-          };
-        }
-
-        return { results: [] };
-      };
+      preparedSqls.push(normalizedSql);
 
       return {
-        all,
         bind: (...args: unknown[]) => ({
-          all,
+          all: async () => {
+            bindCalls.push({ sql: normalizedSql, args });
+
+            if (normalizedSql.includes('WHERE needs_rethreading = 1')) {
+              const limit = args[0] as number;
+
+              return {
+                results: rows
+                  .filter((row) => row.needs_rethreading === 1 && row.in_reply_to !== null)
+                  .sort((a, b) => a.created_at.localeCompare(b.created_at))
+                  .slice(0, limit)
+                  .map((row) => ({ id: row.id, in_reply_to: row.in_reply_to! })),
+              };
+            }
+
+            throw new Error(`Unexpected SQL in all(): ${normalizedSql}`);
+          },
           first: async () => {
-            if (normalizedSql === 'SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1') {
+            bindCalls.push({ sql: normalizedSql, args });
+
+            if (normalizedSql.includes('WHERE message_id = ? LIMIT 1')) {
               const parent = rows.find((row) => row.message_id === args[0]);
               return parent ? { thread_id: parent.thread_id } : null;
             }
 
-            return rows[0] ?? null;
+            throw new Error(`Unexpected SQL in first(): ${normalizedSql}`);
           },
           run: async () => {
-            if (normalizedSql === 'UPDATE emails SET thread_id = ?, needs_rethreading = 0 WHERE id = ?') {
+            bindCalls.push({ sql: normalizedSql, args });
+
+            if (normalizedSql.includes('SET thread_id = ?, needs_rethreading = 0')) {
               const [threadId, orphanId] = args;
               const orphan = rows.find((row) => row.id === orphanId);
               if (orphan) {
                 orphan.thread_id = threadId as string;
                 orphan.needs_rethreading = 0;
+                return { success: true };
               }
             }
 
-            return { success: true };
+            throw new Error(`Unexpected SQL in run(): ${normalizedSql}`);
           },
         }),
       };
     },
   } as unknown as D1Database;
 
-  return { db, rows };
+  return { db, rows, preparedSqls, bindCalls };
 }
 
 describe('getLatestEmails', () => {
@@ -246,6 +255,7 @@ describe('resolveOrphanedThreads', () => {
 
     try {
       await expect(resolveOrphanedThreads(db)).resolves.toBe(0);
+      expect(logSpy).not.toHaveBeenCalled();
     } finally {
       logSpy.mockRestore();
     }
@@ -346,7 +356,7 @@ describe('resolveOrphanedThreads', () => {
       created_at: `2026-05-09T11:${String(index).padStart(2, '0')}:00Z`,
     })));
 
-    const { db, rows: threadRows } = createThreadDb(rows);
+    const { db, rows: threadRows, preparedSqls, bindCalls } = createThreadDb(rows);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     try {
@@ -356,6 +366,12 @@ describe('resolveOrphanedThreads', () => {
       logSpy.mockRestore();
     }
 
+    const orphanQuery = preparedSqls.find((sql) => sql.includes('WHERE needs_rethreading = 1'));
+    expect(orphanQuery).toContain('LIMIT ?');
+    expect(bindCalls).toContainEqual({
+      sql: orphanQuery,
+      args: [100],
+    });
     expect(threadRows.filter((row) => row.id.startsWith('orphan-') && row.needs_rethreading === 0)).toHaveLength(100);
     expect(threadRows.filter((row) => row.id.startsWith('orphan-') && row.needs_rethreading === 1)).toHaveLength(50);
   });
