@@ -1,5 +1,6 @@
 interface CloudflareEnv {
   DB: D1Database;
+  EMAIL_BODIES?: R2Bucket;
   RESEND_API_KEY: string;
   AUTH_SECRET: string;
   SENTRY_DSN: string;

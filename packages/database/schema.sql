@@ -15,8 +15,10 @@ CREATE TABLE IF NOT EXISTS emails (
   from_name         TEXT,
   to_address        TEXT NOT NULL,
   subject           TEXT,
-  body_text         TEXT,
-  body_html         TEXT,
+  body_text         TEXT,                                 -- DEPRECATED: use body_text_key + R2
+  body_html         TEXT,                                 -- DEPRECATED: use body_html_key + R2
+  body_text_key     TEXT,                                 -- R2 object key, e.g. emails/{id}/body.txt
+  body_html_key     TEXT,                                 -- R2 object key, e.g. emails/{id}/body.html
   message_id        TEXT UNIQUE,                          -- RFC 2822 Message-ID header
   in_reply_to       TEXT,                                 -- RFC 2822 In-Reply-To header
   "references"      TEXT,                                 -- RFC 2822 References header (space-separated Message-ID chain)

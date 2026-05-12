@@ -9,7 +9,8 @@ export async function GET(
 ) {
   const { id } = await params;
   const { env } = getRequestContext();
-  const email = await getEmailById(env.DB, id);
+  const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
+  const email = await getEmailById(env.DB, id, r2Bucket);
   if (!email) return Response.json({ error: 'Not found' }, { status: 404 });
 
   // markAsRead is a best-effort side-effect. A D1 write failure must not
