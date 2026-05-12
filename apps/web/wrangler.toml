@@ -1,5 +1,5 @@
 #:schema node_modules/wrangler/config-schema.json
-name = "q3ik-mail-web"
+name = "q3ik-mail"
 compatibility_flags = ["nodejs_compat"]
 compatibility_date = "2024-09-23"
 pages_build_output_dir = ".vercel/output/static"
@@ -10,6 +10,10 @@ pages_build_output_dir = ".vercel/output/static"
 binding = "DB"
 database_name = "q3ik-mail-db"
 database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "EMAIL_BODIES"
+bucket_name = "q3ik-mail-bodies"
 
 [vars]
 # RESEND_API_KEY is set via: wrangler secret put RESEND_API_KEY

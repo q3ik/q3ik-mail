@@ -2,6 +2,59 @@ import type { Email, EmailSummary } from './types';
 
 export type { Email, EmailSummary, NewEmail } from './types';
 
+/**
+ * Reads a body string from R2 by key.
+ *
+ * - Returns `fallbackBody` when `key` is null (no R2 key stored yet).
+ * - Returns `fallbackBody` when the R2 object is missing, and logs a warning
+ *   so key/object mismatches are detectable in production logs.
+ * - Errors are NOT swallowed here; callers should handle them individually.
+ */
+async function readBodyFromR2(
+  r2Bucket: R2Bucket,
+  key: string | null,
+  fallbackBody: string | null
+): Promise<string | null> {
+  if (!key) return fallbackBody;
+  const object = await r2Bucket.get(key);
+  if (!object) {
+    console.warn('[database] R2 object not found for key; falling back to D1 value', { key });
+    return fallbackBody;
+  }
+  return object.text();
+}
+
+/**
+ * Hydrates body_html and body_text on an Email from R2 when key columns are set.
+ *
+ * Each R2 read failure is caught individually so one transient error does not
+ * fail the entire result set. Failed reads fall back to the D1 column value
+ * (which is null for new records).
+ */
+async function hydrateEmailBodyFromR2(
+  email: Email,
+  r2Bucket: R2Bucket | null | undefined
+): Promise<Email> {
+  if (!r2Bucket) return email;
+
+  const [bodyHtml, bodyText] = await Promise.all([
+    readBodyFromR2(r2Bucket, email.body_html_key, email.body_html).catch((err) => {
+      console.warn('[database] R2 read failed for body_html; using fallback', { key: email.body_html_key, err });
+      return email.body_html;
+    }),
+    readBodyFromR2(r2Bucket, email.body_text_key, email.body_text).catch((err) => {
+      console.warn('[database] R2 read failed for body_text; using fallback', { key: email.body_text_key, err });
+      return email.body_text;
+    }),
+  ]);
+
+  return {
+    ...email,
+    body_html: bodyHtml,
+    body_text: bodyText,
+  };
+}
+
 export interface ThreadListPage {
   threads: EmailSummary[];
   nextCursor: string | null;
@@ -83,7 +136,8 @@ export async function getLatestEmails(
  */
 export async function getEmailsByThread(
   db: D1Database,
-  threadId: string
+  threadId: string,
+  r2Bucket: R2Bucket | null = null
 ): Promise<Email[]> {
   const { results } = await db
     .prepare(
@@ -94,7 +148,8 @@ export async function getEmailsByThread(
     )
     .bind(threadId)
     .all<Email>();
-  return results;
+
+  return Promise.all(results.map((email) => hydrateEmailBodyFromR2(email, r2Bucket)));
 }
 
 /**
@@ -123,13 +178,99 @@ export async function markAsRead(
  */
 export async function getEmailById(
   db: D1Database,
-  emailId: string
+  emailId: string,
+  r2Bucket: R2Bucket | null = null
 ): Promise<Email | null> {
   const result = await db
     .prepare(`SELECT * FROM emails WHERE id = ? LIMIT 1`)
     .bind(emailId)
     .first<Email>();
-  return result ?? null;
+  if (!result) return null;
+  return hydrateEmailBodyFromR2(result, r2Bucket);
+}
+
+/**
+ * Backfill existing D1-stored body content into R2 and persist key columns.
+ * Intended for one-time migration runs after deploying body offload support.
+ */
+export async function migrateEmailBodiesToR2(
+  db: D1Database,
+  r2Bucket: R2Bucket,
+  limit: number = 100
+): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, body_text, body_html, body_text_key, body_html_key
+       FROM emails
+       WHERE (body_text IS NOT NULL OR body_html IS NOT NULL)
+         AND (body_text_key IS NULL OR body_html_key IS NULL)
+       ORDER BY created_at ASC, id ASC
+       LIMIT ?`
+    )
+    .bind(limit)
+    .all<{
+      id: string;
+      body_text: string | null;
+      body_html: string | null;
+      body_text_key: string | null;
+      body_html_key: string | null;
+    }>();
+
+  let migrated = 0;
+
+  for (const row of results) {
+    try {
+      const bodyTextKey =
+        row.body_text !== null
+          ? (row.body_text_key ?? `emails/${row.id}/body.txt`)
+          : row.body_text_key;
+      const bodyHtmlKey =
+        row.body_html !== null
+          ? (row.body_html_key ?? `emails/${row.id}/body.html`)
+          : row.body_html_key;
+
+      if (row.body_text !== null && row.body_text_key === null && bodyTextKey !== null) {
+        await r2Bucket.put(bodyTextKey, row.body_text, {
+          httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+        });
+      }
+      if (row.body_html !== null && row.body_html_key === null && bodyHtmlKey !== null) {
+        await r2Bucket.put(bodyHtmlKey, row.body_html, {
+          httpMetadata: { contentType: 'text/html; charset=utf-8' },
+        });
+      }
+
+      const clearBodyText = bodyTextKey !== null && row.body_text !== null;
+      const clearBodyHtml = bodyHtmlKey !== null && row.body_html !== null;
+
+      await db
+        .prepare(
+          `UPDATE emails
+           SET body_text = CASE WHEN ? = 1 THEN NULL ELSE body_text END,
+               body_html = CASE WHEN ? = 1 THEN NULL ELSE body_html END,
+               body_text_key = COALESCE(?, body_text_key),
+               body_html_key = COALESCE(?, body_html_key)
+           WHERE id = ?`
+        )
+        .bind(
+          clearBodyText ? 1 : 0,
+          clearBodyHtml ? 1 : 0,
+          bodyTextKey,
+          bodyHtmlKey,
+          row.id
+        )
+        .run();
+
+      migrated++;
+    } catch (err) {
+      console.warn('[migrateEmailBodiesToR2] failed to migrate row', {
+        emailId: row.id,
+        error: err,
+      });
+    }
+  }
+
+  return migrated;
 }
 
 /**

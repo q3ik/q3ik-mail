@@ -15,7 +15,10 @@
     "deploy": "wrangler pages deploy apps/web/out"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "@playwright/test": "^1.60.0",
     "@types/node": "^25.6.2",
-    "turbo": "latest"
+    "turbo": "latest",
+    "wrangler": "^4.90.1"
   }
 }
