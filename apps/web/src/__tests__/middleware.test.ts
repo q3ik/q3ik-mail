@@ -56,15 +56,28 @@ describe('Cloudflare Access middleware', () => {
     expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
   });
 
-  it.each([
-    'invalid JWT',
-    'expired JWT',
-  ])('redirects requests with an %s', async () => {
-    joseMocks.jwtVerify.mockRejectedValueOnce(new Error('verification failed'));
+  it('redirects requests with an invalid JWT', async () => {
+    joseMocks.jwtVerify.mockRejectedValueOnce(new Error('signature verification failed'));
     const { middleware } = await import('../middleware');
     const req = new NextRequest('http://localhost/inbox', {
       headers: {
         'CF-Access-Jwt-Assertion': 'bad-token',
+      },
+    });
+
+    const res = await middleware(req);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://team.example.cloudflareaccess.com/');
+  });
+
+  it('redirects requests with an expired JWT', async () => {
+    const expiredError = Object.assign(new Error('token expired'), { name: 'JWTExpired' });
+    joseMocks.jwtVerify.mockRejectedValueOnce(expiredError);
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/inbox', {
+      headers: {
+        'CF-Access-Jwt-Assertion': 'expired-token',
       },
     });
 

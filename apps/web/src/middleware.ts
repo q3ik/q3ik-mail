@@ -14,14 +14,15 @@ import { NextRequest, NextResponse } from 'next/server';
  *    exposing it on a public domain.
  */
 
-const PUBLIC_PATHS = new Set(['/api/webhook', '/favicon.ico']);
-const PUBLIC_PREFIXES = ['/_next/static/', '/_next/image/'];
+const PUBLIC_PATHS = ['/api/webhook', '/favicon.ico'] as const;
+const PUBLIC_PREFIXES = ['/_next/static/', '/_next/image/'] as const;
+const PUBLIC_PATH_SET = new Set<string>(PUBLIC_PATHS);
 
 let cachedTeamDomain: string | undefined;
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 
 function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.has(pathname) || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  return PUBLIC_PATH_SET.has(pathname) || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 function getAccessConfig():
@@ -85,5 +86,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
+  // Next.js requires middleware matchers to stay statically analyzable.
   matcher: ['/((?!api/webhook|_next/static|_next/image|favicon.ico).*)'],
 };
