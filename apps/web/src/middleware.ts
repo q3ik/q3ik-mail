@@ -10,7 +10,11 @@ import { NextRequest, NextResponse } from 'next/server';
  *    `CLOUDFLARE_TEAM_DOMAIN`.
  * 3. Copy the Access Application Audience tag into
  *    `CLOUDFLARE_ACCESS_AUD`.
- * 4. Ensure the Pages deployment sits behind that Access Application before
+ * 4. In the Access Application → Additional Settings → Cookie settings:
+ *    - Enable **HTTP Only** to prevent client-side JS from reading the JWT cookie.
+ *    - Enable **Binding Cookie** to bind the session to the user's TLS session,
+ *      protecting against token theft. Safe for web apps (not SSH/RDP).
+ * 5. Ensure the Pages deployment sits behind that Access Application before
  *    exposing it on a public domain.
  */
 
@@ -20,6 +24,14 @@ const PUBLIC_PATHS = ['/api/webhook'] as const;
 const PUBLIC_PREFIXES = ['/_next/static/', '/_next/image/'] as const;
 const PUBLIC_PATH_SET = new Set<string>(PUBLIC_PATHS);
 const TEAM_DOMAIN_PATTERN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.cloudflareaccess\.com$/;
+
+/**
+ * Name of the HttpOnly cookie Cloudflare Access sets when "Binding Cookie" is
+ * enabled in the Access Application cookie settings. The middleware checks this
+ * as a fallback when the CF-Access-Jwt-Assertion header is absent — which is
+ * normal for direct browser navigations when HTTP Only is enabled.
+ */
+const CF_ACCESS_COOKIE = 'CF_Authorization';
 
 type AccessConfig = {
   audience: string;
@@ -92,6 +104,29 @@ function getJwks(teamDomain: string) {
   return cachedJwks;
 }
 
+/**
+ * Resolves the Cloudflare Access JWT from the incoming request.
+ *
+ * Cloudflare Access delivers the JWT in two ways depending on the Access
+ * Application cookie settings:
+ *
+ * - As a `CF-Access-Jwt-Assertion` request **header** — present on all
+ *   requests proxied through Access, including API calls and service tokens.
+ * - As a `CF_Authorization` **cookie** — the primary delivery mechanism for
+ *   browser sessions when "Binding Cookie" is enabled (recommended). With
+ *   HTTP Only also enabled, client-side JS cannot read this cookie.
+ *
+ * The header is checked first; the cookie is the fallback. Either is
+ * sufficient for JWT verification — both contain the same signed token.
+ */
+function resolveAccessToken(req: NextRequest): string | null {
+  return (
+    req.headers.get('CF-Access-Jwt-Assertion') ??
+    req.cookies.get(CF_ACCESS_COOKIE)?.value ??
+    null
+  );
+}
+
 export async function middleware(req: NextRequest) {
   if (isPublicPath(req.nextUrl.pathname)) {
     return NextResponse.next();
@@ -106,7 +141,7 @@ export async function middleware(req: NextRequest) {
     return new NextResponse('Internal Server Error', { status: 500 });
   }
 
-  const token = req.headers.get('CF-Access-Jwt-Assertion');
+  const token = resolveAccessToken(req);
 
   if (!token) {
     return NextResponse.redirect(accessConfig.loginUrl);
