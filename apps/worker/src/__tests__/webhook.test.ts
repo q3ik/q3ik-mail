@@ -197,7 +197,7 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
   });
 
-  it('maps Resend `text` payload field into D1 `body_text`', async () => {
+  it('maps Resend `text` payload field into D1 `body_text`, ignoring any `body_text` key', async () => {
     const { Resend } = await import('resend');
     const { env, prepareSpy, bindSpy } = makeThreadEnv();
 
@@ -209,6 +209,8 @@ describe('webhook handler', () => {
             to: ['you@q3ik.com'],
             subject: 'Body Mapping',
             text: 'Plain text from text field',
+            // A `body_text` key in the payload must NOT reach D1 body_text;
+            // the worker must always read from `text`, never from `body_text`.
             body_text: 'legacy field should be ignored',
             html: null,
             headers: [{ name: 'Message-ID', value: '<body-map@example.com>' }],
@@ -224,7 +226,77 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    // Primary assertion: `text` value reached D1
     expect(values[columns.indexOf('body_text')]).toBe('Plain text from text field');
+    // Regression guard: `body_text` payload key must NOT have reached D1
+    expect(values[columns.indexOf('body_text')]).not.toBe('legacy field should be ignored');
+  });
+
+  it('accepts HTML-only email where `text` key is absent (no 502)', async () => {
+    const { Resend } = await import('resend');
+    const { env, prepareSpy, bindSpy } = makeThreadEnv();
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'HTML Only',
+            // `text` key is intentionally absent — HTML-only sender
+            html: '<p>HTML body</p>',
+            headers: [{ name: 'Message-ID', value: '<html-only@example.com>' }],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+    // Must not 502 — missing `text` key is valid for HTML-only senders
+    expect(res.status).toBe(200);
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    // body_text must be NULL when `text` is absent
+    expect(values[columns.indexOf('body_text')]).toBeNull();
+    expect(values[columns.indexOf('body_html')]).toBe('<p>HTML body</p>');
+  });
+
+  it('returns 502 when Resend payload has a non-string, non-null `text` field', async () => {
+    const { Resend } = await import('resend');
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Bad text type',
+            text: 12345,  // wrong type — should trigger 502
+            html: null,
+            headers: [],
+          }),
+        },
+      },
+    }));
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+        'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+      });
+      const res = await fetchWorker(req);
+      expect(res.status).toBe(502);
+      // Verify the field name is included in the diagnostic log
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('field="text"'),
+        expect.anything(),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('extracts and persists References header from inbound email', async () => {
