@@ -4,7 +4,11 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", ".vercel/output/**", "dist/**"]
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "build:cf": {
+      "dependsOn": ["build"],
+      "outputs": [".vercel/output/**"]
     },
     "dev": {
       "cache": false,
