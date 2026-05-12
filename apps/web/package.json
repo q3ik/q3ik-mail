@@ -16,6 +16,11 @@
   "dependencies": {
     "@cloudflare/next-on-pages": "^1.13.10",
     "@q3ik-mail/database": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-label": "^2.1.8",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-separator": "^1.1.8",
+    "@radix-ui/react-slot": "^1.2.4",
     "@sentry/nextjs": "^9.14.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
