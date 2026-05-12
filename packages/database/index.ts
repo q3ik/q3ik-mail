@@ -181,13 +181,12 @@ export async function searchEmails(
   const terms = trimmedQuery
     .split(/\s+/)
     .filter(Boolean)
-    .map((term) => term.replace(/"/g, '""'))
     .filter(Boolean);
 
   if (terms.length === 0) return [];
 
   const matchQuery = terms
-    .map((term) => `"${term}"`)
+    .map((term) => `"${term.replace(/"/g, '""')}"`)
     .join(' ');
 
   const { results } = await db
