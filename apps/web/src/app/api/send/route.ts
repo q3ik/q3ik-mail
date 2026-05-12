@@ -5,11 +5,11 @@ import { captureException } from '@/lib/sentry';
 import { z } from 'zod';
 
 const SendSchema = z.object({
-  to: z.string().email(),
-  subject: z.string().min(1),
-  content: z.string().min(1),
-  replyToId: z.string().optional(),
-  references: z.string().optional(),
+  to: z.string().trim().email(),
+  subject: z.string().trim().min(1),
+  content: z.string().trim().min(1),
+  replyToId: z.string().trim().min(1).nullish().transform((v) => v ?? undefined),
+  references: z.string().trim().min(1).nullish().transform((v) => v ?? undefined),
 });
 
 export const runtime = 'edge';
