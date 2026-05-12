@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { inspect } from 'node:util';
 import { AgentMailClient } from '@q3ik-mail/testing';
 
 describe('AgentMailClient listMessages', () => {
@@ -31,7 +32,14 @@ describe('AgentMailClient listMessages', () => {
     const client = new AgentMailClient('test-key', { baseUrl: 'https://api.agentmail.to/v1' });
 
     await expect(client.listMessages('mailbox-123')).rejects.toThrow(
-      'AgentMail API request failed (500): server error'
+      'AgentMail API error 500 on /mailboxes/mailbox-123/messages'
     );
+  });
+
+  it('redacts API key from JSON and inspect output', () => {
+    const client = new AgentMailClient('test-key', { baseUrl: 'https://api.agentmail.to/v1' });
+
+    expect(JSON.stringify(client)).toBe('{"type":"AgentMailClient"}');
+    expect(inspect(client)).toBe('AgentMailClient [key redacted]');
   });
 });
