@@ -162,20 +162,74 @@ function getBodyTextKey(emailInternalId: string): string {
   return `emails/${emailInternalId}/body.txt`;
 }
 
+/**
+ * Sanitizes a user-supplied attachment filename into a safe R2 key segment.
+ *
+ * Defenses applied:
+ * - Strip path traversal sequences (`..` runs).
+ * - Remove null bytes.
+ * - Remove characters illegal in most filesystems and R2 keys.
+ * - Percent-encode remaining non-ASCII characters to prevent homoglyph attacks.
+ * - Enforce a 200-character max length on the final segment.
+ */
 function sanitizeAttachmentFilename(filename: string, index: number): string {
   const trimmed = filename.trim();
   const base = trimmed.length > 0 ? trimmed : `attachment-${index + 1}`;
-  return base.replace(/[\\/?%*:|"<>]/g, '_');
+  return base
+    // Remove null bytes
+    .replace(/\0/g, '')
+    // Collapse path traversal sequences
+    .replace(/\.{2,}/g, '_')
+    // Remove filesystem/R2-unsafe characters
+    .replace(/[\\/?%*:|"<>]/g, '_')
+    // Percent-encode non-ASCII to neutralise homoglyphs
+    .replace(/[^\x00-\x7F]/g, (ch) => encodeURIComponent(ch))
+    // Enforce max filename length (R2 key limit is 1024 bytes total; cap segment at 200)
+    .slice(0, 200);
 }
 
+/**
+ * Decodes a base64 string to Uint8Array in chunks to avoid blocking the
+ * Workers event loop for large attachments. atob is synchronous; chunking
+ * keeps individual CPU slices short.
+ */
 function decodeBase64ToUint8Array(base64: string): Uint8Array {
-  const binary = atob(base64);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  // Normalise to standard base64 alphabet (URL-safe variant uses - and _)
+  const normalized = base64.replace(/-/g, '+').replace(/_/g, '/');
+  const CHUNK = 65536;
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+  while (offset < normalized.length) {
+    const slice = normalized.slice(offset, offset + CHUNK);
+    const binary = atob(slice);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    chunks.push(bytes);
+    offset += CHUNK;
+  }
+  if (chunks.length === 1) return chunks[0];
+  const total = chunks.reduce((sum, c) => sum + c.length, 0);
+  const result = new Uint8Array(total);
+  let pos = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, pos);
+    pos += chunk.length;
+  }
+  return result;
 }
 
+/**
+ * Downloads attachment content from Resend.
+ *
+ * @param attachment   - Parsed attachment descriptor from Resend payload
+ * @param resendEmailId - The Resend external email ID (NOT the internal UUID)
+ * @param resendApiKey  - Bearer token for Resend API calls
+ */
 async function loadAttachmentContent(
   attachment: ResendReceivedAttachment,
-  emailId: string,
+  resendEmailId: string,
   resendApiKey: string
 ): Promise<ArrayBuffer | Uint8Array | string | null> {
   if (attachment.content) {
@@ -183,7 +237,7 @@ async function loadAttachmentContent(
       return decodeBase64ToUint8Array(attachment.content);
     } catch (err) {
       console.warn('[worker] attachment content is not valid base64; storing raw string', {
-        emailId,
+        resendEmailId,
         error: err,
       });
       return attachment.content;
@@ -204,7 +258,7 @@ async function loadAttachmentContent(
 
   if (attachment.id) {
     const response = await fetch(
-      `https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachment.id)}`,
+      `https://api.resend.com/emails/receiving/${encodeURIComponent(resendEmailId)}/attachments/${encodeURIComponent(attachment.id)}`,
       {
         headers: {
           Authorization: `Bearer ${resendApiKey}`,
@@ -222,9 +276,11 @@ async function loadAttachmentContent(
 
 // Env interface -- matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
+// EMAIL_BODIES is optional: the worker degrades gracefully (body keys = null)
+// if the bucket is not bound (e.g. local dev without R2 configured).
 export interface Env {
   DB: D1Database;
-  EMAIL_BODIES: R2Bucket;
+  EMAIL_BODIES?: R2Bucket;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
   SENTRY_DSN?: string;       // optional -- worker runs without Sentry if unset
@@ -403,75 +459,92 @@ const handler: ExportedHandler<Env> = {
       : (typeof toRaw === 'string' ? toRaw : '');
 
     const internalEmailId = crypto.randomUUID();
+    const r2Bucket = env.EMAIL_BODIES;
 
     // --- Step 6: Store body content in R2 and persist key columns in D1 ---
+    // R2 write failures are NON-FATAL: we log+warn and proceed with null keys
+    // so the D1 INSERT always completes. This prevents the Resend retry
+    // contract from creating orphaned R2 objects: if a 500 were returned here,
+    // Resend would retry, INSERT OR IGNORE would skip the duplicate resend_id,
+    // and any already-written R2 objects would be permanently orphaned.
     let bodyTextKey: string | null = null;
     let bodyHtmlKey: string | null = null;
-    try {
+    if (r2Bucket) {
       if (receivedEmail.text !== null && receivedEmail.text !== undefined) {
         bodyTextKey = getBodyTextKey(internalEmailId);
-        await env.EMAIL_BODIES.put(bodyTextKey, receivedEmail.text, {
-          httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-        });
+        try {
+          await r2Bucket.put(bodyTextKey, receivedEmail.text, {
+            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+          });
+        } catch (err) {
+          console.warn('[worker] failed to persist body_text to R2; proceeding with null key', { emailId, err });
+          bodyTextKey = null;
+        }
       }
 
       if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
         bodyHtmlKey = getBodyHtmlKey(internalEmailId);
-        await env.EMAIL_BODIES.put(bodyHtmlKey, receivedEmail.html, {
-          httpMetadata: { contentType: 'text/html; charset=utf-8' },
-        });
+        try {
+          await r2Bucket.put(bodyHtmlKey, receivedEmail.html, {
+            httpMetadata: { contentType: 'text/html; charset=utf-8' },
+          });
+        } catch (err) {
+          console.warn('[worker] failed to persist body_html to R2; proceeding with null key', { emailId, err });
+          bodyHtmlKey = null;
+        }
       }
-    } catch (err) {
-      console.error('[worker] failed to persist email body to R2', err);
-      return new Response('Failed to persist email body', { status: 500 });
+    } else {
+      console.warn('[worker] EMAIL_BODIES R2 bucket not bound; bodies will not be stored in R2', { emailId });
     }
 
     // --- Step 7: Attachment ingestion (download from Resend, store in R2) ---
-    const attachments = receivedEmail.attachments ?? [];
-    for (const [index, attachment] of attachments.entries()) {
-      const safeFilename = sanitizeAttachmentFilename(
-        attachment.filename ?? `attachment-${index + 1}`,
-        index
-      );
-      let attachmentData: ArrayBuffer | Uint8Array | string | null = null;
-      try {
-        attachmentData = await loadAttachmentContent(
-          attachment,
-          emailId,
-          env.RESEND_API_KEY
+    if (r2Bucket) {
+      const attachments = receivedEmail.attachments ?? [];
+      for (const [index, attachment] of attachments.entries()) {
+        const safeFilename = sanitizeAttachmentFilename(
+          attachment.filename ?? `attachment-${index + 1}`,
+          index
         );
-      } catch (err) {
-        console.warn('[worker] failed to download attachment from Resend', {
-          emailId,
-          filename: safeFilename,
-          error: err,
-        });
-      }
+        let attachmentData: ArrayBuffer | Uint8Array | string | null = null;
+        try {
+          attachmentData = await loadAttachmentContent(
+            attachment,
+            emailId,
+            env.RESEND_API_KEY
+          );
+        } catch (err) {
+          console.warn('[worker] failed to download attachment from Resend', {
+            emailId,
+            filename: safeFilename,
+            error: err,
+          });
+        }
 
-      if (!attachmentData) {
-        console.warn(
-          '[worker] skipping attachment; unable to load attachment data',
-          { emailId, filename: safeFilename }
-        );
-        continue;
-      }
+        if (!attachmentData) {
+          console.warn(
+            '[worker] skipping attachment; unable to load attachment data',
+            { emailId, filename: safeFilename }
+          );
+          continue;
+        }
 
-      const contentType =
-        attachment.contentType ??
-        attachment.content_type ??
-        'application/octet-stream';
-      const attachmentKey = `emails/${internalEmailId}/attachments/${safeFilename}`;
+        const contentType =
+          attachment.contentType ??
+          attachment.content_type ??
+          'application/octet-stream';
+        const attachmentKey = `emails/${internalEmailId}/attachments/${safeFilename}`;
 
-      try {
-        await env.EMAIL_BODIES.put(attachmentKey, attachmentData, {
-          httpMetadata: { contentType },
-        });
-      } catch (err) {
-        console.warn('[worker] failed to persist attachment to R2', {
-          emailId,
-          filename: safeFilename,
-          error: err,
-        });
+        try {
+          await r2Bucket.put(attachmentKey, attachmentData, {
+            httpMetadata: { contentType },
+          });
+        } catch (err) {
+          console.warn('[worker] failed to persist attachment to R2', {
+            emailId,
+            filename: safeFilename,
+            error: err,
+          });
+        }
       }
     }
 

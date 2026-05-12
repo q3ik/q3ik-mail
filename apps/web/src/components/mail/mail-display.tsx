@@ -123,6 +123,11 @@ function EmailBody({ email }: { email: Email }) {
   const [bodyLoadError, setBodyLoadError] = useState(false);
   const [sanitizedHtml, setSanitizedHtml] = useState<string | null>(null);
 
+  // Dependency is [email.id] only. The shouldFetchFromApi check is intentionally
+  // inside the effect rather than in the dep array: when both body fields are null
+  // they will always be null on every render for R2-backed emails, so including
+  // them as deps would either never re-fire (same null reference) or spuriously
+  // re-fire on parent re-renders that produce a new email object with null bodies.
   useEffect(() => {
     const controller = new AbortController();
     const shouldFetchFromApi = email.body_html === null && email.body_text === null;
@@ -142,8 +147,8 @@ function EmailBody({ email }: { email: Email }) {
     setIsBodyLoading(true);
     setBodyLoadError(false);
     setBody({
-      body_html: email.body_html,
-      body_text: email.body_text,
+      body_html: null,
+      body_text: null,
     });
 
     void fetch(`/api/emails/${encodeURIComponent(email.id)}/body`, {
@@ -163,7 +168,12 @@ function EmailBody({ email }: { email: Email }) {
           body_text: payload.body_text ?? null,
         });
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
+        // Filter intentional aborts (component unmount during navigation).
+        // AbortError must not set bodyLoadError — the user navigated away cleanly.
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return;
+        }
         console.error('[mail-display] failed to fetch email body:', err);
         setBodyLoadError(true);
       })
@@ -174,7 +184,8 @@ function EmailBody({ email }: { email: Email }) {
     return () => {
       controller.abort();
     };
-  }, [email.id, email.body_html, email.body_text]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email.id]);
 
   useEffect(() => {
     let cancelled = false;
