@@ -5,6 +5,10 @@ This document captures the Cloudflare Zero Trust / Access settings for the
 and provides a checklist for the manual dashboard steps that cannot be
 managed via code.
 
+> ⚠️ **Never commit the AUD tag or Application ID to this file.**
+> Retrieve them from the Cloudflare Zero Trust dashboard and store the
+> AUD value exclusively as a Worker secret (`wrangler secret put`).
+
 ---
 
 ## Access Application: `q3ik-mail`
@@ -13,7 +17,7 @@ managed via code.
 |---|---|
 | Application URL | `q3ik-mail.pages.dev` |
 | Type | Self-Hosted |
-| Application ID | `REDACTED_APP_ID` |
+| Application ID | *(retrieve from Zero Trust → Access → Applications → q3ik-mail)* |
 | Policy | `owner-only` (Allow, 2 emails included) |
 | Session Duration | 24 hours |
 
@@ -24,15 +28,15 @@ managed via code.
 The AUD (audience) tag uniquely identifies this Access application. It is
 used to validate the `CF_Access_Jwt_Assertion` header in the Worker.
 
-```
-bd9961373ae9b784caad80589843 5cac43eb1dd2366ad5c63d9a7ad5b7879b2f
-```
+**Do not store the AUD value here.** Retrieve it from:
+**Zero Trust → Access → Applications → q3ik-mail → Edit → Overview → Application ID / AUD Tag**
 
-Store this as the `CLOUDFLARE_ACCESS_AUD` secret in the Worker:
+Store it as a Worker secret only:
 
 ```sh
+# From apps/worker/
 npx wrangler secret put CLOUDFLARE_ACCESS_AUD
-# paste the AUD value above
+# paste the AUD value from the dashboard — do not write it in this file
 ```
 
 ---
@@ -69,10 +73,10 @@ request. See `apps/worker/src/middleware/cfAccess.ts`.
 
 Required Worker secrets / vars:
 
-| Name | Type | Value |
+| Name | Type | Where to get the value |
 |---|---|---|
-| `CLOUDFLARE_ACCESS_AUD` | Secret | AUD tag from above |
-| `CLOUDFLARE_TEAM_DOMAIN` | Var (wrangler.toml) | e.g. `your-team.cloudflareaccess.com` |
+| `CLOUDFLARE_ACCESS_AUD` | Secret (`wrangler secret put`) | Zero Trust → Access → Applications → q3ik-mail → AUD Tag |
+| `CLOUDFLARE_TEAM_DOMAIN` | Var (`wrangler.toml`) | Zero Trust → Settings → Custom Pages → Team domain |
 
 Set the secret:
 ```sh
@@ -101,8 +105,8 @@ Steps:
    - Policy: same `owner-only` policy
    - Cookie settings: same hardened values above
 3. Update the Pages project's custom domain in the Cloudflare Pages dashboard.
-4. Update `CLOUDFLARE_ACCESS_AUD` in the Worker with the new AUD tag
-   (each Access application has a unique AUD).
+4. Run `npx wrangler secret put CLOUDFLARE_ACCESS_AUD` with the **new** AUD tag
+   (each Access application has a unique AUD — do not reuse the old one).
 
 ---
 
