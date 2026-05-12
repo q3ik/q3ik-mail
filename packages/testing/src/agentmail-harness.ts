@@ -16,6 +16,9 @@ interface AgentMailMessagesResponse {
   messages: AgentMailMessage[];
 }
 
+const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+const DEFAULT_POLL_INTERVAL_MS = 2_000;
+
 export type AgentMailMessageFilter = (message: AgentMailMessage) => boolean;
 
 export interface WaitForEmailOptions {
@@ -34,11 +37,23 @@ export class AgentMailClient {
     this.baseUrl = options?.baseUrl ?? 'https://api.agentmail.to/v1';
   }
 
+  private async request(
+    path: string,
+    init: RequestInit | undefined,
+    options: { allowStatuses?: number[]; expectJson: false }
+  ): Promise<void>;
+
+  private async request<T>(
+    path: string,
+    init?: RequestInit,
+    options?: { allowStatuses?: number[]; expectJson?: true }
+  ): Promise<T>;
+
   private async request<T>(
     path: string,
     init?: RequestInit,
     options?: { allowStatuses?: number[]; expectJson?: boolean }
-  ): Promise<T> {
+  ): Promise<T | void> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
@@ -53,7 +68,10 @@ export class AgentMailClient {
       throw new Error(`AgentMail API request failed (${res.status}): ${errorBody}`);
     }
 
-    if (options?.expectJson === false || res.status === 204) return undefined as T;
+    if (options?.expectJson === false) return;
+    if (res.status === 204) {
+      throw new Error(`AgentMail API request returned no content for ${path}`);
+    }
 
     return res.json() as Promise<T>;
   }
@@ -77,14 +95,16 @@ export class AgentMailClient {
 
   async waitForEmail(
     mailboxId: string,
-    timeoutOrOptions: number | WaitForEmailOptions = 30_000
+    timeoutOrOptions: number | WaitForEmailOptions = DEFAULT_WAIT_TIMEOUT_MS
   ): Promise<AgentMailMessage> {
     const timeoutMs =
-      typeof timeoutOrOptions === 'number' ? timeoutOrOptions : (timeoutOrOptions.timeoutMs ?? 30_000);
+      typeof timeoutOrOptions === 'number'
+        ? timeoutOrOptions
+        : (timeoutOrOptions.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS);
     const pollIntervalMs =
       typeof timeoutOrOptions === 'number'
-        ? 2_000
-        : (timeoutOrOptions.pollIntervalMs ?? 2_000);
+        ? DEFAULT_POLL_INTERVAL_MS
+        : (timeoutOrOptions.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
     const filter = typeof timeoutOrOptions === 'number' ? undefined : timeoutOrOptions.filter;
     const start = Date.now();
 
