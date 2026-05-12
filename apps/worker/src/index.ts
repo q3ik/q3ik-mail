@@ -5,17 +5,61 @@ import { resolveOrphanedThreads } from '@q3ik-mail/database';
 import { parseFrom } from './utils/parseFrom';
 
 // Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
-// Field names verified against https://resend.com/docs/api-reference/inbound
+// Field names verified against https://resend.com/docs/api-reference/webhooks/email-received
 // When Resend ships official types, replace this interface with the proper SDK import.
-// TODO: confirm `text` vs `body_text` field name against live API once Resend docs stabilise.
 interface ResendReceivedEmail {
   from?: string;
   // Resend may return a single address string or an array; normalise downstream.
   to?: string | string[];
   subject?: string;
-  text?: string;
-  html?: string;
+  text: string | null;
+  html?: string | null;
   headers?: Array<{ name: string; value: string }>;
+}
+
+function parseResendReceivedEmail(payload: unknown): ResendReceivedEmail | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const email = payload as Record<string, unknown>;
+
+  if (!('text' in email) || (email.text !== null && typeof email.text !== 'string')) {
+    return null;
+  }
+  if (email.from !== undefined && typeof email.from !== 'string') return null;
+  if (
+    email.to !== undefined &&
+    typeof email.to !== 'string' &&
+    !(Array.isArray(email.to) && email.to.every((item) => typeof item === 'string'))
+  ) {
+    return null;
+  }
+  if (email.subject !== undefined && typeof email.subject !== 'string') return null;
+  if (email.html !== undefined && email.html !== null && typeof email.html !== 'string') return null;
+  if (
+    email.headers !== undefined &&
+    !(
+      Array.isArray(email.headers) &&
+      email.headers.every(
+        (header) =>
+          header &&
+          typeof header === 'object' &&
+          typeof (header as { name?: unknown }).name === 'string' &&
+          typeof (header as { value?: unknown }).value === 'string',
+      )
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    from: typeof email.from === 'string' ? email.from : undefined,
+    to: typeof email.to === 'string' || Array.isArray(email.to) ? email.to : undefined,
+    subject: typeof email.subject === 'string' ? email.subject : undefined,
+    text: email.text as string | null,
+    html: typeof email.html === 'string' || email.html === null ? email.html : undefined,
+    headers: Array.isArray(email.headers)
+      ? email.headers as Array<{ name: string; value: string }>
+      : undefined,
+  };
 }
 
 // Env interface -- matches wrangler.toml bindings and secrets
@@ -97,11 +141,11 @@ const handler: ExportedHandler<Env> = {
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
     // resend v4 types don't yet include emails.receiving; cast through unknown to call it
     // and assert the expected shape so all downstream field accesses are type-checked.
-    let receivedEmail: ResendReceivedEmail;
+    let receivedEmailPayload: unknown;
     try {
       // Use resend.emails.receiving.get() -- NOT resend.emails.get()
       // resend.emails.get() is for sent mail; receiving.get() is for inbound
-      receivedEmail = await (resend.emails as unknown as { receiving: { get: (id: string) => Promise<ResendReceivedEmail> } }).receiving.get(emailId);
+      receivedEmailPayload = await (resend.emails as unknown as { receiving: { get: (id: string) => Promise<unknown> } }).receiving.get(emailId);
     } catch (err) {
       if (env.SENTRY_DSN) {
         Sentry.captureException(err, {
@@ -116,8 +160,9 @@ const handler: ExportedHandler<Env> = {
     // The API response is cast from `any`; validate the minimum required shape
     // before proceeding so that API will surface immediately as a 502 rather
     // than silently writing nulls into D1.
-    if (!receivedEmail || typeof receivedEmail !== 'object') {
-      console.error('[worker] Resend receiving API returned unexpected payload type:', typeof receivedEmail);
+    const receivedEmail = parseResendReceivedEmail(receivedEmailPayload);
+    if (!receivedEmail) {
+      console.error('[worker] Resend receiving API returned unexpected payload shape');
       return new Response('Invalid email payload from upstream', { status: 502 });
     }
 

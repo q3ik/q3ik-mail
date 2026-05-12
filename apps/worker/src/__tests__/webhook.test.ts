@@ -197,6 +197,36 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
   });
 
+  it('maps Resend `text` payload field into D1 `body_text`', async () => {
+    const { Resend } = await import('resend');
+    const { env, prepareSpy, bindSpy } = makeThreadEnv();
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Body Mapping',
+            text: 'Plain text from text field',
+            body_text: 'legacy field should be ignored',
+            html: null,
+            headers: [{ name: 'Message-ID', value: '<body-map@example.com>' }],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+    expect(res.status).toBe(200);
+
+    const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    expect(values[columns.indexOf('body_text')]).toBe('Plain text from text field');
+  });
+
   it('extracts and persists References header from inbound email', async () => {
     const { Resend } = await import('resend');
     const { env, prepareSpy, bindSpy } = makeThreadEnv();
