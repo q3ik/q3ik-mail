@@ -20,5 +20,10 @@ export async function GET(req: Request) {
   const cursor = searchParams.get('cursor') ?? undefined;
   const { env } = getRequestContext();
 
-  return Response.json(await getThreadListPage(env.DB, { limit, cursor }));
+  try {
+    return Response.json(await getThreadListPage(env.DB, { limit, cursor }));
+  } catch (error) {
+    console.error('[api/emails] failed to load emails:', error);
+    return Response.json({ error: 'Failed to load emails' }, { status: 500 });
+  }
 }
