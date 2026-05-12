@@ -1,7 +1,7 @@
 /**
  * Cloudflare Access JWT validation middleware.
  *
- * Validates the `CF_Access_Jwt_Assertion` header that Cloudflare Access
+ * Validates the `Cf-Access-Jwt-Assertion` header that Cloudflare Access
  * injects on every authenticated request. Rejects requests that are missing
  * the header, have an invalid signature, or carry the wrong AUD or ISS claim.
  *
@@ -100,7 +100,7 @@ function base64urlDecode(input: string): Uint8Array {
 }
 
 /**
- * Validates the CF Access JWT from the `CF_Access_Jwt_Assertion` header.
+ * Validates the CF Access JWT from the `Cf-Access-Jwt-Assertion` header.
  *
  * Steps:
  *  1. Extract and structurally validate the JWT (3-part, base64url)
@@ -114,9 +114,9 @@ export async function validateCfAccessJwt(
   request: Request,
   env: CfAccessEnv,
 ): Promise<ValidateResult> {
-  const token = request.headers.get('CF_Access_Jwt_Assertion');
+  const token = request.headers.get('Cf-Access-Jwt-Assertion');
   if (!token) {
-    return { ok: false, error: 'Missing CF_Access_Jwt_Assertion header' };
+    return { ok: false, error: 'Missing Cf-Access-Jwt-Assertion header' };
   }
 
   const parts = token.split('.');
