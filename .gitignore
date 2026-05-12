@@ -52,3 +52,6 @@ apps/worker/wrangler.toml
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# Turborepo local preferences (machine-specific)
+.turbo/preferences/
