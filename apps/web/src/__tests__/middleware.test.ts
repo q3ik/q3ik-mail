@@ -17,9 +17,6 @@ vi.mock('jose/jwt/verify', () => ({
 
 describe('Cloudflare Access middleware', () => {
   beforeEach(() => {
-    // vi.resetModules() re-evaluates the middleware module on next import,
-    // which resets cachedConfig / cachedJwks / cachedJwksTeamDomain between
-    // tests so each test starts from a clean module-level state.
     vi.resetModules();
     vi.clearAllMocks();
     joseMocks.createRemoteJWKSet.mockReturnValue(joseMocks.remoteJwkSet);
@@ -219,5 +216,51 @@ describe('Cloudflare Access middleware', () => {
     expect(config.matcher).toEqual([
       '/((?!api/webhook|_next/static|_next/image|favicon.ico).*)',
     ]);
+  });
+
+  // ── Security headers ─────────────────────────────────────────────────────
+
+  it('attaches X-Content-Type-Options: nosniff on authenticated responses', async () => {
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/inbox', {
+      headers: { 'CF-Access-Jwt-Assertion': 'valid-token' },
+    });
+
+    const res = await middleware(req);
+
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('attaches X-Frame-Options: DENY on authenticated responses', async () => {
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/inbox', {
+      headers: { 'CF-Access-Jwt-Assertion': 'valid-token' },
+    });
+
+    const res = await middleware(req);
+
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+  });
+
+  it('attaches Referrer-Policy on authenticated responses', async () => {
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/inbox', {
+      headers: { 'CF-Access-Jwt-Assertion': 'valid-token' },
+    });
+
+    const res = await middleware(req);
+
+    expect(res.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
+  });
+
+  it('does NOT attach security headers to the public webhook path', async () => {
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/api/webhook');
+
+    const res = await middleware(req);
+
+    // Webhook bypasses auth entirely — security headers must not be applied.
+    expect(res.headers.get('x-frame-options')).toBeNull();
+    expect(res.headers.get('x-content-type-options')).toBeNull();
   });
 });

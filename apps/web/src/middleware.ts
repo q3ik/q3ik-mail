@@ -18,8 +18,6 @@ import { NextRequest, NextResponse } from 'next/server';
  *    exposing it on a public domain.
  */
 
-// /favicon.ico is excluded by the matcher pattern below; it does not need a
-// runtime check inside isPublicPath().
 const PUBLIC_PATHS = ['/api/webhook'] as const;
 const PUBLIC_PREFIXES = ['/_next/static/', '/_next/image/'] as const;
 const PUBLIC_PATH_SET = new Set<string>(PUBLIC_PATHS);
@@ -41,12 +39,28 @@ type AccessConfig = {
 };
 
 // Module-level caches — valid for the lifetime of the edge worker instance.
-// cachedConfig uses `undefined` as a sentinel meaning "not yet evaluated" so
-// that a legitimate `null` (bad config) is also cached and not re-evaluated
-// on every request.
 let cachedConfig: AccessConfig | null | undefined;
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 let cachedJwksTeamDomain: string | undefined;
+
+/**
+ * Security headers attached to every authenticated NextResponse.next().
+ *
+ * Content-Security-Policy is set via next.config.js headers() for the full
+ * Next.js response pipeline. The subset below is mirrored here so that
+ * middleware-generated responses — which bypass the next.config pipeline on
+ * some Cloudflare Pages deployments — also carry the headers.
+ *
+ * X-Frame-Options and X-Content-Type-Options are intentionally kept here
+ * rather than relying solely on CSP `frame-ancestors` because some older
+ * proxies and security scanners only recognise the legacy headers.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+};
 
 function isPublicPath(pathname: string): boolean {
   return (
@@ -59,9 +73,6 @@ function isPublicPath(pathname: string): boolean {
  * Reads and validates env vars, caching the result for the worker lifetime.
  * Returns null (and caches it) if either var is absent, the audience is
  * whitespace-only, or the team domain fails the allowlist pattern.
- *
- * Both vars are trimmed so stray whitespace in the deployment env does not
- * silently break JWT verification.
  */
 function getAccessConfig(): AccessConfig | null {
   if (cachedConfig !== undefined) {
@@ -107,17 +118,11 @@ function getJwks(teamDomain: string) {
 /**
  * Resolves the Cloudflare Access JWT from the incoming request.
  *
- * Cloudflare Access delivers the JWT in two ways depending on the Access
- * Application cookie settings:
+ * Cloudflare Access delivers the JWT in two ways:
+ * - As a `CF-Access-Jwt-Assertion` request header
+ * - As a `CF_Authorization` cookie (primary for browser sessions)
  *
- * - As a `CF-Access-Jwt-Assertion` request **header** — present on all
- *   requests proxied through Access, including API calls and service tokens.
- * - As a `CF_Authorization` **cookie** — the primary delivery mechanism for
- *   browser sessions when "Binding Cookie" is enabled (recommended). With
- *   HTTP Only also enabled, client-side JS cannot read this cookie.
- *
- * The header is checked first; the cookie is the fallback. Either is
- * sufficient for JWT verification — both contain the same signed token.
+ * The header is checked first; the cookie is the fallback.
  */
 function resolveAccessToken(req: NextRequest): string | null {
   return (
@@ -125,6 +130,15 @@ function resolveAccessToken(req: NextRequest): string | null {
     req.cookies.get(CF_ACCESS_COOKIE)?.value ??
     null
   );
+}
+
+/** Returns NextResponse.next() with all security headers attached. */
+function nextWithSecurityHeaders(): NextResponse {
+  const res = NextResponse.next();
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    res.headers.set(key, value);
+  }
+  return res;
 }
 
 export async function middleware(req: NextRequest) {
@@ -152,20 +166,13 @@ export async function middleware(req: NextRequest) {
       audience: accessConfig.audience,
       issuer: accessConfig.issuer,
     });
-    return NextResponse.next();
+    return nextWithSecurityHeaders();
   } catch (error) {
-    // Log the specific jose error to aid debugging (expired token, bad
-    // signature, JWKS fetch failure, audience/issuer mismatch, etc.)
-    // without leaking the token value itself.
     console.error('[middleware] JWT verification failed:', error);
     return NextResponse.redirect(accessConfig.loginUrl);
   }
 }
 
 export const config = {
-  // Next.js requires middleware matchers to stay statically analyzable.
-  // favicon.ico is excluded here via the negative lookahead.
-  // /api/webhook is excluded both here and via isPublicPath() for defence-in-depth.
-  // Keep this literal in sync with PUBLIC_PATHS and PUBLIC_PREFIXES above.
   matcher: ['/((?!api/webhook|_next/static|_next/image|favicon.ico).*)'],
 };
