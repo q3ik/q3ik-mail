@@ -77,7 +77,7 @@ function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
  * object like `{ thread_id: 'x' }` to simulate a found parent, or `null`
  * for the orphan / no-parent path.
  */
-function makeEnvWithSpy(selectFirstResult: unknown = null) {
+function makeThreadEnv(selectFirstResult: unknown = null) {
   const bindSpy = vi.fn().mockReturnValue({
     first: async () => null,
     run: async () => ({ success: true }),
@@ -199,7 +199,7 @@ describe('webhook handler', () => {
 
   it('extracts and persists References header from inbound email', async () => {
     const { Resend } = await import('resend');
-    const { env, prepareSpy, bindSpy } = makeEnvWithSpy();
+    const { env, prepareSpy, bindSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -234,7 +234,7 @@ describe('webhook handler', () => {
 
   it('stores null for references when References header is absent', async () => {
     const { Resend } = await import('resend');
-    const { env, prepareSpy, bindSpy } = makeEnvWithSpy();
+    const { env, prepareSpy, bindSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -320,7 +320,7 @@ describe('threading', () => {
     }));
 
     // selectFirstResult = found parent row
-    const { env, prepareSpy, bindSpy } = makeEnvWithSpy({ thread_id: 'existing-thread-id' });
+    const { env, prepareSpy, bindSpy } = makeThreadEnv({ thread_id: 'existing-thread-id' });
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
@@ -354,7 +354,7 @@ describe('threading', () => {
     }));
 
     // selectFirstResult = null simulates parent not found
-    const { env, prepareSpy, bindSpy } = makeEnvWithSpy(null);
+    const { env, prepareSpy, bindSpy } = makeThreadEnv(null);
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
@@ -363,11 +363,71 @@ describe('threading', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    const threadIdIdx = columns.indexOf('thread_id');
     const needsRethreadingIdx = columns.indexOf('needs_rethreading');
+    expect(threadIdIdx).toBeGreaterThanOrEqual(0);
     expect(needsRethreadingIdx).toBeGreaterThanOrEqual(0);
+    expect(values[threadIdIdx]).toBe('<missing@example.com>');
     // needs_rethreading is a bound `?` param — getInsertArgs resolves it correctly
     // regardless of the literal 0s for is_read/is_sent in the same INSERT.
     expect(values[needsRethreadingIdx]).toBe(1);
+  });
+
+  it('does not merge separate root emails that share the same subject', async () => {
+    const { Resend } = await import('resend');
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Daily Standup',
+            text: 'Thread A',
+            html: '<p>Thread A</p>',
+            headers: [
+              { name: 'Message-ID', value: '<thread-a@example.com>' },
+            ],
+          }),
+        },
+      },
+    }));
+
+    const { env: firstEnv, prepareSpy: firstPrepareSpy, bindSpy: firstBindSpy } = makeThreadEnv();
+    const firstReq = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const firstRes = await worker.fetch!(firstReq as WorkerRequest, firstEnv, mockCtx);
+    expect(firstRes.status).toBe(200);
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Bob <bob@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Daily Standup',
+            text: 'Thread B',
+            html: '<p>Thread B</p>',
+            headers: [
+              { name: 'Message-ID', value: '<thread-b@example.com>' },
+            ],
+          }),
+        },
+      },
+    }));
+
+    const { env: secondEnv, prepareSpy: secondPrepareSpy, bindSpy: secondBindSpy } = makeThreadEnv();
+    const secondReq = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const secondRes = await worker.fetch!(secondReq as WorkerRequest, secondEnv, mockCtx);
+    expect(secondRes.status).toBe(200);
+
+    const firstInsert = getInsertArgs(firstPrepareSpy, firstBindSpy);
+    const secondInsert = getInsertArgs(secondPrepareSpy, secondBindSpy);
+    expect(firstInsert.values[firstInsert.columns.indexOf('thread_id')]).toBe('<thread-a@example.com>');
+    expect(secondInsert.values[secondInsert.columns.indexOf('thread_id')]).toBe('<thread-b@example.com>');
   });
 
   it('stores correct from_name and from_address for quoted display name with comma', async () => {
@@ -387,7 +447,7 @@ describe('threading', () => {
       },
     }));
 
-    const { env, prepareSpy, bindSpy } = makeEnvWithSpy();
+    const { env, prepareSpy, bindSpy } = makeThreadEnv();
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
