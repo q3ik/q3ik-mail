@@ -37,8 +37,16 @@ const SANITIZE_OPTIONS = {
   FORCE_BODY: true,
 } as const;
 
-/** Matches any CSS url(...) value in a style attribute. */
-const CSS_URL_RE = /url\s*\(\s*(?:'[^']*'|\"[^\"]*\"|[^)]*)\s*\)/gi;
+/**
+ * Matches any CSS url(...) value in a style attribute.
+ *
+ * NOTE: Do NOT use .test() with this regex — it uses the /g flag, which means
+ * lastIndex persists between calls on the same regex instance. On alternating
+ * invocations .test() would return false even when a url() is present,
+ * allowing tracker pixels through. Always use .replace() instead (which
+ * resets lastIndex on every call).
+ */
+const CSS_URL_RE = /url\s*\(\s*(?:'[^']*'|"[^"]*"|[^)]*)\s*\)/gi;
 
 let DOMPurifyPromise: Promise<typeof import('isomorphic-dompurify')> | undefined;
 let hooksInstalled = false;
@@ -52,8 +60,11 @@ function loadDomPurify() {
       mod.default.addHook('afterSanitizeAttributes', (node) => {
         const el = node as Element;
         const style = el.getAttribute?.('style');
-        if (style && CSS_URL_RE.test(style)) {
-          el.setAttribute('style', style.replace(CSS_URL_RE, ''));
+        if (style) {
+          const cleaned = style.replace(CSS_URL_RE, '');
+          if (cleaned !== style) {
+            el.setAttribute('style', cleaned);
+          }
         }
       });
     }
