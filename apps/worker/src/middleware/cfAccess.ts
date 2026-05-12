@@ -3,7 +3,7 @@
  *
  * Validates the `CF_Access_Jwt_Assertion` header that Cloudflare Access
  * injects on every authenticated request. Rejects requests that are missing
- * the header, have an invalid signature, or carry the wrong AUD claim.
+ * the header, have an invalid signature, or carry the wrong AUD or ISS claim.
  *
  * References:
  *   https://developers.cloudflare.com/cloudflare-one/identity/authorization-cookie/validating-json/
@@ -50,26 +50,36 @@ type ValidateResult =
  * CryptoKey matching the given `kid`. Results are NOT cached here — the
  * Workers runtime automatically caches `fetch()` responses respecting
  * Cache-Control headers returned by the CF certs endpoint (24h TTL).
+ *
+ * Wrapped in try/catch: any failure (network, malformed JWKS, importKey
+ * rejection) returns null so the caller emits a controlled 401 rather than
+ * an unhandled 500.
  */
 async function getPublicKey(
   teamDomain: string,
   kid: string,
 ): Promise<CryptoKey | null> {
-  const certsUrl = `https://${teamDomain}/cdn-cgi/access/certs`;
-  const res = await fetch(certsUrl);
-  if (!res.ok) return null;
+  try {
+    const certsUrl = `https://${teamDomain}/cdn-cgi/access/certs`;
+    const res = await fetch(certsUrl);
+    if (!res.ok) return null;
 
-  const jwks = await res.json<{ keys: Array<{ kid: string } & JsonWebKey> }>();
-  const jwk = jwks.keys.find((k) => k.kid === kid);
-  if (!jwk) return null;
+    const jwks = await res.json<{ keys: Array<{ kid: string } & JsonWebKey> }>();
+    const jwk = jwks.keys.find((k) => k.kid === kid);
+    if (!jwk) return null;
 
-  return crypto.subtle.importKey(
-    'jwk',
-    jwk,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  );
+    // `await` is required here inside the try/catch so that importKey
+    // rejections are caught locally rather than escaping as unhandled.
+    return await crypto.subtle.importKey(
+      'jwk',
+      jwk,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify'],
+    );
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -94,9 +104,10 @@ function base64urlDecode(input: string): Uint8Array {
  * Steps:
  *  1. Extract and structurally validate the JWT (3-part, base64url)
  *  2. Verify the AUD claim matches the configured Access AUD tag
- *  3. Verify the exp claim (not expired)
- *  4. Fetch the matching public key from the JWKS endpoint by `kid`
- *  5. Verify the RS256 signature
+ *  3. Verify the ISS claim matches `https://<CLOUDFLARE_TEAM_DOMAIN>`
+ *  4. Verify the exp claim (not expired)
+ *  5. Fetch the matching public key from the JWKS endpoint by `kid`
+ *  6. Verify the RS256 signature
  */
 export async function validateCfAccessJwt(
   request: Request,
@@ -123,10 +134,15 @@ export async function validateCfAccessJwt(
     return { ok: false, error: 'Failed to decode JWT parts' };
   }
 
-  // Verify AUD claim
+  // Verify AUD and ISS claims.
+  // ISS check prevents token substitution from other Cloudflare Access teams
+  // that share the same AUD format but were issued by a different team domain.
   const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   if (!audList.includes(env.CLOUDFLARE_ACCESS_AUD)) {
     return { ok: false, error: 'JWT AUD mismatch' };
+  }
+  if (payload.iss !== `https://${env.CLOUDFLARE_TEAM_DOMAIN}`) {
+    return { ok: false, error: 'JWT ISS mismatch' };
   }
 
   // Verify expiry (use seconds, same as JWT spec)
@@ -146,9 +162,17 @@ export async function validateCfAccessJwt(
     return { ok: false, error: 'Public key not found for kid' };
   }
 
+  // Decode the signature safely — a malformed base64url signature should
+  // produce a controlled 401, not an unhandled Worker exception.
+  let signature: Uint8Array;
+  try {
+    signature = base64urlDecode(rawSignature);
+  } catch {
+    return { ok: false, error: 'Invalid JWT signature encoding' };
+  }
+
   // Verify RS256 signature
   const signingInput = new TextEncoder().encode(`${rawHeader}.${rawPayload}`);
-  const signature = base64urlDecode(rawSignature);
 
   const valid = await crypto.subtle.verify(
     'RSASSA-PKCS1-v1_5',

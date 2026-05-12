@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { validateCfAccessJwt, type CfAccessEnv } from './cfAccess';
 
 const mockEnv: CfAccessEnv = {
@@ -49,6 +49,20 @@ describe('validateCfAccessJwt', () => {
     if (!result.ok) expect(result.error).toMatch(/AUD mismatch/);
   });
 
+  it('rejects JWT with wrong ISS', async () => {
+    const header = base64url({ alg: 'RS256', kid: 'kid1' });
+    const payload = base64url({
+      aud: 'test-aud-value',
+      iss: 'https://evil-other-team.cloudflareaccess.com',
+      sub: 'user@example.com',
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const result = await validateCfAccessJwt(makeRequest(`${header}.${payload}.fakesig`), mockEnv);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/ISS mismatch/);
+  });
+
   it('rejects an expired JWT', async () => {
     const header = base64url({ alg: 'RS256', kid: 'kid1' });
     const payload = base64url({
@@ -93,6 +107,25 @@ describe('validateCfAccessJwt', () => {
     });
     const result = await validateCfAccessJwt(makeRequest(`${header}.${payload}.fakesig`), mockEnv);
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/Public key not found/);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('returns controlled error when JWKS fetch throws', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network failure')));
+
+    const header = base64url({ alg: 'RS256', kid: 'kid1' });
+    const payload = base64url({
+      aud: 'test-aud-value',
+      iss: 'https://test-team.cloudflareaccess.com',
+      sub: 'user@example.com',
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const result = await validateCfAccessJwt(makeRequest(`${header}.${payload}.fakesig`), mockEnv);
+    expect(result.ok).toBe(false);
+    // Should be a controlled 401 message, not an unhandled throw
     if (!result.ok) expect(result.error).toMatch(/Public key not found/);
 
     vi.unstubAllGlobals();
