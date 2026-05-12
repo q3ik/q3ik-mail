@@ -6,9 +6,11 @@ export const runtime = 'edge';
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const query = searchParams.get('q')?.trim() ?? '';
+
   if (!query) {
     return Response.json({ error: 'q is required' }, { status: 400 });
   }
+
   const { env } = getRequestContext();
 
   try {

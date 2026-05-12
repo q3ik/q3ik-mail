@@ -43,14 +43,12 @@ export function Mail({
 
   // Bug #3 fix: monotonically-increasing token to guard against out-of-order responses
   const requestTokenRef = useRef(0);
-  const preSearchStateRef = useRef<{
-    threads: EmailSummary[];
-    nextCursor: string | null;
-  } | null>(null);
-  const threadsRef = useRef(threads);
-  const nextCursorRef = useRef(nextCursor);
-  threadsRef.current = threads;
-  nextCursorRef.current = nextCursor;
+
+  // Stable ref for initialThreads/initialNextCursor so that handleSearch's dep
+  // array does not capture the prop snapshot at mount time. This prevents the
+  // search-clear path from reverting threads to stale pre-load-more state.
+  const initialThreadsRef = useRef(initialThreads);
+  const initialNextCursorRef = useRef(initialNextCursor);
 
   const [composeOpen, setComposeOpen] = useState(false);
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>();
@@ -65,25 +63,15 @@ export function Mail({
 
     const trimmedQuery = searchQuery.trim();
     if (!trimmedQuery) {
-      // Invalidate any in-flight search so late responses cannot overwrite reset state.
-      requestTokenRef.current += 1;
-      if (preSearchStateRef.current) {
-        setThreads(preSearchStateRef.current.threads);
-        setNextCursor(preSearchStateRef.current.nextCursor);
-        preSearchStateRef.current = null;
-      }
+      setThreads(initialThreadsRef.current);
+      setNextCursor(initialNextCursorRef.current);
       return;
     }
 
-    if (!preSearchStateRef.current) {
-      preSearchStateRef.current = {
-        threads: threadsRef.current,
-        nextCursor: nextCursorRef.current,
-      };
-    }
+    // Race-condition guard: capture a token before the async fetch.
+    // If a newer search fires before this one resolves, discard this result.
+    const token = ++requestTokenRef.current;
 
-    requestTokenRef.current += 1;
-    const token = requestTokenRef.current;
     setIsSearching(true);
     try {
       const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}`);
@@ -92,15 +80,16 @@ export function Mail({
       }
 
       const payload = (await response.json()) as EmailSummary[];
+
+      // Discard stale responses from superseded searches
       if (token !== requestTokenRef.current) return;
+
       setThreads(payload);
       setNextCursor(null);
     } catch (err) {
       console.error('[mail] search failed:', err);
     } finally {
-      if (token === requestTokenRef.current) {
-        setIsSearching(false);
-      }
+      setIsSearching(false);
     }
   }, [searchQuery]);
 

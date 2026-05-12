@@ -181,13 +181,18 @@ export async function searchEmails(
   const terms = trimmedQuery
     .split(/\s+/)
     .filter(Boolean)
+    // Only escape double-quote characters for FTS5 phrase quoting.
+    // All other characters (hyphens, colons, etc.) are valid inside a
+    // double-quoted FTS5 phrase and must not be stripped.
+    .map((term) => term.replace(/"/g, '""'))
     .filter(Boolean);
 
   if (terms.length === 0) return [];
 
-  const matchQuery = terms
-    .map((term) => `"${term.replace(/"/g, '""')}"`)
-    .join(' ');
+  // Use implicit AND (space-separated phrases) so that multi-word queries
+  // require all terms to be present. OR would match any single word and
+  // produces over-broad, low-quality results.
+  const matchQuery = terms.map((term) => `"${term}"`).join(' ');
 
   const { results } = await db
     .prepare(
@@ -208,10 +213,10 @@ export async function searchEmails(
          FROM emails
          JOIN emails_fts ON emails.rowid = emails_fts.rowid
          WHERE emails_fts MATCH ?
-        ) ranked_results
-        WHERE thread_rank = 1
-        ORDER BY rank ASC, created_at DESC, id ASC
-        LIMIT 50`
+       ) ranked_results
+       WHERE thread_rank = 1
+       ORDER BY rank ASC, created_at DESC, id ASC
+       LIMIT 50`
     )
     .bind(matchQuery)
     .all<EmailSummary>();
