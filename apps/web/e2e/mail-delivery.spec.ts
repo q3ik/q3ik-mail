@@ -85,11 +85,8 @@ test.describe('agentmail delivery', () => {
     const verificationPayload = (await verificationResponse.json()) as {
       threads?: Array<Record<string, unknown>>;
     };
-    const persistedRow = verificationPayload.threads?.find((row) => row.subject === uniqueSubject);
+    const persistedRow = verificationPayload.threads?.find((row) => row.subject === uniqueSubject)!;
     expect(persistedRow).toBeTruthy();
-    if (!persistedRow) {
-      throw new Error('Expected persisted inbound email row to exist');
-    }
 
     expect(typeof persistedRow.thread_id).toBe('string');
     if (typeof persistedRow.message_id === 'string' && persistedRow.message_id.length > 0) {

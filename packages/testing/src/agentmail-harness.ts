@@ -63,7 +63,8 @@ export class AgentMailClient {
     const start = Date.now();
     const pollIntervalMs = 2_000;
 
-    while (Date.now() - start < timeoutMs) {
+    while (true) {
+      if (Date.now() - start >= timeoutMs) break;
       const data = await this.request<AgentMailMessagesResponse>(`/mailboxes/${mailboxId}/messages`);
       if (data.messages.length > 0) return data.messages[0];
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
