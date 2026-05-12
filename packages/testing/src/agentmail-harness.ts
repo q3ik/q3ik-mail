@@ -8,7 +8,7 @@ export interface AgentMailMessage {
   subject?: string;
   headers?: Record<string, string>;
   parsed_headers?: Record<string, string>;
-  raw_headers?: Record<string, string>;
+  raw_headers?: Record<string, string> | string;
   [key: string]: unknown;
 }
 
@@ -29,12 +29,22 @@ export interface WaitForEmailOptions {
 
 export class AgentMailClient {
   private readonly baseUrl: string;
+  #apiKey: string;
 
   constructor(
-    private readonly apiKey: string,
+    apiKey: string,
     options?: { baseUrl?: string }
   ) {
+    this.#apiKey = apiKey;
     this.baseUrl = options?.baseUrl ?? 'https://api.agentmail.to/v1';
+  }
+
+  toJSON() {
+    return { type: 'AgentMailClient' };
+  }
+
+  [Symbol.for('nodejs.util.inspect.custom')]() {
+    return 'AgentMailClient [key redacted]';
   }
 
   private async request(
@@ -57,7 +67,7 @@ export class AgentMailClient {
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
+        Authorization: `Bearer ${this.#apiKey}`,
         ...(init?.headers ?? {}),
       },
     });
@@ -65,7 +75,8 @@ export class AgentMailClient {
     const allowStatuses = options?.allowStatuses ?? [];
     if (!res.ok && !allowStatuses.includes(res.status)) {
       const errorBody = await res.text();
-      throw new Error(`AgentMail API request failed (${res.status}): ${errorBody}`);
+      if (process.env.DEBUG) console.debug('AgentMail error body:', errorBody);
+      throw new Error(`AgentMail API error ${res.status} on ${path}`);
     }
 
     // Caller explicitly opted out of JSON parsing — return without reading body.
@@ -94,7 +105,7 @@ export class AgentMailClient {
   }
 
   async deleteMailbox(mailboxId: string): Promise<void> {
-    await this.request<void>(
+    await this.request(
       `/mailboxes/${mailboxId}`,
       { method: 'DELETE' },
       { allowStatuses: [404], expectJson: false }
@@ -121,7 +132,21 @@ export class AgentMailClient {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
-      const messages = await this.listMessages(mailboxId);
+      let messages: AgentMailMessage[];
+      try {
+        messages = await this.listMessages(mailboxId);
+      } catch (err) {
+        console.warn(
+          'AgentMail listMessages failed, retrying:',
+          err instanceof Error ? err.message : err
+        );
+        // Back off on transient failure using the same interval as a successful-but-empty poll.
+        // Without this, a sustained failure busy-loops for the full timeoutMs budget.
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)));
+        continue;
+      }
       const message = filter ? messages.find(filter) : messages[0];
       if (message) return message;
       const remaining = deadline - Date.now();

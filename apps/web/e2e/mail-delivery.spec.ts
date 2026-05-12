@@ -11,10 +11,7 @@ const inboundAddress = process.env.E2E_INBOUND_ADDRESS ?? 'mail@q3ik.com';
 // inboundAddress. Scenario A skips explicitly when the var is absent.
 const inboundFromAddress = process.env.E2E_INBOUND_FROM;
 const timeoutMs = Number.parseInt(process.env.AGENTMAIL_TIMEOUT_MS ?? '30000', 10);
-const isPullRequestEvent = process.env.GITHUB_EVENT_NAME === 'pull_request';
-
-test.skip(!agentmailApiKey, 'AGENTMAIL_API_KEY is not configured; skipping agentmail E2E tests');
-test.skip(isPullRequestEvent, 'agentmail E2E tests are disabled for pull_request events');
+const e2eTestSecret = process.env.E2E_TEST_SECRET;
 
 function getHeader(message: AgentMailMessage, name: string): string | undefined {
   const lowerName = name.toLowerCase();
@@ -22,7 +19,6 @@ function getHeader(message: AgentMailMessage, name: string): string | undefined 
   const headerSources = [
     message.headers,
     message.parsed_headers,
-    message.raw_headers,
   ];
 
   for (const source of headerSources) {
@@ -30,6 +26,12 @@ function getHeader(message: AgentMailMessage, name: string): string | undefined 
     for (const [key, value] of Object.entries(source)) {
       if (key.toLowerCase() === lowerName && typeof value === 'string') return value;
     }
+  }
+
+  if (typeof message.raw_headers === 'string') {
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rawHeaderMatch = message.raw_headers.match(new RegExp(`^${escapedName}:\\s*(.+)$`, 'im'));
+    if (rawHeaderMatch?.[1]) return rawHeaderMatch[1].trim();
   }
 
   return undefined;
@@ -40,8 +42,14 @@ test.describe('agentmail delivery', () => {
   let mailbox: { id: string; email: string } | null = null;
 
   test.beforeAll(async () => {
-    client = new AgentMailClient(agentmailApiKey!);
+    // Guard with early return so subsequent lines never execute with undefined key.
+    if (!agentmailApiKey) {
+      test.skip(true, 'AGENTMAIL_API_KEY is not configured; skipping agentmail E2E tests');
+      return;
+    }
+    client = new AgentMailClient(agentmailApiKey);
     mailbox = await client.createMailbox();
+    if (!mailbox) throw new Error('AgentMail createMailbox() returned null — cannot proceed with suite');
   });
 
   test.afterAll(async () => {
@@ -57,6 +65,13 @@ test.describe('agentmail delivery', () => {
       'E2E_INBOUND_FROM is required for inbound routing E2E — set it to a Resend sandbox sender'
     );
 
+    // E2E_TEST_SECRET must be set; an empty string would yield a misleading 401
+    // from the trigger endpoint rather than a clear configuration error.
+    if (!e2eTestSecret) {
+      test.skip(true, 'E2E_TEST_SECRET is not set — Scenario A cannot run without a trigger secret');
+      return;
+    }
+
     const uniqueSubject = `AgentMail inbound ${Date.now()}`;
     const senderAddress = inboundFromAddress!;
 
@@ -64,6 +79,9 @@ test.describe('agentmail delivery', () => {
     // instead of calling api.resend.com directly. This keeps the Resend API
     // key out of Playwright's browser-context traces and HTML reports.
     const triggerResponse = await request.post('/api/trigger-inbound', {
+      headers: {
+        'x-e2e-test-secret': e2eTestSecret,
+      },
       data: {
         from: senderAddress,
         to: inboundAddress,
@@ -90,6 +108,7 @@ test.describe('agentmail delivery', () => {
       )
       .toMatchObject({ from_address: senderAddress, subject: uniqueSubject });
 
+    expect(persistedRow).not.toBeNull();
     // persistedRow is guaranteed non-null here: expect.poll only resolves
     // when the closure returned a truthy value, which set persistedRow.
     expect(typeof (persistedRow as Record<string, unknown>).thread_id).toBe('string');
@@ -101,9 +120,10 @@ test.describe('agentmail delivery', () => {
 
   test('Scenario B: outbound loopback preserves reply headers', async ({ request }) => {
     const outboundSubject = `AgentMail loopback ${Date.now()}`;
+    if (!mailbox) throw new Error('Mailbox not initialized');
     const response = await request.post('/api/send', {
       data: {
-        to: mailbox!.email,
+        to: mailbox.email,
         subject: outboundSubject,
         content: 'Outbound loopback test body',
         replyToId: '<reply-parent@q3ik.com>',
@@ -113,7 +133,7 @@ test.describe('agentmail delivery', () => {
 
     expect(response.ok()).toBeTruthy();
 
-    const message = await client.waitForEmail(mailbox!.id, {
+    const message = await client.waitForEmail(mailbox.id, {
       timeoutMs,
       filter: (candidate) => candidate.subject === outboundSubject,
     });
@@ -122,6 +142,8 @@ test.describe('agentmail delivery', () => {
     expect(getHeader(message, 'References')).toContain('<thread-root@q3ik.com>');
     expect(getHeader(message, 'References')).toContain('<reply-parent@q3ik.com>');
 
+    // Sent-email persistence is best-effort and asynchronous in /api/send,
+    // so poll /api/emails until the inserted row becomes visible.
     await expect
       .poll(
         async () => {

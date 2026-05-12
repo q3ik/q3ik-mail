@@ -6,7 +6,10 @@ on:
   pull_request:
     branches: [trunk]
   workflow_dispatch: # manual trigger
-  invalidate #TODO: Remove
+
+permissions:
+  contents: read
+
 # Cancel any in-progress run for the same branch/PR the moment a newer commit
 # is pushed. This prevents redundant runs from queuing up and wasting runner
 # minutes — only the latest commit on a given ref ever runs to completion.
@@ -206,6 +209,7 @@ jobs:
     needs: unit-test
     permissions:
       contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -237,16 +241,22 @@ jobs:
           npx wrangler pages dev .vercel/output/static
           --port 3000
           --persist-to $GITHUB_WORKSPACE/.wrangler/state
+          > $GITHUB_WORKSPACE/wrangler.log 2>&1
           &
         working-directory: apps/web
 
       - name: Wait for app to be ready
         run: npx wait-on http://localhost:3000 --timeout 60000
 
+      - name: Dump wrangler log on failure
+        if: failure()
+        run: cat $GITHUB_WORKSPACE/wrangler.log || echo 'No wrangler log found'
+
       - name: Run agentmail.to E2E
         run: pnpm --filter @q3ik-mail/web exec playwright test e2e/mail-delivery.spec.ts
         env:
           AGENTMAIL_API_KEY: ${{ secrets.AGENTMAIL_API_KEY }}
+          E2E_TEST_SECRET: ${{ secrets.E2E_TEST_SECRET }}
           # RESEND_API_KEY is intentionally omitted — Scenario A now routes
           # through /api/trigger-inbound; the key never touches PW traces.
           E2E_INBOUND_FROM: ${{ secrets.E2E_INBOUND_FROM }}
