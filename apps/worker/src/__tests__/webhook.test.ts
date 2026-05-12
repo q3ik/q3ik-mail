@@ -70,7 +70,7 @@ function makeRequest(body: string, headers: Record<string, string> = {}) {
     body,
     headers: {
       'Content-Type': 'application/json',
-      'CF_Access_Jwt_Assertion': 'test-jwt',
+      'Cf-Access-Jwt-Assertion': 'test-jwt',
       ...headers,
     },
   });
@@ -201,7 +201,7 @@ describe('webhook handler', () => {
     const { validateCfAccessJwt } = await import('../middleware/cfAccess');
     (validateCfAccessJwt as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: false,
-      error: 'Missing CF_Access_Jwt_Assertion header',
+      error: 'Missing Cf-Access-Jwt-Assertion header',
     });
 
     const req = makeRequest('{"type":"email.received"}', {

@@ -17,7 +17,7 @@ function base64url(obj: unknown): string {
 function makeRequest(token?: string): Request {
   const headers: Record<string, string> = {};
   if (token !== undefined) {
-    headers['CF_Access_Jwt_Assertion'] = token;
+    headers['Cf-Access-Jwt-Assertion'] = token;
   }
   return new Request('https://worker.example.com/', { method: 'POST', headers });
 }
