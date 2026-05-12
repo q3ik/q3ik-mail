@@ -4,7 +4,7 @@
 // but is kept as explicit documentation. happy-dom has known differences from jsdom
 // (CSS, custom elements) and from the actual Cloudflare Workers runtime.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, act, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import type { Email, EmailSummary } from '@q3ik-mail/database';
 import { Mail } from '../mail';
 
@@ -78,11 +78,13 @@ vi.mock('@/components/ui/button', () => ({
   Button: ({
     children,
     onClick,
+    ...props
   }: {
     children: React.ReactNode;
     onClick?: () => void;
+    [key: string]: unknown;
   }) => (
-    <button type="button" onClick={onClick}>
+    <button type="button" onClick={onClick} {...props}>
       {children}
     </button>
   ),
@@ -230,6 +232,40 @@ describe('Mail — markAsRead error recovery', () => {
     // then assert markEmailAsRead was never invoked.
     await waitFor(() => expect(mailActions.fetchThread).toHaveBeenCalledWith(THREAD_ID));
     expect(mailActions.markEmailAsRead).not.toHaveBeenCalled();
+  });
+
+  it('searches via /api/search and replaces the thread list with results', async () => {
+    const initialThread = makeThread({ thread_id: 'thread-initial', subject: 'Initial' });
+    const searchedThread = makeThread({
+      id: 'email-2',
+      thread_id: 'thread-search',
+      resend_id: 'resend-2',
+      subject: 'Found by search',
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [searchedThread],
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <Mail
+        threads={[initialThread]}
+        selectedThread={[]}
+        defaultSelectedId={undefined}
+      />
+    );
+
+    const searchInput = screen.getByLabelText('Search emails');
+    fireEvent.change(searchInput, { target: { value: 'search' } });
+    act(() => { screen.getByRole('button', { name: 'Search' }).click(); });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('thread-thread-search')).not.toBeNull()
+    );
+    expect(fetchMock).toHaveBeenCalledWith('/api/search?q=search');
+    expect(screen.queryByTestId('thread-thread-initial')).toBeNull();
   });
 
   it('appends threads from the next cursor page and hides load more when exhausted', async () => {

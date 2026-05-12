@@ -171,6 +171,48 @@ export async function getThreadList(
   return results;
 }
 
+export async function searchEmails(
+  db: D1Database,
+  query: string
+): Promise<EmailSummary[]> {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return [];
+
+  const matchQuery = trimmedQuery
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((term) => `"${term.replace(/"/g, '""')}"`)
+    .join(' AND ');
+
+  const { results } = await db
+    .prepare(
+      `SELECT
+         id, resend_id, thread_id, from_address, from_name,
+         to_address, subject, message_id, in_reply_to, "references",
+         is_read, is_sent, needs_rethreading, created_at
+       FROM (
+         SELECT
+           emails.id, emails.resend_id, emails.thread_id, emails.from_address, emails.from_name,
+           emails.to_address, emails.subject, emails.message_id, emails.in_reply_to, emails."references",
+           emails.is_read, emails.is_sent, emails.needs_rethreading, emails.created_at,
+           ROW_NUMBER() OVER (
+             PARTITION BY emails.thread_id
+             ORDER BY bm25(emails_fts), emails.created_at DESC, emails.id ASC
+           ) AS thread_rank,
+           bm25(emails_fts) AS rank
+         FROM emails
+         JOIN emails_fts ON emails.rowid = emails_fts.rowid
+         WHERE emails_fts MATCH ?
+       ) ranked_results
+       WHERE thread_rank = 1
+       ORDER BY rank ASC, created_at DESC, id ASC`
+    )
+    .bind(matchQuery)
+    .all<EmailSummary>();
+
+  return results;
+}
+
 export async function getThreadListPage(
   db: D1Database,
   {

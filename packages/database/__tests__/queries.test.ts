@@ -5,6 +5,7 @@ import { getLatestEmails,
         getEmailById, 
         getThreadList, 
         getThreadListPage,
+        searchEmails,
         resolveOrphanedThreads 
        } from '../index';
 
@@ -448,6 +449,47 @@ describe('getThreadListPage', () => {
 
     expect(result.threads).toEqual([]);
     expect(result.nextCursor).toBeNull();
+  });
+});
+
+describe('searchEmails', () => {
+  it('returns an empty array for blank queries', async () => {
+    const db = createMockDb([
+      { id: '1', thread_id: 'thread-1', subject: 'Hello' },
+    ]);
+    const result = await searchEmails(db, '   ');
+    expect(result).toEqual([]);
+  });
+
+  it('queries FTS5 with a sanitized MATCH query', async () => {
+    let preparedSql = '';
+    let boundArgs: unknown[] = [];
+    const db = createMockDb(
+      [
+        {
+          id: '1',
+          thread_id: 'thread-1',
+          subject: 'Hello FTS',
+          references: null,
+        },
+      ],
+      {
+        onPrepare: (sql) => {
+          preparedSql = sql;
+        },
+        onBind: (args) => {
+          boundArgs = args;
+        },
+      }
+    );
+
+    const result = await searchEmails(db, 'hello "world');
+
+    expect(preparedSql).toContain('JOIN emails_fts ON emails.rowid = emails_fts.rowid');
+    expect(preparedSql).toContain('WHERE emails_fts MATCH ?');
+    expect(boundArgs).toEqual(['"hello" AND """world"']);
+    expect(result).toHaveLength(1);
+    expect(result[0].subject).toBe('Hello FTS');
   });
 });
 
