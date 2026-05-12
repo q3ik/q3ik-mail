@@ -420,7 +420,7 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
     expect(putSpy).toHaveBeenCalledWith(
       expect.stringMatching(/^emails\/.+\/attachments\/invoice\.pdf$/),
-      expect.any(ArrayBuffer),
+      expect.any(Uint8Array),
       expect.objectContaining({
         httpMetadata: { contentType: 'application/pdf' },
       })

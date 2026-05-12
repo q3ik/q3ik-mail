@@ -155,7 +155,6 @@ function EmailBody({ email }: { email: Email }) {
 
     return () => {
       controller.abort();
-      setIsBodyLoading(false);
     };
   }, [email.id, email.body_html, email.body_text]);
 
