@@ -16,11 +16,23 @@ function encodeThreadListCursor(cursor: ThreadListCursorPayload): string {
   return btoa(JSON.stringify(cursor));
 }
 
+class InvalidCursorError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidCursorError';
+  }
+}
+
 function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
-  const payload = JSON.parse(atob(cursor)) as Partial<ThreadListCursorPayload>;
+  let payload: Partial<ThreadListCursorPayload>;
+  try {
+    payload = JSON.parse(atob(cursor)) as Partial<ThreadListCursorPayload>;
+  } catch {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
 
   if (typeof payload.createdAt !== 'string' || typeof payload.id !== 'string') {
-    throw new Error('Invalid thread list cursor');
+    throw new InvalidCursorError('Invalid thread list cursor');
   }
 
   return {
@@ -175,8 +187,11 @@ export async function getThreadListPage(
   if (cursor) {
     try {
       decodedCursor = decodeThreadListCursor(cursor);
-    } catch {
-      return { threads: [], nextCursor: null };
+    } catch (err) {
+      if (err instanceof InvalidCursorError) {
+        return { threads: [], nextCursor: null };
+      }
+      throw err;
     }
   }
   const whereClause = decodedCursor
