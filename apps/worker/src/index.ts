@@ -310,7 +310,10 @@ export interface Env {
   EMAIL_BODIES?: R2Bucket;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
-  CF_ACCESS_TEAM_DOMAIN: string; // e.g. "yourteam.cloudflareaccess.com"
+  /** AUD tag from the Cloudflare Access application. Set via `wrangler secret put CLOUDFLARE_ACCESS_AUD`. */
+  CLOUDFLARE_ACCESS_AUD: string;
+  /** Your Zero Trust team domain, e.g. "yourteam.cloudflareaccess.com". Set via `wrangler secret put CLOUDFLARE_TEAM_DOMAIN`. */
+  CLOUDFLARE_TEAM_DOMAIN: string;
   SENTRY_DSN?: string;           // optional -- worker runs without Sentry if unset
   ENVIRONMENT: string;           // set in wrangler.toml [vars]
 }
