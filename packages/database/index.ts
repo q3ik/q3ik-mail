@@ -2,6 +2,14 @@ import type { Email, EmailSummary } from './types';
 
 export type { Email, EmailSummary, NewEmail } from './types';
 
+/**
+ * Reads a body string from R2 by key.
+ *
+ * - Returns `fallbackBody` when `key` is null (no R2 key stored yet).
+ * - Returns `fallbackBody` when the R2 object is missing, and logs a warning
+ *   so key/object mismatches are detectable in production logs.
+ * - Errors are NOT swallowed here; callers should handle them individually.
+ */
 async function readBodyFromR2(
   r2Bucket: R2Bucket,
   key: string | null,
@@ -9,10 +17,20 @@ async function readBodyFromR2(
 ): Promise<string | null> {
   if (!key) return fallbackBody;
   const object = await r2Bucket.get(key);
-  if (!object) return fallbackBody;
+  if (!object) {
+    console.warn('[database] R2 object not found for key; falling back to D1 value', { key });
+    return fallbackBody;
+  }
   return object.text();
 }
 
+/**
+ * Hydrates body_html and body_text on an Email from R2 when key columns are set.
+ *
+ * Each R2 read failure is caught individually so one transient error does not
+ * fail the entire result set. Failed reads fall back to the D1 column value
+ * (which is null for new records).
+ */
 async function hydrateEmailBodyFromR2(
   email: Email,
   r2Bucket: R2Bucket | null | undefined
@@ -20,8 +38,14 @@ async function hydrateEmailBodyFromR2(
   if (!r2Bucket) return email;
 
   const [bodyHtml, bodyText] = await Promise.all([
-    readBodyFromR2(r2Bucket, email.body_html_key, email.body_html),
-    readBodyFromR2(r2Bucket, email.body_text_key, email.body_text),
+    readBodyFromR2(r2Bucket, email.body_html_key, email.body_html).catch((err) => {
+      console.warn('[database] R2 read failed for body_html; using fallback', { key: email.body_html_key, err });
+      return email.body_html;
+    }),
+    readBodyFromR2(r2Bucket, email.body_text_key, email.body_text).catch((err) => {
+      console.warn('[database] R2 read failed for body_text; using fallback', { key: email.body_text_key, err });
+      return email.body_text;
+    }),
   ]);
 
   return {
