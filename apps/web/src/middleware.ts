@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from 'next/server';
 const PUBLIC_PATHS = ['/api/webhook', '/favicon.ico'] as const;
 const PUBLIC_PREFIXES = ['/_next/static/', '/_next/image/'] as const;
 const PUBLIC_PATH_SET = new Set<string>(PUBLIC_PATHS);
-const TEAM_DOMAIN_PATTERN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.cloudflareaccess\.com$/i;
+const TEAM_DOMAIN_PATTERN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.cloudflareaccess\.com$/;
 
 let cachedTeamDomain: string | undefined;
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | undefined;
@@ -68,7 +68,7 @@ export async function middleware(req: NextRequest) {
   const accessConfig = getAccessConfig();
 
   if (!accessConfig) {
-    console.error('[middleware] Cloudflare Access is not configured correctly');
+    console.error('[middleware] Missing or invalid CLOUDFLARE_TEAM_DOMAIN or CLOUDFLARE_ACCESS_AUD');
     return new NextResponse('Internal Server Error', { status: 500 });
   }
 
@@ -91,6 +91,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Next.js requires middleware matchers to stay statically analyzable.
+  // Next.js requires middleware matchers to stay statically analyzable, so keep
+  // this literal in sync with PUBLIC_PATHS and PUBLIC_PREFIXES above.
   matcher: ['/((?!api/webhook|_next/static|_next/image|favicon.ico).*)'],
 };

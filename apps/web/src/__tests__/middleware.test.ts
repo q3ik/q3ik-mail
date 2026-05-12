@@ -66,7 +66,9 @@ describe('Cloudflare Access middleware', () => {
 
     expect(res.status).toBe(500);
     expect(joseMocks.createRemoteJWKSet).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith('[middleware] Cloudflare Access is not configured correctly');
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[middleware] Missing or invalid CLOUDFLARE_TEAM_DOMAIN or CLOUDFLARE_ACCESS_AUD',
+    );
     errorSpy.mockRestore();
   });
 
