@@ -313,19 +313,26 @@ describe('Mail — markAsRead error recovery', () => {
     const searchForm = searchInput.closest('form');
     expect(searchForm).not.toBeNull();
 
+    // Submit first (slow) search — spinner should appear
     fireEvent.change(searchInput, { target: { value: 'slow' } });
     act(() => { fireEvent.submit(searchForm!); });
     expect(screen.queryByTestId('mail-list-searching')).not.toBeNull();
 
+    // Submit second (fast) search before slow resolves — spinner must stay up
     fireEvent.change(searchInput, { target: { value: 'fast' } });
     act(() => { fireEvent.submit(searchForm!); });
+    expect(screen.queryByTestId('mail-list-searching')).not.toBeNull();
 
+    // Fast search resolves first — results applied, spinner cleared
     resolveFast?.({
       ok: true,
       json: async () => [fastSearchThread],
     });
     await waitFor(() => expect(screen.queryByTestId('thread-thread-fast')).not.toBeNull());
+    // Spinner must be gone now that the active search has settled
+    expect(screen.queryByTestId('mail-list-searching')).toBeNull();
 
+    // Slow search resolves late — must be discarded; fast results stay
     resolveSlow?.({
       ok: true,
       json: async () => [slowSearchThread],
@@ -334,6 +341,9 @@ describe('Mail — markAsRead error recovery', () => {
 
     expect(screen.queryByTestId('thread-thread-fast')).not.toBeNull();
     expect(screen.queryByTestId('thread-thread-slow')).toBeNull();
+    // Spinner must still be gone (slow result must not re-clear it to an
+    // unexpected state or trigger an extra render)
+    expect(screen.queryByTestId('mail-list-searching')).toBeNull();
   });
 
   it('appends threads from the next cursor page and hides load more when exhausted', async () => {
