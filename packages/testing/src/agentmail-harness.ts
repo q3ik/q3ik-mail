@@ -70,7 +70,7 @@ export class AgentMailClient {
 
     if (options?.expectJson === false) return;
     if (res.status === 204) {
-      throw new Error(`AgentMail API request returned no content for ${path}`);
+      throw new Error(`AgentMail API request expected JSON but received 204 No Content for ${path}`);
     }
 
     return res.json() as Promise<T>;
