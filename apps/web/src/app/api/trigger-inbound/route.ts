@@ -27,9 +27,11 @@ function parseFrom(raw: string): { name: string | null; address: string } {
   return { name: null, address: raw.trim() };
 }
 
-// TODO: Replace ingestInboundEmail with a shared utility (e.g. src/lib/ingest-inbound.ts)
-// once the real inbound handler's INSERT logic is extracted. Any schema change to the
-// `emails` table must currently be applied here and in the real inbound handler separately.
+// SCHEMA DRIFT RISK: ingestInboundEmail duplicates the INSERT logic from the real
+// inbound webhook handler. Any column added or renamed in the `emails` table must
+// be applied here too, or Scenario A will silently insert incomplete rows.
+// Follow-up: extract this into a shared src/lib/ingest-inbound.ts utility once
+// the real handler's INSERT is stable enough to factor out.
 async function ingestInboundEmail(
   db: D1Database,
   payload: { from: string; to: string; subject: string; text: string }
