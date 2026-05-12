@@ -280,6 +280,8 @@ describe('Mail — markAsRead error recovery', () => {
         encodeCursor('2024-01-02T00:00:00Z', 'email-1')
       )}`
     );
+    // Behavioral note: load-more merge must dedupe by thread_id to avoid
+    // duplicate rows when cursor boundaries drift or concurrent mail arrives.
     expect(screen.getAllByTestId(`thread-${THREAD_ID}`)).toHaveLength(1);
     expect(screen.queryByTestId('load-more')).toBeNull();
   });
