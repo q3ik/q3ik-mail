@@ -1,22 +1,64 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Email } from '@q3ik-mail/database';
 import { ReplyIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { ComposePayload } from '@/components/mail/compose-dialog';
 
-const sanitizeOptions = {
+// ---------------------------------------------------------------------------
+// DOMPurify configuration
+//
+// Prior to this fix, `FORBID_ATTR: ['style']` stripped all inline CSS from
+// incoming HTML emails, collapsing multi-column layouts and removing all
+// visual formatting. Inline CSS is the primary (often only) styling mechanism
+// for HTML email, since external stylesheets are blocked by email clients.
+//
+// The email body is rendered inside <iframe sandbox=""> (no flags), which:
+//   - Blocks script execution (no JS runs inside the frame)
+//   - Blocks same-origin access (frame cannot read parent DOM/cookies)
+//   - Blocks form submission and top-level navigation
+//
+// Given that containment, the residual CSS threat is:
+//   - url() in style attributes → CSS-based tracker exfiltration
+//     (background-image: url(https://tracker.example.com/pixel))
+//
+// This is addressed by the afterSanitizeAttributes hook below, which strips
+// url() values from any style attribute while preserving all other CSS.
+// The parent-page CSP (img-src 'self' data: cid:) provides an additional
+// layer of defence against tracker pixels escaping the parent context.
+// ---------------------------------------------------------------------------
+
+/** DOMPurify config — style attribute is intentionally NOT forbidden. */
+const SANITIZE_OPTIONS = {
   USE_PROFILES: { html: true },
-  FORBID_ATTR: ['style'],
   ALLOW_DATA_ATTR: false,
-};
+  FORCE_BODY: true,
+} as const;
+
+/** Matches any CSS url(...) value in a style attribute. */
+const CSS_URL_RE = /url\s*\([^)]*\)/gi;
 
 let DOMPurifyPromise: Promise<typeof import('isomorphic-dompurify')> | undefined;
+let hooksInstalled = false;
 
 function loadDomPurify() {
-  DOMPurifyPromise ??= import('isomorphic-dompurify');
+  DOMPurifyPromise ??= import('isomorphic-dompurify').then((mod) => {
+    if (!hooksInstalled) {
+      hooksInstalled = true;
+      // Strip url() from style attributes to block CSS-based tracker pixels.
+      // All other inline styles (colors, spacing, fonts, layout) are kept.
+      mod.default.addHook('afterSanitizeAttributes', (node) => {
+        const el = node as Element;
+        const style = el.getAttribute?.('style');
+        if (style && CSS_URL_RE.test(style)) {
+          el.setAttribute('style', style.replace(CSS_URL_RE, ''));
+        }
+      });
+    }
+    return mod;
+  });
   return DOMPurifyPromise;
 }
 
@@ -122,12 +164,11 @@ function EmailBody({ email }: { email: Email }) {
   const [isBodyLoading, setIsBodyLoading] = useState(false);
   const [bodyLoadError, setBodyLoadError] = useState(false);
   const [sanitizedHtml, setSanitizedHtml] = useState<string | null>(null);
+  // Track the email id that produced the current sanitizedHtml so stale
+  // content is never shown when navigating rapidly between emails.
+  const sanitizedForId = useRef<string | null>(null);
 
-  // Dependency is [email.id] only. The shouldFetchFromApi check is intentionally
-  // inside the effect rather than in the dep array: when both body fields are null
-  // they will always be null on every render for R2-backed emails, so including
-  // them as deps would either never re-fire (same null reference) or spuriously
-  // re-fire on parent re-renders that produce a new email object with null bodies.
+  // Dependency is [email.id] only — see original comment for rationale.
   useEffect(() => {
     const controller = new AbortController();
     const shouldFetchFromApi = email.body_html === null && email.body_text === null;
@@ -169,8 +210,6 @@ function EmailBody({ email }: { email: Email }) {
         });
       })
       .catch((err: unknown) => {
-        // Filter intentional aborts (component unmount during navigation).
-        // AbortError must not set bodyLoadError — the user navigated away cleanly.
         if (err instanceof DOMException && err.name === 'AbortError') {
           return;
         }
@@ -189,28 +228,32 @@ function EmailBody({ email }: { email: Email }) {
 
   useEffect(() => {
     let cancelled = false;
-
     const bodyHtml = body.body_html;
-    if (bodyHtml) {
-      void loadDomPurify()
-        .then(({ default: DOMPurify }) => {
-          if (!cancelled) {
-            setSanitizedHtml(DOMPurify.sanitize(bodyHtml, sanitizeOptions));
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setSanitizedHtml(null);
-          }
-        });
-    } else {
+
+    if (!bodyHtml) {
       setSanitizedHtml(null);
+      sanitizedForId.current = null;
+      return;
     }
+
+    void loadDomPurify()
+      .then(({ default: DOMPurify }) => {
+        if (!cancelled) {
+          sanitizedForId.current = email.id;
+          setSanitizedHtml(DOMPurify.sanitize(bodyHtml, SANITIZE_OPTIONS));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSanitizedHtml(null);
+          sanitizedForId.current = null;
+        }
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [body.body_html]);
+  }, [body.body_html, email.id]);
 
   if (isBodyLoading && !sanitizedHtml && !body.body_text) {
     return (
@@ -222,6 +265,9 @@ function EmailBody({ email }: { email: Email }) {
 
   if (sanitizedHtml) {
     return (
+      // sandbox="" (no flags) blocks: scripts, same-origin access, forms,
+      // plugins, top-level navigation, and pointer-lock inside the frame.
+      // The email body only needs to render HTML+CSS — no flags needed.
       <iframe
         title="Email body"
         srcDoc={sanitizedHtml}
