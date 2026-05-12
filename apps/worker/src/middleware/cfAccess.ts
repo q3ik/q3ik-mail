@@ -106,7 +106,7 @@ function base64urlDecode(input: string): Uint8Array {
  *  1. Extract and structurally validate the JWT (3-part, base64url)
  *  2. Verify the AUD claim matches the configured Access AUD tag
  *  3. Verify the ISS claim matches `https://<CLOUDFLARE_TEAM_DOMAIN>`
- *  4. Verify the exp claim (not expired)
+ *  4. Verify exp (not expired) and nbf (not-before) with 60s clock-drift leeway
  *  5. Fetch the matching public key from the JWKS endpoint by `kid`
  *  6. Verify the RS256 signature
  */
@@ -149,10 +149,15 @@ export async function validateCfAccessJwt(
     return { ok: false, error: 'JWT ISS mismatch' };
   }
 
-  // Verify expiry (use seconds, same as JWT spec)
+  // Verify expiry and not-before claims with a 60s leeway to tolerate clock
+  // drift between Cloudflare's token issuer and this Worker.
   const nowSec = Math.floor(Date.now() / 1000);
-  if (payload.exp < nowSec) {
+  const LEEWAY = 60;
+  if (payload.exp + LEEWAY < nowSec) {
     return { ok: false, error: 'JWT expired' };
+  }
+  if (payload.nbf !== undefined && payload.nbf - LEEWAY > nowSec) {
+    return { ok: false, error: 'JWT not yet valid' };
   }
 
   // Only RS256 is supported by CF Access
