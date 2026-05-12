@@ -16,7 +16,17 @@ interface ResendReceivedEmail {
   // may omit the key entirely). Treat as optional; normalise to null downstream.
   text?: string | null;
   html?: string | null;
+  attachments?: ResendReceivedAttachment[];
   headers?: Array<{ name: string; value: string }>;
+}
+
+interface ResendReceivedAttachment {
+  id?: string;
+  filename?: string;
+  content?: string;
+  content_type?: string;
+  contentType?: string;
+  url?: string;
 }
 
 /**
@@ -87,6 +97,36 @@ function parseResendReceivedEmail(
     }
   }
 
+  if (email.attachments !== undefined) {
+    if (!Array.isArray(email.attachments)) {
+      return { ok: false, field: 'attachments' };
+    }
+    for (const attachment of email.attachments as unknown[]) {
+      if (!attachment || typeof attachment !== 'object') {
+        return { ok: false, field: 'attachments[*]' };
+      }
+      const a = attachment as Record<string, unknown>;
+      if (a.id !== undefined && typeof a.id !== 'string') {
+        return { ok: false, field: 'attachments[*].id' };
+      }
+      if (a.filename !== undefined && typeof a.filename !== 'string') {
+        return { ok: false, field: 'attachments[*].filename' };
+      }
+      if (a.content !== undefined && typeof a.content !== 'string') {
+        return { ok: false, field: 'attachments[*].content' };
+      }
+      if (a.content_type !== undefined && typeof a.content_type !== 'string') {
+        return { ok: false, field: 'attachments[*].content_type' };
+      }
+      if (a.contentType !== undefined && typeof a.contentType !== 'string') {
+        return { ok: false, field: 'attachments[*].contentType' };
+      }
+      if (a.url !== undefined && typeof a.url !== 'string') {
+        return { ok: false, field: 'attachments[*].url' };
+      }
+    }
+  }
+
   return {
     ok: true,
     email: {
@@ -107,14 +147,154 @@ function parseResendReceivedEmail(
       headers: Array.isArray(email.headers)
         ? (email.headers as Array<{ name: string; value: string }>)
         : undefined,
+      attachments: Array.isArray(email.attachments)
+        ? (email.attachments as ResendReceivedAttachment[])
+        : undefined,
     },
   };
 }
 
+function getBodyHtmlKey(emailInternalId: string): string {
+  return `emails/${emailInternalId}/body.html`;
+}
+
+function getBodyTextKey(emailInternalId: string): string {
+  return `emails/${emailInternalId}/body.txt`;
+}
+
+/**
+ * Sanitizes a user-supplied attachment filename into a safe R2 key segment.
+ *
+ * Defenses applied:
+ * - Strip path traversal sequences (`..` runs).
+ * - Remove null bytes.
+ * - Remove characters illegal in most filesystems and R2 keys.
+ * - Percent-encode remaining non-ASCII characters to prevent homoglyph attacks.
+ * - Enforce a 200-character max length on the final segment.
+ */
+function sanitizeAttachmentFilename(filename: string, index: number): string {
+  const trimmed = filename.trim();
+  const base = trimmed.length > 0 ? trimmed : `attachment-${index + 1}`;
+  const normalized = base
+    // Remove null bytes
+    .replaceAll('\0', '')
+    // Collapse path traversal sequences
+    .replace(/\.{2,}/g, '_')
+    // Remove filesystem/R2-unsafe characters
+    .replace(/[\\/?%*:|"<>]/g, '_');
+
+  // Percent-encode non-ASCII characters to neutralise homoglyphs.
+  // (Avoid control-character regex ranges to satisfy no-control-regex lint rule.)
+  let asciiSafe = '';
+  for (const ch of normalized) {
+    const code = ch.codePointAt(0);
+    if (code === undefined) continue;
+    // Encode ASCII control chars (C0 range 0x00-0x1F and DEL 0x7F) and all
+    // non-ASCII chars (> 0x7F) into percent-escaped sequences.
+    const shouldEncode =
+      code <= 0x1f ||
+      code === 0x7f ||
+      code > 0x7f;
+    asciiSafe += shouldEncode ? encodeURIComponent(ch) : ch;
+  }
+
+  // Enforce max filename length (R2 key limit is 1024 bytes total; cap segment at 200)
+  return asciiSafe.slice(0, 200);
+}
+
+/**
+ * Decodes a base64 string to Uint8Array in chunks to avoid blocking the
+ * Workers event loop for large attachments. atob is synchronous; chunking
+ * keeps individual CPU slices short.
+ */
+function decodeBase64ToUint8Array(base64: string): Uint8Array {
+  // Normalise to standard base64 alphabet (URL-safe variant uses - and _)
+  const normalized = base64.replace(/-/g, '+').replace(/_/g, '/');
+  const CHUNK = 65536;
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+  while (offset < normalized.length) {
+    const slice = normalized.slice(offset, offset + CHUNK);
+    const binary = atob(slice);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    chunks.push(bytes);
+    offset += CHUNK;
+  }
+  if (chunks.length === 1) return chunks[0];
+  const total = chunks.reduce((sum, c) => sum + c.length, 0);
+  const result = new Uint8Array(total);
+  let pos = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, pos);
+    pos += chunk.length;
+  }
+  return result;
+}
+
+/**
+ * Downloads attachment content from Resend.
+ *
+ * @param attachment   - Parsed attachment descriptor from Resend payload
+ * @param resendEmailId - The Resend external email ID (NOT the internal UUID)
+ * @param resendApiKey  - Bearer token for Resend API calls
+ */
+async function loadAttachmentContent(
+  attachment: ResendReceivedAttachment,
+  resendEmailId: string,
+  resendApiKey: string
+): Promise<ArrayBuffer | Uint8Array | string | null> {
+  if (attachment.content) {
+    try {
+      return decodeBase64ToUint8Array(attachment.content);
+    } catch (err) {
+      console.warn('[worker] attachment content is not valid base64; storing raw string', {
+        resendEmailId,
+        error: err,
+      });
+      return attachment.content;
+    }
+  }
+
+  if (attachment.url) {
+    const response = await fetch(attachment.url, {
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+      },
+    });
+    if (!response.ok) {
+      return null;
+    }
+    return response.arrayBuffer();
+  }
+
+  if (attachment.id) {
+    const response = await fetch(
+      `https://api.resend.com/emails/receiving/${encodeURIComponent(resendEmailId)}/attachments/${encodeURIComponent(attachment.id)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+        },
+      }
+    );
+    if (!response.ok) {
+      return null;
+    }
+    return response.arrayBuffer();
+  }
+
+  return null;
+}
+
 // Env interface -- matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
+// EMAIL_BODIES is optional: the worker degrades gracefully (body keys = null)
+// if the bucket is not bound (e.g. local dev without R2 configured).
 export interface Env {
   DB: D1Database;
+  EMAIL_BODIES?: R2Bucket;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
   SENTRY_DSN?: string;       // optional -- worker runs without Sentry if unset
@@ -292,7 +472,97 @@ const handler: ExportedHandler<Env> = {
       ? toRaw.join(', ')
       : (typeof toRaw === 'string' ? toRaw : '');
 
-    // --- Step 6: Persist to D1 ---
+    const internalEmailId = crypto.randomUUID();
+    const r2Bucket = env.EMAIL_BODIES;
+
+    // --- Step 6: Store body content in R2 and persist key columns in D1 ---
+    // R2 write failures are NON-FATAL: we log+warn and proceed with null keys
+    // so the D1 INSERT always completes. This prevents the Resend retry
+    // contract from creating orphaned R2 objects: if a 500 were returned here,
+    // Resend would retry, INSERT OR IGNORE would skip the duplicate resend_id,
+    // and any already-written R2 objects would be permanently orphaned.
+    let bodyTextKey: string | null = null;
+    let bodyHtmlKey: string | null = null;
+    if (r2Bucket) {
+      if (receivedEmail.text !== null && receivedEmail.text !== undefined) {
+        bodyTextKey = getBodyTextKey(internalEmailId);
+        try {
+          await r2Bucket.put(bodyTextKey, receivedEmail.text, {
+            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+          });
+        } catch (err) {
+          console.warn('[worker] failed to persist body_text to R2; proceeding with null key', { emailId, err });
+          bodyTextKey = null;
+        }
+      }
+
+      if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
+        bodyHtmlKey = getBodyHtmlKey(internalEmailId);
+        try {
+          await r2Bucket.put(bodyHtmlKey, receivedEmail.html, {
+            httpMetadata: { contentType: 'text/html; charset=utf-8' },
+          });
+        } catch (err) {
+          console.warn('[worker] failed to persist body_html to R2; proceeding with null key', { emailId, err });
+          bodyHtmlKey = null;
+        }
+      }
+    } else {
+      console.warn('[worker] EMAIL_BODIES R2 bucket not bound; bodies will not be stored in R2', { emailId });
+    }
+
+    // --- Step 7: Attachment ingestion (download from Resend, store in R2) ---
+    if (r2Bucket) {
+      const attachments = receivedEmail.attachments ?? [];
+      for (const [index, attachment] of attachments.entries()) {
+        const safeFilename = sanitizeAttachmentFilename(
+          attachment.filename ?? `attachment-${index + 1}`,
+          index
+        );
+        let attachmentData: ArrayBuffer | Uint8Array | string | null = null;
+        try {
+          attachmentData = await loadAttachmentContent(
+            attachment,
+            emailId,
+            env.RESEND_API_KEY
+          );
+        } catch (err) {
+          console.warn('[worker] failed to download attachment from Resend', {
+            emailId,
+            filename: safeFilename,
+            error: err,
+          });
+        }
+
+        if (!attachmentData) {
+          console.warn(
+            '[worker] skipping attachment; unable to load attachment data',
+            { emailId, filename: safeFilename }
+          );
+          continue;
+        }
+
+        const contentType =
+          attachment.contentType ??
+          attachment.content_type ??
+          'application/octet-stream';
+        const attachmentKey = `emails/${internalEmailId}/attachments/${safeFilename}`;
+
+        try {
+          await r2Bucket.put(attachmentKey, attachmentData, {
+            httpMetadata: { contentType },
+          });
+        } catch (err) {
+          console.warn('[worker] failed to persist attachment to R2', {
+            emailId,
+            filename: safeFilename,
+            error: err,
+          });
+        }
+      }
+    }
+
+    // --- Step 8: Persist metadata + R2 keys to D1 ---
     // INSERT OR IGNORE: Resend guarantees at-least-once delivery, so duplicate
     // webhook deliveries are expected. IGNORE silently skips the entire row if
     // resend_id or message_id already exists. This is intentional -- the first
@@ -300,26 +570,26 @@ const handler: ExportedHandler<Env> = {
     // upsert semantics are ever needed, replace with INSERT OR REPLACE or add
     // an ON CONFLICT DO UPDATE clause.
     //
-    // Column order in the INSERT and .bind() are kept in sync:
-    //   13 bound ? placeholders + 2 literal 0s (is_read, is_sent) = 15 columns.
-    //   All 13 bound args below map 1-1 to the 13 `?` placeholders.
+    // Column order in the INSERT and .bind() are kept in sync.
     try {
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
-          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
+          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
       `)
         .bind(
-          crypto.randomUUID(),        // id
+          internalEmailId,            // id
           emailId,                    // resend_id
           threadId,                   // thread_id (looked up or new)
           fromAddress,                // from_address
           fromName,                   // from_name (nullable)
           toAddress,                  // to_address
           receivedEmail.subject ?? null,
-          receivedEmail.text ?? null,
-          receivedEmail.html ?? null,
+          null,                       // DEPRECATED: body_text now stored in R2
+          null,                       // DEPRECATED: body_html now stored in R2
+          bodyTextKey,                // body_text_key
+          bodyHtmlKey,                // body_html_key
           messageId,                  // message_id (nullable)
           inReplyTo,                  // in_reply_to (nullable)
           referencesHeader,           // references (nullable)
