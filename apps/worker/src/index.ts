@@ -210,9 +210,9 @@ function sanitizeAttachmentFilename(filename: string, index: number): string {
 function decodeBase64ToUint8Array(base64: string): Uint8Array {
   // Normalise to standard base64 alphabet (URL-safe variant uses - and _),
   // then restore omitted padding so decoders accept unpadded inputs.
-  const normalized = base64.replace(/-/g, '+').replace(/_/g, '/');
+  const normalized = base64.replace(/-/g, '+').replace(/_/g, '/').replace(/\s/g, '');
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
-
+  
   const uint8ArrayWithFromBase64 = Uint8Array as Uint8ArrayConstructor & {
     fromBase64?: (input: string) => Uint8Array;
   };
