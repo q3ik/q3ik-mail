@@ -187,7 +187,10 @@ function sanitizeAttachmentFilename(filename: string, index: number): string {
   // (Avoid control-character regex ranges to satisfy no-control-regex lint rule.)
   let asciiSafe = '';
   for (const ch of normalized) {
-    const code = ch.codePointAt(0) as number;
+    const code = ch.codePointAt(0);
+    if (code === undefined) continue;
+    // Encode ASCII control chars (C0 range 0x00-0x1F and DEL 0x7F) and all
+    // non-ASCII chars (> 0x7F) into percent-escaped sequences.
     const shouldEncode =
       code <= 0x1f ||
       code === 0x7f ||
