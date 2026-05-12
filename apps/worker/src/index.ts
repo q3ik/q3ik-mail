@@ -323,11 +323,11 @@ const handler: ExportedHandler<Env> = {
     ctx.waitUntil(
       resolveOrphanedThreads(env.DB)
         .then((resolved) => {
-          if (resolved > 0 && env.SENTRY_DSN) {
+          if (env.SENTRY_DSN) {
             Sentry.addBreadcrumb({
               category: 'cron.rethread',
               level: 'info',
-              message: '[cron/rethread] resolved orphaned rows',
+              message: '[cron/rethread] resolveOrphanedThreads completed',
               data: { resolvedCount: resolved },
             });
           }
@@ -504,6 +504,17 @@ const handler: ExportedHandler<Env> = {
           });
         } catch (err) {
           console.warn('[worker] failed to persist body_text to R2; proceeding with null key', { emailId, err });
+          if (env.SENTRY_DSN) {
+            Sentry.captureException(err, {
+              tags: {
+                layer: 'worker',
+                operation: 'r2.put.body_text',
+                storage_provider: 'r2',
+                r2_object_key: bodyTextKey,
+              },
+              extra: { emailId },
+            });
+          }
           bodyTextKey = null;
         }
       }
@@ -516,6 +527,17 @@ const handler: ExportedHandler<Env> = {
           });
         } catch (err) {
           console.warn('[worker] failed to persist body_html to R2; proceeding with null key', { emailId, err });
+          if (env.SENTRY_DSN) {
+            Sentry.captureException(err, {
+              tags: {
+                layer: 'worker',
+                operation: 'r2.put.body_html',
+                storage_provider: 'r2',
+                r2_object_key: bodyHtmlKey,
+              },
+              extra: { emailId },
+            });
+          }
           bodyHtmlKey = null;
         }
       }
