@@ -2,6 +2,36 @@ import { Resend } from 'resend';
 import { NextRequest } from 'next/server';
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { captureException } from '@/lib/sentry';
+import { z } from 'zod';
+
+/**
+ * All 400 responses share this shape so clients have one code path:
+ *   { error: { message: string; fieldErrors?: Record<string, string[]> } }
+ *
+ * - JSON parse failures: message set, fieldErrors absent.
+ * - Schema validation failures: message set to a human summary, fieldErrors
+ *   populated with Zod's flatten() output for per-field detail.
+ */
+function errorResponse(
+  message: string,
+  fieldErrors?: Record<string, string[]>,
+  status = 400
+): Response {
+  return Response.json(
+    { error: { message, ...(fieldErrors ? { fieldErrors } : {}) } },
+    { status }
+  );
+}
+
+const SendSchema = z.object({
+  to: z.string().trim().email(),
+  subject: z.string().trim().min(1),
+  content: z.string().trim().min(1),
+  // nullish() accepts both null and undefined from JSON clients;
+  // the transform normalises both to undefined for downstream functions.
+  replyToId: z.string().trim().min(1).nullish().transform((v) => v ?? undefined),
+  references: z.string().trim().min(1).nullish().transform((v) => v ?? undefined),
+});
 
 export const runtime = 'edge';
 
@@ -62,61 +92,31 @@ async function resolveThreadingMetadata(
   return { threadId: replyToId, needsRethreading: 1 };
 }
 
-/**
- * Validates an email address using a structurally sound approach:
- * - Exactly one '@' separator (split-based, not indexOf)
- * - Non-empty local and domain parts
- * - Domain contains a dot, not at start or end
- * - No whitespace anywhere
- *
- * Intentionally does not use a backtracking regex (ReDoS-safe).
- */
-function isValidEmail(value: string): boolean {
-  if (typeof value !== 'string' || value.length === 0) return false;
-  const parts = value.split('@');
-  // Exactly two parts: local @ domain
-  if (parts.length !== 2) return false;
-  const [local, domain] = parts;
-  if (local.length === 0) return false;
-  if (domain.length === 0) return false;
-  // No whitespace anywhere in the address
-  if (/\s/.test(value)) return false;
-  // Domain must contain a dot, not at start or end
-  const dotIndex = domain.indexOf('.');
-  if (dotIndex <= 0 || dotIndex === domain.length - 1) return false;
-  return true;
-}
-
 export async function POST(req: NextRequest) {
   const { env } = getRequestContext();
-  const resend = new Resend(env.RESEND_API_KEY);
 
-  let body: {
-    to?: string;
-    subject?: string;
-    content?: string;
-    replyToId?: string;
-    references?: string;
-  };
+  let rawBody: unknown;
 
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
-    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return errorResponse('Invalid JSON body');
   }
 
-  const { to, subject, content, replyToId, references } = body;
-
-  // Validate all required fields with consistent semantics
-  if (!subject || !content) {
-    return Response.json({ error: 'Missing required fields: subject, content' }, { status: 400 });
+  const parsed = SendSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    const flat = parsed.error.flatten();
+    return errorResponse(
+      'Validation failed',
+      flat.fieldErrors as Record<string, string[]>
+    );
   }
 
-  if (!isValidEmail(to ?? '')) {
-    return Response.json({ error: 'Invalid or missing email address' }, { status: 400 });
-  }
+  // Resend client instantiated after validation so the allocation is skipped
+  // on every fast-fail 400 path (malformed JSON, missing/invalid fields).
+  const resend = new Resend(env.RESEND_API_KEY);
 
-  const toAddress = to as string;
+  const { to, subject, content, replyToId, references } = parsed.data;
 
   try {
     const sentMessageId = `<${crypto.randomUUID()}@q3ik.com>`;
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
     );
     const result = await resend.emails.send({
       from: `${APP_FROM_NAME} <${APP_FROM_ADDRESS}>`,
-      to: [toAddress],
+      to: [to],
       subject,
       text: content,
       headers: buildEmailHeaders(sentMessageId, replyToId, references),
@@ -170,7 +170,7 @@ export async function POST(req: NextRequest) {
           threadId,
           APP_FROM_ADDRESS,
           APP_FROM_NAME,
-          toAddress,
+          to,
           subject,
           content,
           null,
