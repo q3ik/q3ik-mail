@@ -7,8 +7,10 @@ const resendApiKey = process.env.RESEND_API_KEY;
 const inboundAddress = process.env.E2E_INBOUND_ADDRESS ?? 'mail@q3ik.com';
 const inboundFromAddress = process.env.E2E_INBOUND_FROM ?? 'mail@q3ik.com';
 const timeoutMs = Number.parseInt(process.env.AGENTMAIL_TIMEOUT_MS ?? '30000', 10);
+const isPullRequestEvent = process.env.GITHUB_EVENT_NAME === 'pull_request';
 
 test.skip(!agentmailApiKey, 'AGENTMAIL_API_KEY is not configured; skipping agentmail E2E tests');
+test.skip(isPullRequestEvent, 'agentmail E2E tests are disabled for pull_request events');
 
 function getHeader(message: AgentMailMessage, name: string): string | undefined {
   const lowerName = name.toLowerCase();
