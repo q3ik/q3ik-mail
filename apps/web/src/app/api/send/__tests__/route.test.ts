@@ -58,6 +58,7 @@ function getInsertCall(): { sql: string; boundValues: unknown[] } {
   // SELECTs use selectBind, so insertBind only records INSERT parameter lists.
   expect(routeMocks.insertBind).toHaveBeenCalledTimes(1);
   const firstInsertBindCall = routeMocks.insertBind.mock.calls[0];
+  expect(firstInsertBindCall).toBeDefined();
   return {
     sql: routeMocks.prepare.mock.calls[insertIdx][0] as string,
     boundValues: firstInsertBindCall as unknown[],
