@@ -255,7 +255,7 @@ function EmailBody({ email }: { email: Email }) {
     };
   }, [body.body_html, email.id]);
 
-  if (isBodyLoading && !sanitizedHtml && !body.body_text) {
+  if (isBodyLoading && (sanitizedForId.current !== email.id) && !body.body_text) {
     return (
       <p aria-live="polite" className="text-sm text-muted-foreground italic">
         Loading email content...
