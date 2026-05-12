@@ -16,11 +16,23 @@ function encodeThreadListCursor(cursor: ThreadListCursorPayload): string {
   return btoa(JSON.stringify(cursor));
 }
 
+class InvalidCursorError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidCursorError';
+  }
+}
+
 function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
-  const payload = JSON.parse(atob(cursor)) as Partial<ThreadListCursorPayload>;
+  let payload: Partial<ThreadListCursorPayload>;
+  try {
+    payload = JSON.parse(atob(cursor)) as Partial<ThreadListCursorPayload>;
+  } catch {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
 
   if (typeof payload.createdAt !== 'string' || typeof payload.id !== 'string') {
-    throw new Error('Invalid thread list cursor');
+    throw new InvalidCursorError('Invalid thread list cursor');
   }
 
   return {
@@ -171,7 +183,17 @@ export async function getThreadListPage(
 ): Promise<ThreadListPage> {
   const pageSize = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
   const fetchLimit = pageSize + 1;
-  const decodedCursor = cursor ? decodeThreadListCursor(cursor) : null;
+  let decodedCursor: ThreadListCursorPayload | null = null;
+  if (cursor) {
+    try {
+      decodedCursor = decodeThreadListCursor(cursor);
+    } catch (err) {
+      if (err instanceof InvalidCursorError) {
+        return { threads: [], nextCursor: null };
+      }
+      throw err;
+    }
+  }
   const whereClause = decodedCursor
     ? `WHERE thread_rank = 1
          AND (
