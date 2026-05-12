@@ -37,6 +37,9 @@ vi.mock('resend', () => ({
 const mockEnv = {
   RESEND_API_KEY: 'test-key',
   RESEND_WEBHOOK_SECRET: 'test-secret',
+  EMAIL_BODIES: {
+    put: async () => {},
+  },
   DB: {
     prepare: () => ({
       bind: () => ({
@@ -91,12 +94,14 @@ function makeThreadEnv(selectFirstResult: unknown = null) {
     }
     return { bind: bindSpy };
   });
+  const putSpy = vi.fn().mockResolvedValue(undefined);
   const env = {
     RESEND_API_KEY: 'test-key',
     RESEND_WEBHOOK_SECRET: 'test-secret',
+    EMAIL_BODIES: { put: putSpy },
     DB: { prepare: prepareSpy },
   } as unknown as import('../index').Env;
-  return { env, prepareSpy, bindSpy };
+  return { env, prepareSpy, bindSpy, putSpy };
 }
 
 /**
@@ -197,9 +202,9 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
   });
 
-  it('maps Resend `text` payload field into D1 `body_text`, ignoring any `body_text` key', async () => {
+  it('stores text body in R2 and persists the `body_text_key` in D1', async () => {
     const { Resend } = await import('resend');
-    const { env, prepareSpy, bindSpy } = makeThreadEnv();
+    const { env, prepareSpy, bindSpy, putSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -226,15 +231,21 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
-    // Primary assertion: `text` value reached D1
-    expect(values[columns.indexOf('body_text')]).toBe('Plain text from text field');
-    // Regression guard: `body_text` payload key must NOT have reached D1
-    expect(values[columns.indexOf('body_text')]).not.toBe('legacy field should be ignored');
+    expect(values[columns.indexOf('body_text')]).toBeNull();
+    const bodyTextKey = values[columns.indexOf('body_text_key')];
+    expect(bodyTextKey).toMatch(/^emails\/.+\/body\.txt$/);
+    expect(putSpy).toHaveBeenCalledWith(
+      bodyTextKey,
+      'Plain text from text field',
+      expect.objectContaining({
+        httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+      })
+    );
   });
 
   it('accepts HTML-only email where `text` key is absent (no 502)', async () => {
     const { Resend } = await import('resend');
-    const { env, prepareSpy, bindSpy } = makeThreadEnv();
+    const { env, prepareSpy, bindSpy, putSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -259,9 +270,18 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
-    // body_text must be NULL when `text` is absent
     expect(values[columns.indexOf('body_text')]).toBeNull();
-    expect(values[columns.indexOf('body_html')]).toBe('<p>HTML body</p>');
+    expect(values[columns.indexOf('body_html')]).toBeNull();
+    expect(values[columns.indexOf('body_text_key')]).toBeNull();
+    const bodyHtmlKey = values[columns.indexOf('body_html_key')];
+    expect(bodyHtmlKey).toMatch(/^emails\/.+\/body\.html$/);
+    expect(putSpy).toHaveBeenCalledWith(
+      bodyHtmlKey,
+      '<p>HTML body</p>',
+      expect.objectContaining({
+        httpMetadata: { contentType: 'text/html; charset=utf-8' },
+      })
+    );
   });
 
   it('returns 502 when Resend payload has a non-string, non-null `text` field', async () => {
@@ -365,6 +385,46 @@ describe('webhook handler', () => {
     const referencesIdx = columns.indexOf('references');
     expect(referencesIdx).toBeGreaterThanOrEqual(0);
     expect(values[referencesIdx]).toBeNull();
+  });
+
+  it('stores inline attachment content under the required R2 attachments key prefix', async () => {
+    const { Resend } = await import('resend');
+    const { env, putSpy } = makeThreadEnv();
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Bob <bob@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Attachment',
+            text: null,
+            html: null,
+            attachments: [
+              {
+                filename: 'invoice.pdf',
+                content: 'aGVsbG8=',
+                content_type: 'application/pdf',
+              },
+            ],
+            headers: [{ name: 'Message-ID', value: '<attachment@example.com>' }],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+    expect(res.status).toBe(200);
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^emails\/.+\/attachments\/invoice\.pdf$/),
+      expect.any(Uint8Array),
+      expect.objectContaining({
+        httpMetadata: { contentType: 'application/pdf' },
+      })
+    );
   });
 });
 

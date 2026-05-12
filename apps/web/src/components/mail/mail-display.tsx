@@ -115,16 +115,87 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
 }
 
 function EmailBody({ email }: { email: Email }) {
+  const [body, setBody] = useState<{ body_html: string | null; body_text: string | null }>({
+    body_html: null,
+    body_text: null,
+  });
+  const [isBodyLoading, setIsBodyLoading] = useState(false);
+  const [bodyLoadError, setBodyLoadError] = useState(false);
   const [sanitizedHtml, setSanitizedHtml] = useState<string | null>(null);
+
+  // Dependency is [email.id] only. The shouldFetchFromApi check is intentionally
+  // inside the effect rather than in the dep array: when both body fields are null
+  // they will always be null on every render for R2-backed emails, so including
+  // them as deps would either never re-fire (same null reference) or spuriously
+  // re-fire on parent re-renders that produce a new email object with null bodies.
+  useEffect(() => {
+    const controller = new AbortController();
+    const shouldFetchFromApi = email.body_html === null && email.body_text === null;
+
+    if (!shouldFetchFromApi) {
+      setBody({
+        body_html: email.body_html,
+        body_text: email.body_text,
+      });
+      setIsBodyLoading(false);
+      setBodyLoadError(false);
+      return () => {
+        controller.abort();
+      };
+    }
+
+    setIsBodyLoading(true);
+    setBodyLoadError(false);
+    setBody({
+      body_html: null,
+      body_text: null,
+    });
+
+    void fetch(`/api/emails/${encodeURIComponent(email.id)}/body`, {
+      method: 'GET',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch email body (${response.status})`);
+        }
+        const payload = (await response.json()) as {
+          body_html: string | null;
+          body_text: string | null;
+        };
+        setBody({
+          body_html: payload.body_html ?? null,
+          body_text: payload.body_text ?? null,
+        });
+      })
+      .catch((err: unknown) => {
+        // Filter intentional aborts (component unmount during navigation).
+        // AbortError must not set bodyLoadError — the user navigated away cleanly.
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return;
+        }
+        console.error('[mail-display] failed to fetch email body:', err);
+        setBodyLoadError(true);
+      })
+      .finally(() => {
+        setIsBodyLoading(false);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email.id]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (email.body_html) {
+    const bodyHtml = body.body_html;
+    if (bodyHtml) {
       void loadDomPurify()
         .then(({ default: DOMPurify }) => {
           if (!cancelled) {
-            setSanitizedHtml(DOMPurify.sanitize(email.body_html!, sanitizeOptions));
+            setSanitizedHtml(DOMPurify.sanitize(bodyHtml, sanitizeOptions));
           }
         })
         .catch(() => {
@@ -139,20 +210,9 @@ function EmailBody({ email }: { email: Email }) {
     return () => {
       cancelled = true;
     };
-  }, [email.body_html]);
+  }, [body.body_html]);
 
-  if (email.body_html) {
-    if (sanitizedHtml) {
-      return (
-        <iframe
-          title="Email body"
-          srcDoc={sanitizedHtml}
-          sandbox=""
-          className="w-full h-[70vh] min-h-[16rem] border-0"
-        />
-      );
-    }
-
+  if (isBodyLoading && !sanitizedHtml && !body.body_text) {
     return (
       <p aria-live="polite" className="text-sm text-muted-foreground italic">
         Loading email content...
@@ -160,11 +220,38 @@ function EmailBody({ email }: { email: Email }) {
     );
   }
 
-  if (email.body_text) {
+  if (sanitizedHtml) {
+    return (
+      <iframe
+        title="Email body"
+        srcDoc={sanitizedHtml}
+        sandbox=""
+        className="w-full h-[70vh] min-h-[16rem] border-0"
+      />
+    );
+  }
+
+  if (body.body_text) {
     return (
       <pre className="whitespace-pre-wrap text-sm text-foreground font-sans break-words">
-        {email.body_text}
+        {body.body_text}
       </pre>
+    );
+  }
+
+  if (bodyLoadError) {
+    return (
+      <p className="text-sm text-muted-foreground italic">
+        Unable to load email body.
+      </p>
+    );
+  }
+
+  if (body.body_html) {
+    return (
+      <p className="text-sm text-muted-foreground italic">
+        Unable to render email body.
+      </p>
     );
   }
 

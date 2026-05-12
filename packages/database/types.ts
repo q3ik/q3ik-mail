@@ -15,6 +15,8 @@ export interface Email {
   subject: string | null;
   body_text: string | null;  // Plain text body
   body_html: string | null;  // Raw HTML — MUST be sanitized before rendering
+  body_text_key: string | null; // R2 object key for plain text body
+  body_html_key: string | null; // R2 object key for HTML body
   message_id: string | null; // RFC 2822 Message-ID header
   in_reply_to: string | null; // RFC 2822 In-Reply-To header
   references: string | null; // RFC 2822 References header (space-separated Message-ID chain)
@@ -29,7 +31,7 @@ export interface Email {
  * Omits body_html and body_text to reduce payload size.
  * Used by getLatestEmails() and list rendering in apps/web.
  */
-export type EmailSummary = Omit<Email, 'body_html' | 'body_text'>;
+export type EmailSummary = Omit<Email, 'body_html' | 'body_text' | 'body_html_key' | 'body_text_key'>;
 
 /**
  * Input type for inserting a new inbound email.
