@@ -125,6 +125,20 @@ function EmailBody({ email }: { email: Email }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    const shouldFetchFromApi = email.body_html === null && email.body_text === null;
+
+    if (!shouldFetchFromApi) {
+      setBody({
+        body_html: email.body_html,
+        body_text: email.body_text,
+      });
+      setIsBodyLoading(false);
+      setBodyLoadError(false);
+      return () => {
+        controller.abort();
+      };
+    }
+
     setIsBodyLoading(true);
     setBodyLoadError(false);
     setBody({
@@ -187,28 +201,22 @@ function EmailBody({ email }: { email: Email }) {
     };
   }, [body.body_html]);
 
-  if (body.body_html) {
-    if (sanitizedHtml) {
-      return (
-        <iframe
-          title="Email body"
-          srcDoc={sanitizedHtml}
-          sandbox=""
-          className="w-full h-[70vh] min-h-[16rem] border-0"
-        />
-      );
-    }
-
-    if (isBodyLoading) {
-      return (
-        <p aria-live="polite" className="text-sm text-muted-foreground italic">
-          Loading email content...
-        </p>
-      );
-    }
-
+  if (isBodyLoading && !sanitizedHtml && !body.body_text) {
     return (
-      <p className="text-sm text-muted-foreground italic">(no body)</p>
+      <p aria-live="polite" className="text-sm text-muted-foreground italic">
+        Loading email content...
+      </p>
+    );
+  }
+
+  if (sanitizedHtml) {
+    return (
+      <iframe
+        title="Email body"
+        srcDoc={sanitizedHtml}
+        sandbox=""
+        className="w-full h-[70vh] min-h-[16rem] border-0"
+      />
     );
   }
 
@@ -220,18 +228,18 @@ function EmailBody({ email }: { email: Email }) {
     );
   }
 
-  if (isBodyLoading) {
-    return (
-      <p aria-live="polite" className="text-sm text-muted-foreground italic">
-        Loading email content...
-      </p>
-    );
-  }
-
   if (bodyLoadError) {
     return (
       <p className="text-sm text-muted-foreground italic">
         Unable to load email body.
+      </p>
+    );
+  }
+
+  if (body.body_html) {
+    return (
+      <p className="text-sm text-muted-foreground italic">
+        Unable to render email body.
       </p>
     );
   }
