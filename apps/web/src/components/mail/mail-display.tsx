@@ -115,16 +115,59 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
 }
 
 function EmailBody({ email }: { email: Email }) {
+  const [body, setBody] = useState<{ body_html: string | null; body_text: string | null }>({
+    body_html: email.body_html,
+    body_text: email.body_text,
+  });
+  const [isBodyLoading, setIsBodyLoading] = useState(false);
   const [sanitizedHtml, setSanitizedHtml] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setIsBodyLoading(true);
+
+    void fetch(`/api/emails/${encodeURIComponent(email.id)}/body`, {
+      method: 'GET',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch email body (${response.status})`);
+        }
+        const payload = (await response.json()) as {
+          body_html: string | null;
+          body_text: string | null;
+        };
+        setBody({
+          body_html: payload.body_html ?? null,
+          body_text: payload.body_text ?? null,
+        });
+      })
+      .catch(() => {
+        setBody({
+          body_html: email.body_html,
+          body_text: email.body_text,
+        });
+      })
+      .finally(() => {
+        setIsBodyLoading(false);
+      });
+
+    return () => {
+      controller.abort();
+      setIsBodyLoading(false);
+    };
+  }, [email.id, email.body_html, email.body_text]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (email.body_html) {
+    const bodyHtml = body.body_html;
+    if (bodyHtml) {
       void loadDomPurify()
         .then(({ default: DOMPurify }) => {
           if (!cancelled) {
-            setSanitizedHtml(DOMPurify.sanitize(email.body_html!, sanitizeOptions));
+            setSanitizedHtml(DOMPurify.sanitize(bodyHtml, sanitizeOptions));
           }
         })
         .catch(() => {
@@ -139,9 +182,9 @@ function EmailBody({ email }: { email: Email }) {
     return () => {
       cancelled = true;
     };
-  }, [email.body_html]);
+  }, [body.body_html]);
 
-  if (email.body_html) {
+  if (body.body_html) {
     if (sanitizedHtml) {
       return (
         <iframe
@@ -153,17 +196,23 @@ function EmailBody({ email }: { email: Email }) {
       );
     }
 
+    if (isBodyLoading) {
+      return (
+        <p aria-live="polite" className="text-sm text-muted-foreground italic">
+          Loading email content...
+        </p>
+      );
+    }
+
     return (
-      <p aria-live="polite" className="text-sm text-muted-foreground italic">
-        Loading email content...
-      </p>
+      <p className="text-sm text-muted-foreground italic">(no body)</p>
     );
   }
 
-  if (email.body_text) {
+  if (body.body_text) {
     return (
       <pre className="whitespace-pre-wrap text-sm text-foreground font-sans break-words">
-        {email.body_text}
+        {body.body_text}
       </pre>
     );
   }
