@@ -110,7 +110,10 @@ test.describe('agentmail delivery', () => {
 
     expect(response.ok()).toBeTruthy();
 
-    const message = await client.waitForEmail(mailbox!.id, timeoutMs);
+    const message = await client.waitForEmail(mailbox!.id, {
+      timeoutMs,
+      filter: (candidate) => candidate.subject === outboundSubject,
+    });
     expect(message.subject).toBe(outboundSubject);
     expect(getHeader(message, 'In-Reply-To')).toBe('<reply-parent@q3ik.com>');
     expect(getHeader(message, 'References')).toContain('<thread-root@q3ik.com>');
