@@ -170,7 +170,7 @@ jobs:
       # pages dev and waits for a real HTTP 200 before running any test.
       # No manual background server or wait-on needed here.
       - name: Run Playwright E2E
-        run: pnpm --filter web exec playwright test e2e/inbox.spec.ts
+        run: pnpm --filter @q3ik-mail/web e2e
         env:
           BASE_URL: http://localhost:3000
           CI: true
@@ -213,7 +213,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
+      - run: pnpm install --frozen-lockfile
       - name: Build web app
         run: pnpm --filter web run build:cf
       - name: Apply D1 migrations (local)

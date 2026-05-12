@@ -7,6 +7,8 @@ export interface AgentMailMessage {
   id: string;
   subject?: string;
   headers?: Record<string, string>;
+  parsed_headers?: Record<string, string>;
+  raw_headers?: Record<string, string>;
   [key: string]: unknown;
 }
 
@@ -15,9 +17,14 @@ interface AgentMailMessagesResponse {
 }
 
 export class AgentMailClient {
-  private readonly baseUrl = 'https://api.agentmail.to/v1';
+  private readonly baseUrl: string;
 
-  constructor(private readonly apiKey: string) {}
+  constructor(
+    private readonly apiKey: string,
+    options?: { baseUrl?: string }
+  ) {
+    this.baseUrl = options?.baseUrl ?? 'https://api.agentmail.to/v1';
+  }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
