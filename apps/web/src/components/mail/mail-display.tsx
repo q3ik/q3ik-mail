@@ -5,6 +5,7 @@ import type { Email } from '@q3ik-mail/database';
 import { ReplyIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { captureMessage } from '@/lib/sentry';
 import type { ComposePayload } from '@/components/mail/compose-dialog';
 
 // ---------------------------------------------------------------------------
@@ -225,6 +226,10 @@ function EmailBody({ email }: { email: Email }) {
           return;
         }
         console.error('[mail-display] failed to fetch email body:', err);
+        void captureMessage('[mail-display] email body loading error', {
+          level: 'warning',
+          tags: { category: 'loading-error', surface: 'mail-display', email_id: email.id },
+        });
         setBodyLoadError(true);
       })
       .finally(() => {

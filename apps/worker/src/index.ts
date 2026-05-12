@@ -313,6 +313,33 @@ export interface Env {
   ENVIRONMENT: string;       // set in wrangler.toml [vars]
 }
 
+/**
+ * Captures an R2 put failure to Sentry when the DSN is configured.
+ * Centralises the duplicated catch-block logic for body_text and body_html
+ * persistence so each catch site is a single call.
+ */
+function captureR2PutError(
+  err: unknown,
+  env: Env,
+  ctx: { emailId: string; operation: string; objectKey: string | null },
+): void {
+  console.warn(
+    `[worker] failed to persist ${ctx.operation} to R2; proceeding with null key`,
+    { emailId: ctx.emailId, err },
+  );
+  if (env.SENTRY_DSN) {
+    Sentry.captureException(err, {
+      tags: {
+        layer: 'worker',
+        operation: `r2.put.${ctx.operation}`,
+        storage_provider: 'r2',
+        ...(ctx.objectKey ? { r2_object_key: ctx.objectKey } : {}),
+      },
+      extra: { emailId: ctx.emailId },
+    });
+  }
+}
+
 const handler: ExportedHandler<Env> = {
   // --------------------------------------------------------------------------
   // Cron Trigger: re-thread orphaned emails on a schedule
@@ -323,11 +350,11 @@ const handler: ExportedHandler<Env> = {
     ctx.waitUntil(
       resolveOrphanedThreads(env.DB)
         .then((resolved) => {
-          if (resolved > 0 && env.SENTRY_DSN) {
+          if (env.SENTRY_DSN) {
             Sentry.addBreadcrumb({
               category: 'cron.rethread',
               level: 'info',
-              message: '[cron/rethread] resolved orphaned rows',
+              message: '[cron/rethread] resolveOrphanedThreads completed',
               data: { resolvedCount: resolved },
             });
           }
@@ -503,7 +530,7 @@ const handler: ExportedHandler<Env> = {
             httpMetadata: { contentType: 'text/plain; charset=utf-8' },
           });
         } catch (err) {
-          console.warn('[worker] failed to persist body_text to R2; proceeding with null key', { emailId, err });
+          captureR2PutError(err, env, { emailId, operation: 'body_text', objectKey: bodyTextKey });
           bodyTextKey = null;
         }
       }
@@ -515,7 +542,7 @@ const handler: ExportedHandler<Env> = {
             httpMetadata: { contentType: 'text/html; charset=utf-8' },
           });
         } catch (err) {
-          console.warn('[worker] failed to persist body_html to R2; proceeding with null key', { emailId, err });
+          captureR2PutError(err, env, { emailId, operation: 'body_html', objectKey: bodyHtmlKey });
           bodyHtmlKey = null;
         }
       }
