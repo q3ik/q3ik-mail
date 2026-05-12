@@ -341,7 +341,13 @@ describe('getThreadListPage', () => {
   });
 
   it('does not skip or duplicate rows when two threads share the same created_at timestamp', async () => {
-    // All five threads: two share the same timestamp at the page boundary.
+    // NOTE: createMockDb simulates the composite WHERE clause in-memory (not via real SQL).
+    // This test verifies that cursor encode/decode round-trips correctly across page
+    // boundaries and that the mock filters rows consistently with the intended
+    // (created_at < ?) OR (created_at = ? AND id > ?) predicate.
+    // SQL clause correctness against a real D1 database is covered by integration tests.
+    //
+    // All five threads: three share the same timestamp at the page boundary.
     // Page 1 (limit=2): threads A and B (both at '2026-05-11T12:00:00Z').
     // Page 2 cursor encodes { createdAt: '2026-05-11T12:00:00Z', id: 'b' }.
     // Page 2 must return C (same timestamp, id > 'b') and D — no skip, no duplicate.
@@ -354,17 +360,38 @@ describe('getThreadListPage', () => {
     ];
 
     // Fetch page 1 (no cursor) — should return rows a, b.
-    const page1 = await getThreadListPage(createMockDb(allRows), { limit: 2 });
+    let capturedSql = '';
+    const page1 = await getThreadListPage(
+      createMockDb(allRows, { onPrepare: (sql) => { capturedSql = sql; } }),
+      { limit: 2 }
+    );
     expect(page1.threads.map((t) => t.id)).toEqual(['a', 'b']);
     expect(page1.nextCursor).not.toBeNull();
+    // Page 1 has no cursor — WHERE clause must not include the tiebreaker predicate.
+    expect(capturedSql).not.toContain('created_at < ?');
 
     // Fetch page 2 using the cursor from page 1 — should return rows c, d (no skip/duplicate).
-    const page2 = await getThreadListPage(createMockDb(allRows), {
-      limit: 2,
-      cursor: page1.nextCursor!,
-    });
+    // Also assert the SQL carries the composite tiebreaker predicate.
+    let page2Sql = '';
+    let page2Args: unknown[] = [];
+    const page2 = await getThreadListPage(
+      createMockDb(allRows, {
+        onPrepare: (sql) => { page2Sql = sql; },
+        onBind: (args) => { page2Args = args; },
+      }),
+      { limit: 2, cursor: page1.nextCursor! }
+    );
     expect(page2.threads.map((t) => t.id)).toEqual(['c', 'd']);
     expect(page2.nextCursor).not.toBeNull();
+    // Verify the composite WHERE clause structure is emitted correctly.
+    expect(page2Sql).toContain('created_at < ?');
+    expect(page2Sql).toContain('created_at = ? AND id > ?');
+    expect(page2Args).toEqual([
+      '2026-05-11T12:00:00Z',
+      '2026-05-11T12:00:00Z',
+      'b',
+      3, // fetchLimit = pageSize + 1
+    ]);
 
     // Fetch page 3 — should return row e only and no further cursor.
     const page3 = await getThreadListPage(createMockDb(allRows), {
