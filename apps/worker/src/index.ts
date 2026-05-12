@@ -363,6 +363,7 @@ const handler: ExportedHandler<Env> = {
     // downstream errors to unauthenticated callers.
     const accessResult = await validateCfAccessJwt(request, env);
     if (!accessResult.ok) {
+      console.error('[worker] Cloudflare Access validation failed: ' + accessResult.error);
       return new Response('Unauthorized', { status: 401 });
     }
 
