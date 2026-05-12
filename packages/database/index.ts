@@ -495,6 +495,9 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     .bind(ORPHAN_RETHREAD_BATCH_SIZE)
     .all<{ id: string; in_reply_to: string; references: string | null }>();
 
+  // Nothing to do — skip the bulk SELECT and batch entirely.
+  if (orphans.length === 0) return 0;
+
   const parentMessageIds = [...new Set(orphans.map((orphan) => orphan.in_reply_to))];
   const inReplyToPlaceholders = parentMessageIds.map(() => '?').join(', ');
   const { results: parentCandidates } =
