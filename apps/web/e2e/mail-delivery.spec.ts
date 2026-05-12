@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { AgentMailClient } from '@q3ik-mail/testing';
+import type { AgentMailMessage } from '@q3ik-mail/testing';
 
 const agentmailApiKey = process.env.AGENTMAIL_API_KEY;
 const resendApiKey = process.env.RESEND_API_KEY;
@@ -9,7 +10,7 @@ const timeoutMs = Number.parseInt(process.env.AGENTMAIL_TIMEOUT_MS ?? '30000', 1
 
 test.skip(!agentmailApiKey, 'AGENTMAIL_API_KEY is not configured; skipping agentmail E2E tests');
 
-function getHeader(message: Record<string, unknown>, name: string): string | undefined {
+function getHeader(message: AgentMailMessage, name: string): string | undefined {
   const lowerName = name.toLowerCase();
 
   const headerSources = [
@@ -110,7 +111,7 @@ test.describe('agentmail delivery', () => {
 
     expect(response.ok()).toBeTruthy();
 
-    const message = await client.waitForEmail(mailbox!.id, timeoutMs) as Record<string, unknown>;
+    const message = await client.waitForEmail(mailbox!.id, timeoutMs);
     expect(message.subject).toBe(outboundSubject);
     expect(getHeader(message, 'In-Reply-To')).toBe('<reply-parent@q3ik.com>');
     expect(getHeader(message, 'References')).toContain('<thread-root@q3ik.com>');
