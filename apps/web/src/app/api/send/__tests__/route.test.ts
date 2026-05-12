@@ -64,6 +64,28 @@ function getInsertCall(): { sql: string; boundValues: unknown[] } {
   };
 }
 
+// ─── Unified error shape helpers ───────────────────────────────────────────
+// All 400 responses must conform to:
+//   { error: { message: string; fieldErrors?: Record<string, string[]> } }
+
+function expectJsonParseError(body: unknown) {
+  expect(body).toHaveProperty('error');
+  const err = (body as { error: { message: string } }).error;
+  expect(typeof err.message).toBe('string');
+  expect(err.message).toBe('Invalid JSON body');
+  // JSON parse errors must NOT expose fieldErrors
+  expect(err).not.toHaveProperty('fieldErrors');
+}
+
+function expectFieldError(body: unknown, field: string) {
+  expect(body).toHaveProperty('error');
+  const err = (body as { error: { message: string; fieldErrors: Record<string, string[]> } }).error;
+  expect(typeof err.message).toBe('string');
+  expect(err).toHaveProperty('fieldErrors');
+  expect(err.fieldErrors).toHaveProperty(field);
+}
+// ───────────────────────────────────────────────────────────────────────────
+
 describe('POST /api/send', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -73,7 +95,9 @@ describe('POST /api/send', () => {
     routeMocks.selectFirst.mockResolvedValue(null);
   });
 
-  it('returns 400 when "to" is missing', async () => {
+  // ── Unified error shape contract ──────────────────────────────────────────
+
+  it('returns 400 with unified error shape when "to" is missing', async () => {
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
       method: 'POST',
@@ -82,9 +106,10 @@ describe('POST /api/send', () => {
     });
     const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
+    expectFieldError(await res.json(), 'to');
   });
 
-  it('returns 400 when "subject" is missing', async () => {
+  it('returns 400 with unified error shape when "subject" is missing', async () => {
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
       method: 'POST',
@@ -93,9 +118,46 @@ describe('POST /api/send', () => {
     });
     const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
+    expectFieldError(await res.json(), 'subject');
   });
 
-  it('returns 400 when "to" is not a valid email address', async () => {
+  it('returns 400 with unified error shape when "content" is an empty string', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: '' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    expectFieldError(await res.json(), 'content');
+  });
+
+  it('returns 400 with unified error shape when "content" is whitespace-only', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: '   ' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    expectFieldError(await res.json(), 'content');
+  });
+
+  it('returns 400 with unified error shape when "subject" is whitespace-only', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: 'a@b.com', subject: '   ', content: 'Hello' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    expectFieldError(await res.json(), 'subject');
+  });
+
+  it('returns 400 with unified error shape when "to" is not a valid email address', async () => {
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
       method: 'POST',
@@ -104,11 +166,63 @@ describe('POST /api/send', () => {
     });
     const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toBe('Invalid or missing email address');
+    expectFieldError(await res.json(), 'to');
   });
 
-  // Boundary cases that the original indexOf-based check passed incorrectly
+  it('returns 400 with unified error shape for malformed JSON body', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    expectJsonParseError(await res.json());
+  });
+
+  // ── null optional fields are accepted (nullish() contract) ────────────────
+
+  it('accepts null replyToId and null references (nullish normalised to undefined)', async () => {
+    const randomUuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('msg-uuid')
+      .mockReturnValueOnce('row-uuid');
+    try {
+      const { POST } = await import('../route');
+      const req = new Request('http://localhost/api/send', {
+        method: 'POST',
+        body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello', replyToId: null, references: null }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const res = await POST(req as unknown as NextRequest);
+      expect(res.status).toBe(200);
+      // Should be treated as a new thread (no In-Reply-To / References headers)
+      const MockedResend = Resend as MockedClass<typeof Resend>;
+      const sendSpy = MockedResend.mock.results[0]?.value.emails.send as ReturnType<typeof vi.fn>;
+      const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
+      expect(callArgs.headers?.['In-Reply-To']).toBeUndefined();
+      expect(callArgs.headers?.['References']).toBeUndefined();
+    } finally {
+      randomUuidSpy.mockRestore();
+    }
+  });
+
+  it('treats empty-string replyToId as absent (min(1) + nullish)', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello', replyToId: '' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    // An empty string hits min(1) inside the nullish chain — fails validation
+    const res = await POST(req as unknown as NextRequest);
+    // empty string after trim is 0 length, so min(1) rejects it
+    expect(res.status).toBe(400);
+    expectFieldError(await res.json(), 'replyToId');
+  });
+
+  // ── Boundary cases for invalid email formats ──────────────────────────────
+
   it.each([
     ['trailing dot in domain', 'a@b.'],
     ['leading dot in domain', 'a@.b.com'],
@@ -125,9 +239,22 @@ describe('POST /api/send', () => {
     });
     const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toBe('Invalid or missing email address');
+    expectFieldError(await res.json(), 'to');
   });
+
+  // Plus-addressing must pass — used by Resend test inboxes and common in production
+  it('accepts plus-addressed email (user+tag@sub.domain.com) as valid', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: 'user+tag@sub.domain.com', subject: 'Hi', content: 'Hello' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(200);
+  });
+
+  // ── Happy path & persistence ───────────────────────────────────────────────
 
   it('returns 200 with email id on success and persists the sent email', async () => {
     const randomUuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID')
