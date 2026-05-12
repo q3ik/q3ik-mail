@@ -47,6 +47,10 @@ export function Mail({
     threads: EmailSummary[];
     nextCursor: string | null;
   } | null>(null);
+  const threadsRef = useRef(threads);
+  const nextCursorRef = useRef(nextCursor);
+  threadsRef.current = threads;
+  nextCursorRef.current = nextCursor;
 
   const [composeOpen, setComposeOpen] = useState(false);
   const [composePayload, setComposePayload] = useState<ComposePayload | undefined>();
@@ -61,6 +65,7 @@ export function Mail({
 
     const trimmedQuery = searchQuery.trim();
     if (!trimmedQuery) {
+      // Invalidate any in-flight search so late responses cannot overwrite reset state.
       requestTokenRef.current += 1;
       if (preSearchStateRef.current) {
         setThreads(preSearchStateRef.current.threads);
@@ -72,12 +77,13 @@ export function Mail({
 
     if (!preSearchStateRef.current) {
       preSearchStateRef.current = {
-        threads,
-        nextCursor,
+        threads: threadsRef.current,
+        nextCursor: nextCursorRef.current,
       };
     }
 
-    const token = ++requestTokenRef.current;
+    requestTokenRef.current += 1;
+    const token = requestTokenRef.current;
     setIsSearching(true);
     try {
       const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}`);
@@ -96,7 +102,7 @@ export function Mail({
         setIsSearching(false);
       }
     }
-  }, [nextCursor, searchQuery, threads]);
+  }, [searchQuery]);
 
   const handleLoadMore = useCallback(async function handleLoadMore() {
     if (!nextCursor || isLoadingMore) return;
