@@ -38,7 +38,7 @@ const SANITIZE_OPTIONS = {
 } as const;
 
 /** Matches any CSS url(...) value in a style attribute. */
-const CSS_URL_RE = /url\s*\([^)]*\)/gi;
+const CSS_URL_RE = /url\s*\(\s*(?:'[^']*'|\"[^\"]*\"|[^)]*)\s*\)/gi;
 
 let DOMPurifyPromise: Promise<typeof import('isomorphic-dompurify')> | undefined;
 let hooksInstalled = false;
