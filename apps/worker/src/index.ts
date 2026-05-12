@@ -3,6 +3,7 @@ import { Webhook } from 'svix';
 import { Resend } from 'resend';
 import { resolveOrphanedThreads } from '@q3ik-mail/database';
 import { parseFrom } from './utils/parseFrom';
+import { validateCfAccessJwt } from './middleware/cfAccess';
 
 // Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
 // Field names verified against https://resend.com/docs/api-reference/webhooks/email-received
@@ -309,8 +310,9 @@ export interface Env {
   EMAIL_BODIES?: R2Bucket;
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
-  SENTRY_DSN?: string;       // optional -- worker runs without Sentry if unset
-  ENVIRONMENT: string;       // set in wrangler.toml [vars]
+  CF_ACCESS_TEAM_DOMAIN: string; // e.g. "yourteam.cloudflareaccess.com"
+  SENTRY_DSN?: string;           // optional -- worker runs without Sentry if unset
+  ENVIRONMENT: string;           // set in wrangler.toml [vars]
 }
 
 const handler: ExportedHandler<Env> = {
@@ -350,6 +352,15 @@ const handler: ExportedHandler<Env> = {
     // Only accept POST requests
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });
+    }
+
+    // --- Step 0: Verify Cloudflare Access JWT ---
+    // Validates the Cf-Access-Jwt-Assertion header before any webhook logic.
+    // An invalid or missing JWT returns a controlled 401 rather than exposing
+    // downstream errors to unauthenticated callers.
+    const accessResult = await validateCfAccessJwt(request, env);
+    if (!accessResult.ok) {
+      return new Response('Unauthorized', { status: 401 });
     }
 
     // Read raw body as text BEFORE any parsing -- required for signature verification
