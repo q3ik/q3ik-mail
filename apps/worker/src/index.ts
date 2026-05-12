@@ -175,17 +175,23 @@ function getBodyTextKey(emailInternalId: string): string {
 function sanitizeAttachmentFilename(filename: string, index: number): string {
   const trimmed = filename.trim();
   const base = trimmed.length > 0 ? trimmed : `attachment-${index + 1}`;
-  return base
+  const normalized = base
     // Remove null bytes
-    .replace(/\0/g, '')
+    .replaceAll('\0', '')
     // Collapse path traversal sequences
     .replace(/\.{2,}/g, '_')
     // Remove filesystem/R2-unsafe characters
-    .replace(/[\\/?%*:|"<>]/g, '_')
-    // Percent-encode non-ASCII to neutralise homoglyphs
-    .replace(/[^\x00-\x7F]/g, (ch) => encodeURIComponent(ch))
-    // Enforce max filename length (R2 key limit is 1024 bytes total; cap segment at 200)
-    .slice(0, 200);
+    .replace(/[\\/?%*:|"<>]/g, '_');
+
+  // Percent-encode non-ASCII characters to neutralise homoglyphs.
+  // (Avoid control-character regex ranges to satisfy no-control-regex lint rule.)
+  const asciiSafe = Array.from(normalized, (ch) => {
+    const code = ch.codePointAt(0) ?? 0;
+    return code > 0x7f ? encodeURIComponent(ch) : ch;
+  }).join('');
+
+  // Enforce max filename length (R2 key limit is 1024 bytes total; cap segment at 200)
+  return asciiSafe.slice(0, 200);
 }
 
 /**
