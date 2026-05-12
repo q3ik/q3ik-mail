@@ -114,9 +114,7 @@ export async function validateCfAccessJwt(
   request: Request,
   env: CfAccessEnv,
 ): Promise<ValidateResult> {
-  const token =
-    request.headers.get('Cf-Access-Jwt-Assertion')
-    ?? request.headers.get('CF_Access_Jwt_Assertion');
+  const token = request.headers.get('Cf-Access-Jwt-Assertion');
   if (!token) {
     return { ok: false, error: 'Missing Cf-Access-Jwt-Assertion header' };
   }

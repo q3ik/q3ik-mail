@@ -26,4 +26,9 @@ bucket_name = "q3ik-mail-bodies"
 
 [vars]
 ENVIRONMENT = "production"
-# RESEND_API_KEY, RESEND_WEBHOOK_SECRET, and SENTRY_DSN are set via wrangler secret put
+# The following secrets must be set via `wrangler secret put <NAME>`:
+#   RESEND_API_KEY            - Resend API key for sending email
+#   RESEND_WEBHOOK_SECRET     - Resend webhook signing secret
+#   CLOUDFLARE_ACCESS_AUD     - AUD tag from the Cloudflare Access application
+#   CLOUDFLARE_TEAM_DOMAIN    - Zero Trust team domain, e.g. "yourteam.cloudflareaccess.com"
+#   SENTRY_DSN                - (optional) Sentry DSN for error reporting
