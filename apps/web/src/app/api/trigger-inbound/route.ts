@@ -95,7 +95,6 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Validation failed' }, { status: 400 });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { name: _name, address: fromAddress } = parseFrom(parsed.data.from);
   if (!isValidEmail(fromAddress)) {
     return Response.json({ error: 'Invalid from address' }, { status: 400 });
