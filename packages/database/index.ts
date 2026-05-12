@@ -28,6 +28,7 @@ function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
     id: payload.id,
   };
 }
+const ORPHAN_RETHREAD_BATCH_SIZE = 100;
 
 /**
  * Fetch the N most recent emails ordered by created_at DESC.
@@ -237,19 +238,20 @@ export async function getThreadListPage(
  * @returns number of emails successfully re-threaded
  */
 export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
-  // Fetch all orphaned emails (batch of 50)
+  // Fetch a single bounded batch of orphaned emails and only resolve them via
+  // RFC 2822 Message-ID lookup. If the parent still does not exist, leave the
+  // orphan on its current thread_id so it is not silently merged by subject.
   const { results: orphans } = await db
     .prepare(
       `SELECT id, in_reply_to
        FROM emails
        WHERE needs_rethreading = 1
-         AND in_reply_to IS NOT NULL
-       ORDER BY created_at ASC
-       LIMIT 50`
+          AND in_reply_to IS NOT NULL
+        ORDER BY created_at ASC
+        LIMIT ?`
     )
+    .bind(ORPHAN_RETHREAD_BATCH_SIZE)
     .all<{ id: string; in_reply_to: string }>();
-
-  if (orphans.length === 0) return 0;
 
   let resolvedCount = 0;
 
@@ -273,6 +275,10 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
       .run();
 
     resolvedCount++;
+  }
+
+  if (resolvedCount > 0) {
+    console.log(`[rethread] resolved ${resolvedCount} orphaned rows`);
   }
 
   return resolvedCount;
