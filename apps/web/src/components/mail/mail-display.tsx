@@ -116,8 +116,8 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
 
 function EmailBody({ email }: { email: Email }) {
   const [body, setBody] = useState<{ body_html: string | null; body_text: string | null }>({
-    body_html: email.body_html,
-    body_text: email.body_text,
+    body_html: null,
+    body_text: null,
   });
   const [isBodyLoading, setIsBodyLoading] = useState(false);
   const [bodyLoadError, setBodyLoadError] = useState(false);
@@ -127,6 +127,10 @@ function EmailBody({ email }: { email: Email }) {
     const controller = new AbortController();
     setIsBodyLoading(true);
     setBodyLoadError(false);
+    setBody({
+      body_html: email.body_html,
+      body_text: email.body_text,
+    });
 
     void fetch(`/api/emails/${encodeURIComponent(email.id)}/body`, {
       method: 'GET',
@@ -148,10 +152,6 @@ function EmailBody({ email }: { email: Email }) {
       .catch((err) => {
         console.error('[mail-display] failed to fetch email body:', err);
         setBodyLoadError(true);
-        setBody({
-          body_html: email.body_html,
-          body_text: email.body_text,
-        });
       })
       .finally(() => {
         setIsBodyLoading(false);

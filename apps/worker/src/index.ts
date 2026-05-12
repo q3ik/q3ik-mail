@@ -181,7 +181,11 @@ async function loadAttachmentContent(
   if (attachment.content) {
     try {
       return decodeBase64ToUint8Array(attachment.content);
-    } catch {
+    } catch (err) {
+      console.warn('[worker] attachment content is not valid base64; storing raw string', {
+        emailId,
+        error: err,
+      });
       return attachment.content;
     }
   }
