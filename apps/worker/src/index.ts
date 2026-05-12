@@ -208,13 +208,25 @@ function sanitizeAttachmentFilename(filename: string, index: number): string {
  * keeps individual CPU slices short.
  */
 function decodeBase64ToUint8Array(base64: string): Uint8Array {
-  // Normalise to standard base64 alphabet (URL-safe variant uses - and _)
+  // Normalise to standard base64 alphabet (URL-safe variant uses - and _),
+  // then restore omitted padding so decoders accept unpadded inputs.
   const normalized = base64.replace(/-/g, '+').replace(/_/g, '/');
-  const CHUNK = 65536;
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+
+  const uint8ArrayWithFromBase64 = Uint8Array as Uint8ArrayConstructor & {
+    fromBase64?: (input: string) => Uint8Array;
+  };
+  if (typeof uint8ArrayWithFromBase64.fromBase64 === 'function') {
+    return uint8ArrayWithFromBase64.fromBase64(padded);
+  }
+
+  const CHUNK = 65_536;
+  console.assert(CHUNK % 4 === 0, 'Base64 chunk size must be a multiple of 4');
+
   const chunks: Uint8Array[] = [];
   let offset = 0;
-  while (offset < normalized.length) {
-    const slice = normalized.slice(offset, offset + CHUNK);
+  while (offset < padded.length) {
+    const slice = padded.slice(offset, offset + CHUNK);
     const binary = atob(slice);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
