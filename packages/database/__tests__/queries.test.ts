@@ -1,4 +1,3 @@
-
 import { describe, it, expect, vi } from 'vitest';
 import { getLatestEmails, 
         getEmailsByThread, 
@@ -261,6 +260,24 @@ describe('getThreadList', () => {
     expect(result[0].references).toBe('<root-001@example.com>');
   });
 
+  it('returns exactly limit rows when more rows exist (no +1 over-fetch)', async () => {
+    // 4 rows available, limit=3 → must return exactly 3 rows and bind exactly 3 (not 4)
+    let lastBoundLimit: number | undefined;
+    const rows = Array.from({ length: 4 }, (_, i) => ({
+      id: String(i + 1),
+      thread_id: `thread-${i + 1}`,
+      created_at: `2026-05-09T${String(15 - i).padStart(2, '0')}:00:00Z`,
+    }));
+    const db = createMockDb(rows, {
+      onBind: (args) => {
+        const last = args.at(-1);
+        if (typeof last === 'number') lastBoundLimit = last;
+      },
+    });
+    const result = await getThreadList(db, 3);
+    expect(result).toHaveLength(3);
+    expect(lastBoundLimit).toBe(3); // Confirms the LIMIT arg is exactly 3, not 4 (limit+1)
+  });
 });
 
 describe('getThreadListPage', () => {
