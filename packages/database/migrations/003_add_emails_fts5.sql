@@ -28,6 +28,8 @@ CREATE TRIGGER IF NOT EXISTS emails_au AFTER UPDATE ON emails BEGIN
 END;
 
 -- Backfill existing rows into the FTS index.
+-- Guard prevents duplicate entries if this migration is applied more than once
+-- (e.g. during local dev resets or accidental Wrangler re-runs).
 INSERT INTO emails_fts(rowid, subject, body_text, from_address, from_name)
 SELECT rowid, subject, body_text, from_address, from_name
 FROM emails
