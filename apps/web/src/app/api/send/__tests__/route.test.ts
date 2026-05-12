@@ -164,6 +164,18 @@ describe('POST /api/send', () => {
     expect(body.error.fieldErrors).toHaveProperty('to');
   });
 
+  // Plus-addressing must pass — used by Resend test inboxes and common in production
+  it('accepts plus-addressed email (user+tag@sub.domain.com) as valid', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: 'user+tag@sub.domain.com', subject: 'Hi', content: 'Hello' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(200);
+  });
+
   it('returns 200 with email id on success and persists the sent email', async () => {
     const randomUuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('message-uuid')

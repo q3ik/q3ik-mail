@@ -71,10 +71,8 @@ async function resolveThreadingMetadata(
   return { threadId: replyToId, needsRethreading: 1 };
 }
 
-
 export async function POST(req: NextRequest) {
   const { env } = getRequestContext();
-  const resend = new Resend(env.RESEND_API_KEY);
 
   let rawBody: unknown;
 
@@ -88,6 +86,10 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
+
+  // Resend client instantiated after validation so the allocation is skipped
+  // on every fast-fail 400 path (malformed JSON, missing/invalid fields).
+  const resend = new Resend(env.RESEND_API_KEY);
 
   const { to, subject, content, replyToId, references } = parsed.data;
 
