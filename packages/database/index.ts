@@ -178,11 +178,17 @@ export async function searchEmails(
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return [];
 
-  const matchQuery = trimmedQuery
+  const terms = trimmedQuery
     .split(/\s+/)
     .filter(Boolean)
+    .map((term) => term.replace(/["'*^(){}[\]:+\\-]/g, '').trim())
+    .filter(Boolean);
+
+  if (terms.length === 0) return [];
+
+  const matchQuery = terms
     .map((term) => `"${term.replace(/"/g, '""')}"`)
-    .join(' AND ');
+    .join(' OR ');
 
   const { results } = await db
     .prepare(

@@ -487,7 +487,7 @@ describe('searchEmails', () => {
 
     expect(preparedSql).toContain('JOIN emails_fts ON emails.rowid = emails_fts.rowid');
     expect(preparedSql).toContain('WHERE emails_fts MATCH ?');
-    expect(boundArgs).toEqual(['"hello" AND """world"']);
+    expect(boundArgs).toEqual(['"hello" OR "world"']);
     expect(result).toHaveLength(1);
     expect(result[0].subject).toBe('Hello FTS');
   });
