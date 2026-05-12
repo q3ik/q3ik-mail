@@ -73,7 +73,7 @@ describe('POST /api/send', () => {
     routeMocks.selectFirst.mockResolvedValue(null);
   });
 
-  it('returns 400 when "to" is missing', async () => {
+  it('returns 400 with Zod flatten shape when "to" is missing', async () => {
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
       method: 'POST',
@@ -82,9 +82,12 @@ describe('POST /api/send', () => {
     });
     const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toHaveProperty('fieldErrors');
+    expect(body.error.fieldErrors).toHaveProperty('to');
   });
 
-  it('returns 400 when "subject" is missing', async () => {
+  it('returns 400 with Zod flatten shape when "subject" is missing', async () => {
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
       method: 'POST',
@@ -93,9 +96,26 @@ describe('POST /api/send', () => {
     });
     const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toHaveProperty('fieldErrors');
+    expect(body.error.fieldErrors).toHaveProperty('subject');
   });
 
-  it('returns 400 when "to" is not a valid email address', async () => {
+  it('returns 400 with Zod flatten shape when "content" is an empty string', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: '' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toHaveProperty('fieldErrors');
+    expect(body.error.fieldErrors).toHaveProperty('content');
+  });
+
+  it('returns 400 with Zod flatten shape when "to" is not a valid email address', async () => {
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
       method: 'POST',
@@ -105,10 +125,24 @@ describe('POST /api/send', () => {
     const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toBe('Invalid or missing email address');
+    expect(body.error).toHaveProperty('fieldErrors');
+    expect(body.error.fieldErrors).toHaveProperty('to');
   });
 
-  // Boundary cases that the original indexOf-based check passed incorrectly
+  it('returns 400 for malformed JSON body', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('Invalid JSON body');
+  });
+
+  // Boundary cases for invalid email formats
   it.each([
     ['trailing dot in domain', 'a@b.'],
     ['leading dot in domain', 'a@.b.com'],
@@ -126,7 +160,8 @@ describe('POST /api/send', () => {
     const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toBe('Invalid or missing email address');
+    expect(body.error).toHaveProperty('fieldErrors');
+    expect(body.error.fieldErrors).toHaveProperty('to');
   });
 
   it('returns 200 with email id on success and persists the sent email', async () => {

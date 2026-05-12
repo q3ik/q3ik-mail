@@ -2,6 +2,15 @@ import { Resend } from 'resend';
 import { NextRequest } from 'next/server';
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { captureException } from '@/lib/sentry';
+import { z } from 'zod';
+
+const SendSchema = z.object({
+  to: z.string().email(),
+  subject: z.string().min(1),
+  content: z.string().min(1),
+  replyToId: z.string().optional(),
+  references: z.string().optional(),
+});
 
 export const runtime = 'edge';
 
@@ -62,61 +71,25 @@ async function resolveThreadingMetadata(
   return { threadId: replyToId, needsRethreading: 1 };
 }
 
-/**
- * Validates an email address using a structurally sound approach:
- * - Exactly one '@' separator (split-based, not indexOf)
- * - Non-empty local and domain parts
- * - Domain contains a dot, not at start or end
- * - No whitespace anywhere
- *
- * Intentionally does not use a backtracking regex (ReDoS-safe).
- */
-function isValidEmail(value: string): boolean {
-  if (typeof value !== 'string' || value.length === 0) return false;
-  const parts = value.split('@');
-  // Exactly two parts: local @ domain
-  if (parts.length !== 2) return false;
-  const [local, domain] = parts;
-  if (local.length === 0) return false;
-  if (domain.length === 0) return false;
-  // No whitespace anywhere in the address
-  if (/\s/.test(value)) return false;
-  // Domain must contain a dot, not at start or end
-  const dotIndex = domain.indexOf('.');
-  if (dotIndex <= 0 || dotIndex === domain.length - 1) return false;
-  return true;
-}
 
 export async function POST(req: NextRequest) {
   const { env } = getRequestContext();
   const resend = new Resend(env.RESEND_API_KEY);
 
-  let body: {
-    to?: string;
-    subject?: string;
-    content?: string;
-    replyToId?: string;
-    references?: string;
-  };
+  let rawBody: unknown;
 
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { to, subject, content, replyToId, references } = body;
-
-  // Validate all required fields with consistent semantics
-  if (!subject || !content) {
-    return Response.json({ error: 'Missing required fields: subject, content' }, { status: 400 });
+  const parsed = SendSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  if (!isValidEmail(to ?? '')) {
-    return Response.json({ error: 'Invalid or missing email address' }, { status: 400 });
-  }
-
-  const toAddress = to as string;
+  const { to, subject, content, replyToId, references } = parsed.data;
 
   try {
     const sentMessageId = `<${crypto.randomUUID()}@q3ik.com>`;
@@ -128,7 +101,7 @@ export async function POST(req: NextRequest) {
     );
     const result = await resend.emails.send({
       from: `${APP_FROM_NAME} <${APP_FROM_ADDRESS}>`,
-      to: [toAddress],
+      to: [to],
       subject,
       text: content,
       headers: buildEmailHeaders(sentMessageId, replyToId, references),
@@ -170,7 +143,7 @@ export async function POST(req: NextRequest) {
           threadId,
           APP_FROM_ADDRESS,
           APP_FROM_NAME,
-          toAddress,
+          to,
           subject,
           content,
           null,
