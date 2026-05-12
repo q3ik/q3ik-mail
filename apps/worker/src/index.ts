@@ -52,7 +52,7 @@ function parseResendReceivedEmail(payload: unknown): ResendReceivedEmail | null 
 
   return {
     from: typeof email.from === 'string' ? email.from : undefined,
-    to: typeof email.to === 'string' || Array.isArray(email.to) ? email.to : undefined,
+    to: typeof email.to === 'string' || Array.isArray(email.to) ? email.to as string | string[] : undefined,
     subject: typeof email.subject === 'string' ? email.subject : undefined,
     text: email.text as string | null,
     html: typeof email.html === 'string' || email.html === null ? email.html : undefined,
