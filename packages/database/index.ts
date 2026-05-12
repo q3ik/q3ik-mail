@@ -155,8 +155,9 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
        WHERE needs_rethreading = 1
           AND in_reply_to IS NOT NULL
         ORDER BY created_at ASC
-        LIMIT ${ORPHAN_RETHREAD_BATCH_SIZE}`
+        LIMIT ?`
     )
+    .bind(ORPHAN_RETHREAD_BATCH_SIZE)
     .all<{ id: string; in_reply_to: string }>();
 
   let resolvedCount = 0;
@@ -183,7 +184,9 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     resolvedCount++;
   }
 
-  console.log(`[rethread] resolved ${resolvedCount} orphaned rows`);
+  if (resolvedCount > 0) {
+    console.log(`[rethread] resolved ${resolvedCount} orphaned rows`);
+  }
 
   return resolvedCount;
 }

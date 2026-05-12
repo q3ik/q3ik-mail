@@ -36,14 +36,25 @@ const handler: ExportedHandler<Env> = {
   // --------------------------------------------------------------------------
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      resolveOrphanedThreads(env.DB).catch((err) => {
-        console.error('[cron/rethread] resolveOrphanedThreads failed:', err);
-        if (env.SENTRY_DSN) {
-          Sentry.captureException(err, {
-            tags: { layer: 'worker', operation: 'cron.rethread' },
-          });
-        }
-      })
+      resolveOrphanedThreads(env.DB)
+        .then((resolved) => {
+          if (resolved > 0 && env.SENTRY_DSN) {
+            Sentry.addBreadcrumb({
+              category: 'cron.rethread',
+              level: 'info',
+              message: '[cron/rethread] resolved orphaned rows',
+              data: { resolvedCount: resolved },
+            });
+          }
+        })
+        .catch((err) => {
+          console.error('[cron/rethread] resolveOrphanedThreads failed:', err);
+          if (env.SENTRY_DSN) {
+            Sentry.captureException(err, {
+              tags: { layer: 'worker', operation: 'cron.rethread' },
+            });
+          }
+        })
     );
   },
 
