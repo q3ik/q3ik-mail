@@ -56,7 +56,6 @@ function getInsertCall(): { sql: string; boundValues: unknown[] } {
   expect(insertIdx).toBeGreaterThanOrEqual(0);
 
   // SELECTs use selectBind, so insertBind only records INSERT parameter lists.
-  expect(routeMocks.insertBind).toHaveBeenCalledTimes(1);
   const firstInsertBindCall = routeMocks.insertBind.mock.calls[0];
   expect(firstInsertBindCall).toBeDefined();
   return {
@@ -151,6 +150,7 @@ describe('POST /api/send', () => {
       const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
       expect(callArgs.headers?.['Message-ID']).toBe('<message-uuid@q3ik.com>');
 
+      expect(routeMocks.insertBind).toHaveBeenCalledTimes(1);
       const { sql, boundValues } = getInsertCall();
       expect(sql).toContain('1, 1, ?');
       expect(boundValues).toEqual([
@@ -191,7 +191,7 @@ describe('POST /api/send', () => {
     expect(body.error).toBe('Failed to send email');
   });
 
-  it('returns 500 without sending when thread lookup fails before send', async () => {
+  it('returns 500 and skips send when thread lookup fails', async () => {
     routeMocks.selectFirst.mockRejectedValueOnce(new Error('thread lookup failed'));
     const MockedResend = Resend as MockedClass<typeof Resend>;
     const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'sent-id' }, error: null });
@@ -250,6 +250,7 @@ describe('POST /api/send', () => {
       expect(callArgs.headers?.['References']).toBe('<root@example.com> <msg-1@example.com>');
       expect(routeMocks.selectBind).toHaveBeenCalledWith('<msg-1@example.com>');
 
+      expect(routeMocks.insertBind).toHaveBeenCalledTimes(1);
       const { sql, boundValues } = getInsertCall();
       expect(sql).toContain('1, 1, ?');
       expect(boundValues).toEqual([
@@ -316,6 +317,7 @@ describe('POST /api/send', () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ id: null });
       expect(routeMocks.insertBind).not.toHaveBeenCalled();
+      expect(routeMocks.captureException).not.toHaveBeenCalled();
       expect(warnSpy).toHaveBeenCalledWith(
         '[api/send] Resend returned success without an id; skipping sent-email persistence'
       );
