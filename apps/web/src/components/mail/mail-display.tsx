@@ -120,11 +120,13 @@ function EmailBody({ email }: { email: Email }) {
     body_text: email.body_text,
   });
   const [isBodyLoading, setIsBodyLoading] = useState(false);
+  const [bodyLoadError, setBodyLoadError] = useState(false);
   const [sanitizedHtml, setSanitizedHtml] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     setIsBodyLoading(true);
+    setBodyLoadError(false);
 
     void fetch(`/api/emails/${encodeURIComponent(email.id)}/body`, {
       method: 'GET',
@@ -144,6 +146,7 @@ function EmailBody({ email }: { email: Email }) {
         });
       })
       .catch(() => {
+        setBodyLoadError(true);
         setBody({
           body_html: email.body_html,
           body_text: email.body_text,
@@ -156,7 +159,7 @@ function EmailBody({ email }: { email: Email }) {
     return () => {
       controller.abort();
     };
-  }, [email.id, email.body_html, email.body_text]);
+  }, [email.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,6 +216,22 @@ function EmailBody({ email }: { email: Email }) {
       <pre className="whitespace-pre-wrap text-sm text-foreground font-sans break-words">
         {body.body_text}
       </pre>
+    );
+  }
+
+  if (isBodyLoading) {
+    return (
+      <p aria-live="polite" className="text-sm text-muted-foreground italic">
+        Loading email content...
+      </p>
+    );
+  }
+
+  if (bodyLoadError) {
+    return (
+      <p className="text-sm text-muted-foreground italic">
+        Unable to load email body.
+      </p>
     );
   }
 
