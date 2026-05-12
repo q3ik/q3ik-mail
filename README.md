@@ -67,6 +67,24 @@ pnpm run deploy
 
 ```
 
+### 5. Cloudflare Access Hardening
+
+After deploying the Pages app, configure the Access Application in the [Zero Trust dashboard](https://one.dash.cloudflare.com/) under **Access → Applications → q3ik-mail → Additional Settings → Cookie settings**:
+
+| Setting | Required value | Why |
+|---|---|---|
+| **HTTP Only** | **ON** | Prevents client-side JavaScript from reading the Access JWT cookie, mitigating XSS-based token theft. |
+| **Binding Cookie** | **ON** | Binds the JWT session to the user's TLS connection, protecting against cookie replay attacks. Safe for all web app clients (do not enable for SSH/RDP applications). |
+| **Same Site Attribute** | `Strict` (recommended) | Prevents the session cookie from being sent in cross-site requests. Set to `Lax` only if you need OAuth redirects from third-party IdPs to carry the session. |
+
+**Copy the AUD tag:**
+1. In **Access → Applications**, open the q3ik-mail app and go to **Additional Settings → AUD tag**.
+2. Copy the token value.
+3. Set it as `CLOUDFLARE_ACCESS_AUD` in your Pages deployment environment variables (`wrangler secret put CLOUDFLARE_ACCESS_AUD` or via the Cloudflare dashboard).
+4. Set `CLOUDFLARE_TEAM_DOMAIN` to your Zero Trust team domain (e.g. `your-team.cloudflareaccess.com`).
+
+The middleware in `apps/web/src/middleware.ts` verifies the Access JWT on every non-public request. With HTTP Only and Binding Cookie enabled, Cloudflare delivers the JWT as a `CF_Authorization` cookie for browser sessions and as a `CF-Access-Jwt-Assertion` header for API/service token requests. The middleware handles both paths.
+
 ## 🧠 Technical Highlights
 
 * **Advanced Threading:** The ingestion worker walks up `In-Reply-To` and `Message-ID` chains to group emails into threads.
