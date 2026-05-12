@@ -268,9 +268,7 @@ describe('Mail — markAsRead error recovery', () => {
       />
     );
 
-    act(() => {
-      screen.getByTestId('load-more').click();
-    });
+    screen.getByTestId('load-more').click();
 
     await waitFor(() =>
       expect(screen.queryByTestId('thread-thread-def')).not.toBeNull()
@@ -282,5 +280,38 @@ describe('Mail — markAsRead error recovery', () => {
     );
     expect(screen.getAllByTestId(`thread-${THREAD_ID}`)).toHaveLength(1);
     expect(screen.queryByTestId('load-more')).toBeNull();
+  });
+
+  it('keeps one row when load-more payload repeats an existing thread_id', async () => {
+    const duplicateThread = makeThread({
+      id: 'email-2',
+      thread_id: THREAD_ID,
+      resend_id: 'resend-2',
+      created_at: '2024-01-02T00:00:00Z',
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        threads: [duplicateThread],
+        nextCursor: null,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <Mail
+        threads={[makeThread()]}
+        selectedThread={[]}
+        defaultSelectedId={undefined}
+        initialNextCursor={encodeCursor('2024-01-02T00:00:00Z', 'email-1')}
+      />
+    );
+
+    screen.getByTestId('load-more').click();
+
+    await waitFor(() => expect(screen.queryByTestId('load-more')).toBeNull());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByTestId(`thread-${THREAD_ID}`)).toHaveLength(1);
   });
 });

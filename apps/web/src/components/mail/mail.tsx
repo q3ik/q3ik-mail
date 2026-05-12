@@ -67,6 +67,8 @@ export function Mail({
         nextCursor: string | null;
       };
 
+      // Deduplicate by thread_id when appending in case cursor drift or
+      // concurrent inbound email causes an existing thread to reappear.
       setThreads((prev) => {
         const seenThreadIds = new Set(prev.map((thread) => thread.thread_id));
         return [
