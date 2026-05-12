@@ -11,6 +11,7 @@ interface MailListProps {
   onSelectThread: (threadId: string) => void;
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
+  isSearching?: boolean;
 }
 
 export function MailList({
@@ -19,7 +20,16 @@ export function MailList({
   onSelectThread,
   onLoadMore,
   isLoadingMore = false,
+  isSearching = false,
 }: MailListProps) {
+  if (isSearching) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Searching…
+      </div>
+    );
+  }
+
   if (threads.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
