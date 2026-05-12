@@ -128,8 +128,11 @@ export async function validateCfAccessJwt(
   let header: JwtHeader;
   let payload: JwtPayload;
   try {
-    header = JSON.parse(new TextDecoder().decode(base64urlDecode(rawHeader))) as JwtHeader;
-    payload = JSON.parse(new TextDecoder().decode(base64urlDecode(rawPayload))) as JwtPayload;
+    header = JSON.parse(new TextDecoder().decode(base64urlDecode(rawHeader)));
+    payload = JSON.parse(new TextDecoder().decode(base64urlDecode(rawPayload)));
+    if (!header || typeof header !== 'object' || !payload || typeof payload !== 'object') {
+      throw new Error();
+    }
   } catch {
     return { ok: false, error: 'Failed to decode JWT parts' };
   }
