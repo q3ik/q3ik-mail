@@ -216,16 +216,25 @@ export async function migrateEmailBodiesToR2(
         });
       }
 
+      const clearBodyText = bodyTextKey !== null && row.body_text !== null;
+      const clearBodyHtml = bodyHtmlKey !== null && row.body_html !== null;
+
       await db
         .prepare(
           `UPDATE emails
-           SET body_text = CASE WHEN ? IS NOT NULL THEN NULL ELSE body_text END,
-               body_html = CASE WHEN ? IS NOT NULL THEN NULL ELSE body_html END,
+           SET body_text = CASE WHEN ? = 1 THEN NULL ELSE body_text END,
+               body_html = CASE WHEN ? = 1 THEN NULL ELSE body_html END,
                body_text_key = COALESCE(?, body_text_key),
                body_html_key = COALESCE(?, body_html_key)
            WHERE id = ?`
         )
-        .bind(bodyTextKey, bodyHtmlKey, bodyTextKey, bodyHtmlKey, row.id)
+        .bind(
+          clearBodyText ? 1 : 0,
+          clearBodyHtml ? 1 : 0,
+          bodyTextKey,
+          bodyHtmlKey,
+          row.id
+        )
         .run();
 
       migrated++;

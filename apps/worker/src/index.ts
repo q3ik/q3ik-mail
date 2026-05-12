@@ -170,24 +170,17 @@ function sanitizeAttachmentFilename(filename: string, index: number): string {
 
 function decodeBase64ToUint8Array(base64: string): Uint8Array {
   const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
 async function loadAttachmentContent(
   attachment: ResendReceivedAttachment,
   emailId: string,
   resendApiKey: string
-): Promise<ArrayBuffer | string | null> {
+): Promise<ArrayBuffer | Uint8Array | string | null> {
   if (attachment.content) {
     try {
-      const bytes = decodeBase64ToUint8Array(attachment.content);
-      const arrayBuffer = new ArrayBuffer(bytes.byteLength);
-      new Uint8Array(arrayBuffer).set(bytes);
-      return arrayBuffer;
+      return decodeBase64ToUint8Array(attachment.content);
     } catch {
       return attachment.content;
     }
@@ -436,7 +429,7 @@ const handler: ExportedHandler<Env> = {
         attachment.filename ?? `attachment-${index + 1}`,
         index
       );
-      let attachmentData: ArrayBuffer | string | null = null;
+      let attachmentData: ArrayBuffer | Uint8Array | string | null = null;
       try {
         attachmentData = await loadAttachmentContent(
           attachment,
