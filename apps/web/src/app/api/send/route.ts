@@ -1,26 +1,65 @@
 import { Resend } from 'resend';
 import { NextRequest } from 'next/server';
 import { getRequestContext } from '@cloudflare/next-on-pages';
+import { captureException } from '@/lib/sentry';
 
 export const runtime = 'edge';
 
-function buildEmailHeaders(
+const APP_FROM_ADDRESS = 'mail@q3ik.com';
+const APP_FROM_NAME = 'q3ik Mail';
+
+function buildReferencesHeader(
   replyToId?: string,
   references?: string
-): Record<string, string> | undefined {
-  if (!replyToId) return undefined;
+): string | null {
+  if (!replyToId) return null;
   // RFC 2822 References must be a space-separated chain of all ancestor
   // Message-IDs. `references` is the persisted References value from the
   // replied-to email (stored in D1). Appending `replyToId` grows the chain
   // by one hop for each reply level. If references is absent (e.g. the
   // replied-to email is the thread root), seed the chain with replyToId alone.
-  const updatedReferences = references
+  return references
     ? `${references} ${replyToId}`
     : replyToId;
+}
+
+function buildEmailHeaders(
+  messageId: string,
+  replyToId?: string,
+  references?: string
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Message-ID': messageId,
+  };
+  const updatedReferences = buildReferencesHeader(replyToId, references);
+  if (!replyToId || !updatedReferences) return headers;
+
   return {
+    ...headers,
     'In-Reply-To': replyToId,
     References: updatedReferences,
   };
+}
+
+async function resolveThreadingMetadata(
+  db: D1Database,
+  replyToId: string | undefined,
+  messageId: string
+): Promise<{ threadId: string; needsRethreading: 0 | 1 }> {
+  if (!replyToId) {
+    return { threadId: messageId, needsRethreading: 0 };
+  }
+
+  const parentRow = await db
+    .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
+    .bind(replyToId)
+    .first<{ thread_id: string }>();
+
+  if (parentRow) {
+    return { threadId: parentRow.thread_id, needsRethreading: 0 };
+  }
+
+  return { threadId: replyToId, needsRethreading: 1 };
 }
 
 /**
@@ -77,13 +116,22 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Invalid or missing email address' }, { status: 400 });
   }
 
+  const toAddress = to as string;
+
   try {
+    const sentMessageId = `<${crypto.randomUUID()}@q3ik.com>`;
+    const persistedReferences = buildReferencesHeader(replyToId, references);
+    const { threadId, needsRethreading } = await resolveThreadingMetadata(
+      env.DB,
+      replyToId,
+      sentMessageId
+    );
     const result = await resend.emails.send({
-      from: 'q3ik Mail <mail@q3ik.com>',
-      to: [to as string],
+      from: `${APP_FROM_NAME} <${APP_FROM_ADDRESS}>`,
+      to: [toAddress],
       subject,
       text: content,
-      headers: buildEmailHeaders(replyToId, references),
+      headers: buildEmailHeaders(sentMessageId, replyToId, references),
     });
 
     if (result.error) {
@@ -97,7 +145,51 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'Failed to send email' }, { status: 500 });
     }
 
-    return Response.json({ id: result.data?.id }, { status: 200 });
+    const resendId = result.data?.id;
+    if (!resendId) {
+      console.warn('[api/send] Resend returned success without an id; skipping sent-email persistence');
+      return Response.json({ id: null }, { status: 200 });
+    }
+
+    try {
+      const sentEmailRowId = crypto.randomUUID();
+      // Keep the INSERT column list aligned with the bound values below:
+      // `is_read` and `is_sent` are intentional literals because sent mail
+      // should always be persisted as read + outbound.
+      // This write is best-effort because the email has already been accepted
+      // by Resend; surfacing a 500 here would risk duplicate sends on retry.
+      await env.DB.prepare(`
+        INSERT OR IGNORE INTO emails
+          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+      `)
+        .bind(
+          sentEmailRowId,
+          resendId,
+          threadId,
+          APP_FROM_ADDRESS,
+          APP_FROM_NAME,
+          toAddress,
+          subject,
+          content,
+          null,
+          sentMessageId,
+          replyToId ?? null,
+          persistedReferences,
+          needsRethreading
+        )
+        .run();
+    } catch (error) {
+      console.error('[api/send] Failed to persist sent email to D1:', error);
+      try {
+        await captureException(error);
+      } catch (captureError) {
+        console.error('[api/send] Failed to capture sent-email persistence error:', captureError);
+      }
+    }
+
+    return Response.json({ id: resendId }, { status: 200 });
   } catch (error) {
     console.error('Failed to send email:', error);
     return Response.json({ error: 'Failed to send email' }, { status: 500 });
