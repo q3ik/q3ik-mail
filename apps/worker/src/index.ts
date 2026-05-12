@@ -19,7 +19,7 @@ interface ResendReceivedEmail {
 
 function parseResendReceivedEmail(payload: unknown): ResendReceivedEmail | null {
   if (!payload || typeof payload !== 'object') return null;
-  const email = payload as Record<string, unknown>;
+  const email = payload as Record<string, any>;
 
   if (!('text' in email) || (email.text !== null && typeof email.text !== 'string')) {
     return null;
