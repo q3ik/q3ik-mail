@@ -16,6 +16,14 @@ interface AgentMailMessagesResponse {
   messages: AgentMailMessage[];
 }
 
+export type AgentMailMessageFilter = (message: AgentMailMessage) => boolean;
+
+export interface WaitForEmailOptions {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  filter?: AgentMailMessageFilter;
+}
+
 export class AgentMailClient {
   private readonly baseUrl: string;
 
@@ -26,7 +34,11 @@ export class AgentMailClient {
     this.baseUrl = options?.baseUrl ?? 'https://api.agentmail.to/v1';
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  private async request<T>(
+    path: string,
+    init?: RequestInit,
+    options?: { allowStatuses?: number[]; expectJson?: boolean }
+  ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
@@ -35,10 +47,13 @@ export class AgentMailClient {
       },
     });
 
-    if (!res.ok) {
+    const allowStatuses = options?.allowStatuses ?? [];
+    if (!res.ok && !allowStatuses.includes(res.status)) {
       const errorBody = await res.text();
       throw new Error(`AgentMail API request failed (${res.status}): ${errorBody}`);
     }
+
+    if (options?.expectJson === false || res.status === 204) return undefined as T;
 
     return res.json() as Promise<T>;
   }
@@ -47,29 +62,40 @@ export class AgentMailClient {
     return this.request<AgentMailMailbox>('/mailboxes', { method: 'POST' });
   }
 
-  async deleteMailbox(mailboxId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/mailboxes/${mailboxId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
-
-    if (!res.ok && res.status !== 404) {
-      const errorBody = await res.text();
-      throw new Error(`AgentMail mailbox cleanup failed (${res.status}): ${errorBody}`);
-    }
+  async listMessages(mailboxId: string): Promise<AgentMailMessage[]> {
+    const data = await this.request<AgentMailMessagesResponse>(`/mailboxes/${mailboxId}/messages`);
+    return data.messages;
   }
 
-  async waitForEmail(mailboxId: string, timeoutMs = 30_000): Promise<AgentMailMessage> {
+  async deleteMailbox(mailboxId: string): Promise<void> {
+    await this.request<void>(
+      `/mailboxes/${mailboxId}`,
+      { method: 'DELETE' },
+      { allowStatuses: [404], expectJson: false }
+    );
+  }
+
+  async waitForEmail(
+    mailboxId: string,
+    timeoutOrOptions: number | WaitForEmailOptions = 30_000
+  ): Promise<AgentMailMessage> {
+    const timeoutMs =
+      typeof timeoutOrOptions === 'number' ? timeoutOrOptions : (timeoutOrOptions.timeoutMs ?? 30_000);
+    const pollIntervalMs =
+      typeof timeoutOrOptions === 'number'
+        ? 2_000
+        : (timeoutOrOptions.pollIntervalMs ?? 2_000);
+    const filter = typeof timeoutOrOptions === 'number' ? undefined : timeoutOrOptions.filter;
     const start = Date.now();
-    const pollIntervalMs = 2_000;
 
     while (true) {
       if (Date.now() - start >= timeoutMs) break;
-      const data = await this.request<AgentMailMessagesResponse>(`/mailboxes/${mailboxId}/messages`);
-      if (data.messages.length > 0) return data.messages[0];
+      const messages = await this.listMessages(mailboxId);
+      const message = filter ? messages.find(filter) : messages[0];
+      if (message) return message;
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
 
-    throw new Error('Timed out waiting for email');
+    throw new Error(filter ? 'Timed out waiting for matching email' : 'Timed out waiting for email');
   }
 }
