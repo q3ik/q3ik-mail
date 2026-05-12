@@ -214,21 +214,51 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+
       - name: Build web app
-        run: pnpm --filter web run build:cf
+        run: pnpm --filter @q3ik-mail/web run build:cf
+
       - name: Apply D1 migrations (local)
         run: >
           npx wrangler d1 migrations apply q3ik-mail-db
           --local
           --persist-to $GITHUB_WORKSPACE/.wrangler/state
         working-directory: apps/worker
+
       - name: Install Playwright Chromium
-        run: pnpm --filter web exec playwright install chromium --with-deps
+        run: pnpm --filter @q3ik-mail/web exec playwright install chromium --with-deps
+
+      # Issue 6 fix: start the app via wrangler pages dev (same as the
+      # existing e2e job) and wait for it to be ready before running the
+      # spec. Without this step every request.get('/api/...') in the
+      # mail-delivery spec would fail with ERR_CONNECTION_REFUSED.
+      - name: Start app (wrangler pages dev)
+        run: >
+          npx wrangler pages dev .vercel/output/static
+          --port 3000
+          --persist-to $GITHUB_WORKSPACE/.wrangler/state
+          &
+        working-directory: apps/web
+
+      - name: Wait for app to be ready
+        run: npx wait-on http://localhost:3000 --timeout 60000
+
       - name: Run agentmail.to E2E
-        run: pnpm --filter web exec playwright test e2e/mail-delivery.spec.ts
+        run: pnpm --filter @q3ik-mail/web exec playwright test e2e/mail-delivery.spec.ts
         env:
           AGENTMAIL_API_KEY: ${{ secrets.AGENTMAIL_API_KEY }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # RESEND_API_KEY is intentionally omitted — Scenario A now routes
+          # through /api/trigger-inbound; the key never touches PW traces.
+          E2E_INBOUND_FROM: ${{ secrets.E2E_INBOUND_FROM }}
+          E2E_INBOUND_ADDRESS: ${{ secrets.E2E_INBOUND_ADDRESS }}
           BASE_URL: http://localhost:3000
           CI: true
           GITHUB_WORKSPACE: ${{ github.workspace }}
+
+      - name: Upload mail E2E report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mail-e2e-report
+          path: apps/web/playwright-report/
+          retention-days: 14

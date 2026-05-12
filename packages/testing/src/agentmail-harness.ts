@@ -68,9 +68,17 @@ export class AgentMailClient {
       throw new Error(`AgentMail API request failed (${res.status}): ${errorBody}`);
     }
 
+    // Caller explicitly opted out of JSON parsing — return without reading body.
     if (options?.expectJson === false) return;
+
+    // Issue 2 fix: a 204 on the default path returns undefined rather than
+    // throwing. The caller receives undefined (typed as T | void) and can
+    // handle it. Only throw when the caller explicitly required JSON (expectJson: true).
     if (res.status === 204) {
-      throw new Error(`AgentMail API request expected JSON but received 204 No Content for ${path}`);
+      if (options?.expectJson === true) {
+        throw new Error(`AgentMail API request expected JSON but received 204 No Content for ${path}`);
+      }
+      return undefined as unknown as T;
     }
 
     return res.json() as Promise<T>;
@@ -106,14 +114,19 @@ export class AgentMailClient {
         ? DEFAULT_POLL_INTERVAL_MS
         : (timeoutOrOptions.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
     const filter = typeof timeoutOrOptions === 'number' ? undefined : timeoutOrOptions.filter;
-    const start = Date.now();
 
-    while (true) {
-      if (Date.now() - start >= timeoutMs) break;
+    // Issue 1 fix: use a hard deadline so the loop never overshoots timeoutMs.
+    // The sleep is capped to the remaining budget so the last iteration does
+    // not push the total elapsed time past the caller's deadline.
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
       const messages = await this.listMessages(mailboxId);
       const message = filter ? messages.find(filter) : messages[0];
       if (message) return message;
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)));
     }
 
     throw new Error(filter ? 'Timed out waiting for matching email' : 'Timed out waiting for email');

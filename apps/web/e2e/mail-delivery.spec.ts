@@ -3,9 +3,13 @@ import { AgentMailClient } from '@q3ik-mail/testing';
 import type { AgentMailMessage } from '@q3ik-mail/testing';
 
 const agentmailApiKey = process.env.AGENTMAIL_API_KEY;
-const resendApiKey = process.env.RESEND_API_KEY;
+// Issue 3 fix: RESEND_API_KEY is no longer read in this file. Scenario A
+// sends via the app's own /api/trigger-inbound endpoint so the key is
+// never present in Playwright's browser-context request traces or reports.
 const inboundAddress = process.env.E2E_INBOUND_ADDRESS ?? 'mail@q3ik.com';
-const inboundFromAddress = process.env.E2E_INBOUND_FROM ?? 'mail@q3ik.com';
+// Issue 4 fix: E2E_INBOUND_FROM is required — no default that equals
+// inboundAddress. Scenario A skips explicitly when the var is absent.
+const inboundFromAddress = process.env.E2E_INBOUND_FROM;
 const timeoutMs = Number.parseInt(process.env.AGENTMAIL_TIMEOUT_MS ?? '30000', 10);
 const isPullRequestEvent = process.env.GITHUB_EVENT_NAME === 'pull_request';
 
@@ -46,27 +50,32 @@ test.describe('agentmail delivery', () => {
   });
 
   test('Scenario A: inbound routing persists email data', async ({ request }) => {
+    // Issue 4 fix: require E2E_INBOUND_FROM; self-send to production inbox
+    // is no longer possible via the default value.
     test.skip(
-      !resendApiKey,
-      'RESEND_API_KEY is required for inbound routing E2E'
+      !inboundFromAddress,
+      'E2E_INBOUND_FROM is required for inbound routing E2E — set it to a Resend sandbox sender'
     );
 
     const uniqueSubject = `AgentMail inbound ${Date.now()}`;
-    const senderAddress = inboundFromAddress;
+    const senderAddress = inboundFromAddress!;
 
-    const resendResponse = await request.post('https://api.resend.com/emails', {
-      headers: {
-        Authorization: `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
-      },
+    // Issue 3 fix: route the send through the app's own internal endpoint
+    // instead of calling api.resend.com directly. This keeps the Resend API
+    // key out of Playwright's browser-context traces and HTML reports.
+    const triggerResponse = await request.post('/api/trigger-inbound', {
       data: {
         from: senderAddress,
-        to: [inboundAddress],
+        to: inboundAddress,
         subject: uniqueSubject,
         text: 'Inbound routing scenario message',
       },
     });
-    expect(resendResponse.ok()).toBeTruthy();
+    expect(triggerResponse.ok()).toBeTruthy();
+
+    // Issue 5 fix: capture the matched row directly from the poll closure
+    // and eliminate the redundant second GET + the non-null ! assertion.
+    let persistedRow: Record<string, unknown> | null = null;
 
     await expect
       .poll(
@@ -74,29 +83,23 @@ test.describe('agentmail delivery', () => {
           const response = await request.get('/api/emails?limit=100');
           if (!response.ok()) return null;
           const payload = (await response.json()) as { threads?: Array<Record<string, unknown>> };
-          return payload.threads?.find((row) => row.subject === uniqueSubject) ?? null;
+          persistedRow = payload.threads?.find((row) => row.subject === uniqueSubject) ?? null;
+          return persistedRow;
         },
         { timeout: timeoutMs, intervals: [2_000] }
       )
       .toMatchObject({ from_address: senderAddress, subject: uniqueSubject });
 
-    const verificationResponse = await request.get('/api/emails?limit=100');
-    expect(verificationResponse.ok()).toBeTruthy();
-    const verificationPayload = (await verificationResponse.json()) as {
-      threads?: Array<Record<string, unknown>>;
-    };
-    const persistedRow = verificationPayload.threads?.find((row) => row.subject === uniqueSubject)!;
-    expect(persistedRow).toBeTruthy();
-
-    expect(typeof persistedRow.thread_id).toBe('string');
-    if (typeof persistedRow.message_id === 'string' && persistedRow.message_id.length > 0) {
-      expect(persistedRow.thread_id).toBe(persistedRow.message_id);
+    // persistedRow is guaranteed non-null here: expect.poll only resolves
+    // when the closure returned a truthy value, which set persistedRow.
+    expect(typeof (persistedRow as Record<string, unknown>).thread_id).toBe('string');
+    const row = persistedRow as Record<string, unknown>;
+    if (typeof row.message_id === 'string' && row.message_id.length > 0) {
+      expect(row.thread_id).toBe(row.message_id);
     }
   });
 
   test('Scenario B: outbound loopback preserves reply headers', async ({ request }) => {
-    test.skip(!resendApiKey, 'RESEND_API_KEY is required for outbound loopback E2E');
-
     const outboundSubject = `AgentMail loopback ${Date.now()}`;
     const response = await request.post('/api/send', {
       data: {
