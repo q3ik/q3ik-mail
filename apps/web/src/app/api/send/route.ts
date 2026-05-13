@@ -38,6 +38,9 @@ export const runtime = 'edge';
 const APP_FROM_ADDRESS = 'mail@q3ik.com';
 const APP_FROM_NAME = 'q3ik Mail';
 
+export const MAX_REFERENCES_IDS = 12;
+export const MAX_REFERENCES_BYTES = 2000;
+
 function buildReferencesHeader(
   replyToId?: string,
   references?: string
@@ -48,9 +51,29 @@ function buildReferencesHeader(
   // replied-to email (stored in D1). Appending `replyToId` grows the chain
   // by one hop for each reply level. If references is absent (e.g. the
   // replied-to email is the thread root), seed the chain with replyToId alone.
-  return references
+  const chain = references
     ? `${references} ${replyToId}`
     : replyToId;
+
+  const ids = chain.split(/\s+/).filter(Boolean);
+  if (ids.length === 0) return null;
+
+  const rootId = ids[0];
+  const tail = ids.slice(1);
+  const dedupedTail = tail.filter((id) => id !== rootId);
+
+  const maxTailIds = Math.max(0, MAX_REFERENCES_IDS - 1);
+  let selectedTail = dedupedTail.slice(-maxTailIds);
+  let selected = [rootId, ...selectedTail];
+
+  let joined = selected.join(' ');
+  while (selectedTail.length > 0 && joined.length > MAX_REFERENCES_BYTES) {
+    selectedTail = selectedTail.slice(1);
+    selected = [rootId, ...selectedTail];
+    joined = selected.join(' ');
+  }
+
+  return joined;
 }
 
 function buildEmailHeaders(

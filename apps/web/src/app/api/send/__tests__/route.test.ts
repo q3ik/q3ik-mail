@@ -401,6 +401,104 @@ describe('POST /api/send', () => {
     }
   });
 
+  it('omits References when replyToId is absent (empty references)', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        to: 'a@b.com',
+        subject: 'Hi',
+        content: 'Hello',
+        references: '<root@example.com>',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    await POST(req as unknown as NextRequest);
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const sendSpy = MockedResend.mock.results[0]?.value.emails.send as ReturnType<typeof vi.fn>;
+    const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
+    expect(callArgs.headers?.['References']).toBeUndefined();
+  });
+
+  it('keeps full short references chain when below caps (no truncation)', async () => {
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'r2' }, error: null });
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
+
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        to: 'a@b.com',
+        subject: 'Re: Hi',
+        content: 'Hi back',
+        replyToId: '<msg-3@example.com>',
+        references: '<root@example.com> <msg-1@example.com> <msg-2@example.com>',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    await POST(req as unknown as NextRequest);
+    const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
+    expect(callArgs.headers?.['References']).toBe(
+      '<root@example.com> <msg-1@example.com> <msg-2@example.com> <msg-3@example.com>'
+    );
+  });
+
+  it('truncates long references chain preserving root and most recent ancestors', async () => {
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'r3' }, error: null });
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
+
+    const root = '<root@example.com>';
+    const mid = Array.from({ length: 20 }, (_, i) => `<msg-${i + 1}@example.com>`).join(' ');
+
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        to: 'a@b.com',
+        subject: 'Re: Hi',
+        content: 'Hi back',
+        replyToId: '<msg-21@example.com>',
+        references: `${root} ${mid}`,
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    await POST(req as unknown as NextRequest);
+    const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
+    expect(callArgs.headers?.['References']).toBe(
+      '<root@example.com> <msg-11@example.com> <msg-12@example.com> <msg-13@example.com> <msg-14@example.com> <msg-15@example.com> <msg-16@example.com> <msg-17@example.com> <msg-18@example.com> <msg-19@example.com> <msg-20@example.com> <msg-21@example.com>'
+    );
+  });
+
+  it('deduplicates root when it reappears in the tail', async () => {
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'r4' }, error: null });
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
+
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        to: 'a@b.com',
+        subject: 'Re: Hi',
+        content: 'Hi back',
+        replyToId: '<msg-3@example.com>',
+        references: '<root@example.com> <msg-1@example.com> <root@example.com> <msg-2@example.com>',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    await POST(req as unknown as NextRequest);
+    const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
+    expect(callArgs.headers?.['References']).toBe(
+      '<root@example.com> <msg-1@example.com> <msg-2@example.com> <msg-3@example.com>'
+    );
+  });
+
   it('still returns 200 when D1 persistence fails after send succeeds', async () => {
     routeMocks.insertRun.mockRejectedValueOnce(new Error('db unavailable'));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
