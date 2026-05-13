@@ -574,6 +574,31 @@ describe('searchEmails', () => {
     expect(result).toEqual([]);
   });
 
+  it('returns an empty array for queries longer than 500 characters', async () => {
+    const prepareSpy = vi.fn();
+    const db = createMockDb(
+      [{ id: '1', thread_id: 'thread-1', subject: 'Hello', references: null }],
+      { onPrepare: prepareSpy }
+    );
+
+    const result = await searchEmails(db, `a${'b'.repeat(500)}`);
+
+    expect(result).toEqual([]);
+    expect(prepareSpy).not.toHaveBeenCalled();
+  });
+
+  it('accepts a 500-character query and runs the FTS search', async () => {
+    let boundArgs: unknown[] = [];
+    const db = createMockDb(
+      [{ id: '1', thread_id: 'thread-1', subject: 'Hello', references: null }],
+      { onBind: (args) => { boundArgs = args; } }
+    );
+
+    await searchEmails(db, 'a'.repeat(500));
+
+    expect(boundArgs).toEqual([`"${'a'.repeat(500)}"`]);
+  });
+
   it('queries FTS5 with AND semantics (space-separated phrases) for multi-word queries', async () => {
     let preparedSql = '';
     let boundArgs: unknown[] = [];

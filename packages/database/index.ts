@@ -343,7 +343,7 @@ export async function searchEmails(
   query: string
 ): Promise<EmailSummary[]> {
   const trimmedQuery = query.trim();
-  if (!trimmedQuery) return [];
+  if (query.length > 1000 || !trimmedQuery || trimmedQuery.length > 500) return [];
 
   const terms = trimmedQuery
     .split(/\s+/)
