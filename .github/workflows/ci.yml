@@ -88,7 +88,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker typecheck
-      - run: pnpm --filter @q3ik-mail/web typecheck
+      - run: pnpm --filter web typecheck
       - run: pnpm --filter @q3ik-mail/database typecheck
 
   lint:
@@ -107,7 +107,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker lint
-      - run: pnpm --filter @q3ik-mail/web lint
+      - run: pnpm --filter web lint
 
   unit-test:
     name: Unit & Integration Tests
@@ -128,7 +128,7 @@ jobs:
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
       - run: pnpm --filter @q3ik-mail/worker test
       - run: pnpm --filter @q3ik-mail/database test
-      - run: pnpm --filter @q3ik-mail/web test
+      - run: pnpm --filter web test
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -162,7 +162,7 @@ jobs:
 
       # Build for Cloudflare Pages — outputs to .vercel/output/static
       - name: Build web app
-        run: pnpm --filter @q3ik-mail/web run build:cf
+        run: pnpm --filter web run build:cf
 
       # Apply all numbered migrations against the local D1 instance.
       # Uses the canonical migration workflow (000_init.sql, 001_*, …) rather
@@ -185,13 +185,13 @@ jobs:
 
       # Install only Chromium (faster than full Playwright install)
       - name: Install Playwright Chromium
-        run: pnpm --filter @q3ik-mail/web exec playwright install chromium --with-deps
+        run: pnpm --filter web exec playwright install chromium --with-deps
 
       # Playwright's webServer block (playwright.config.ts) starts wrangler
       # pages dev and waits for a real HTTP 200 before running any test.
       # No manual background server or wait-on needed here.
       - name: Run Playwright E2E
-        run: pnpm --filter @q3ik-mail/web e2e
+        run: pnpm --filter web e2e
         env:
           BASE_URL: http://localhost:3000
           CI: true
@@ -238,7 +238,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build web app
-        run: pnpm --filter @q3ik-mail/web run build:cf
+        run: pnpm --filter web run build:cf
 
       - name: Apply D1 migrations (local)
         run: >
@@ -248,7 +248,7 @@ jobs:
         working-directory: apps/worker
 
       - name: Install Playwright Chromium
-        run: pnpm --filter @q3ik-mail/web exec playwright install chromium --with-deps
+        run: pnpm --filter web exec playwright install chromium --with-deps
 
       # Issue 6 fix: start the app via wrangler pages dev (same as the
       # existing e2e job) and wait for it to be ready before running the
@@ -271,7 +271,7 @@ jobs:
         run: cat $GITHUB_WORKSPACE/wrangler.log || echo 'No wrangler log found'
 
       - name: Run agentmail.to E2E
-        run: pnpm --filter @q3ik-mail/web exec playwright test e2e/mail-delivery.spec.ts
+        run: pnpm --filter web exec playwright test e2e/mail-delivery.spec.ts
         env:
           AGENTMAIL_API_KEY: ${{ secrets.AGENTMAIL_API_KEY }}
           E2E_TEST_SECRET: ${{ secrets.E2E_TEST_SECRET }}
