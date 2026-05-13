@@ -1,4 +1,4 @@
-import * as Sentry from '@sentry/cloudflare';
+import { captureException, captureMessage } from '@/lib/sentry';
 import { createRemoteJWKSet } from 'jose/jwks/remote';
 import { jwtVerify } from 'jose/jwt/verify';
 import { NextRequest, NextResponse } from 'next/server';
@@ -147,7 +147,7 @@ export async function middleware(req: NextRequest) {
   const token = resolveAccessToken(req);
 
   if (!token) {
-    Sentry.captureMessage('[middleware] Cloudflare Access token missing', {
+    await captureMessage('[middleware] Cloudflare Access token missing', {
       level: 'warning',
       tags: { category: 'security-auth', surface: 'middleware', auth_provider: 'cloudflare-access' },
       extra: { pathname: req.nextUrl.pathname },
@@ -163,7 +163,8 @@ export async function middleware(req: NextRequest) {
     return nextWithSecurityHeaders();
   } catch (error) {
     console.error('[middleware] JWT verification failed:', error);
-    Sentry.captureException(error, {
+    await captureException(error);
+    await captureMessage('[middleware] JWT verification failed', {
       tags: { category: 'security-auth', surface: 'middleware', auth_provider: 'cloudflare-access' },
       extra: { pathname: req.nextUrl.pathname },
     });
