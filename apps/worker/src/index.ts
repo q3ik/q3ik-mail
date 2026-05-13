@@ -415,7 +415,37 @@ const handler: ExportedHandler<Env> = {
       return new Response('OK', { status: 200 });
     }
 
+    // --- Step 2.1: Validate email_id presence before any dereference ---
+    // Guard must fire here — before any await or downstream usage of emailId —
+    // so that no code path can dereference a null/undefined emailId.
     const emailId = event.data.email_id;
+    if (!emailId) {
+      return new Response('Missing email_id', { status: 400 });
+    }
+
+    // --- Step 2.5: Duplicate detection — check for existing resend_id in D1 ---
+    //
+    // SECURITY NOTE: This SELECT executes only after BOTH authentication gates
+    // above have passed:
+    //   - Step 0: Cloudflare Access JWT validated
+    //   - Step 1: Resend svix webhook signature verified
+    // Unauthenticated callers are rejected before reaching this point and cannot
+    // drive arbitrary D1 reads.
+    //
+    // RACE CONDITION NOTE: This app-layer check is a fast-path optimisation that
+    // avoids unnecessary R2 writes on the common duplicate-delivery case. It does
+    // NOT replace the DB-layer race guard. The authoritative idempotency fence is
+    // the UNIQUE constraint on `resend_id` in migration 000_init.sql combined with
+    // `INSERT OR IGNORE` in Step 8. Two concurrent duplicate deliveries that both
+    // pass this SELECT will both attempt the INSERT — the DB constraint ensures
+    // exactly one succeeds and the other is silently discarded.
+    const existing = await env.DB.prepare(
+      'SELECT id FROM emails WHERE resend_id = ? LIMIT 1'
+    ).bind(emailId).first();
+
+    if (existing) {
+      return new Response('Already ingested', { status: 200 });
+    }
 
     const resend = new Resend(env.RESEND_API_KEY);
 
@@ -616,11 +646,11 @@ const handler: ExportedHandler<Env> = {
 
     // --- Step 8: Persist metadata + R2 keys to D1 ---
     // INSERT OR IGNORE: Resend guarantees at-least-once delivery, so duplicate
-    // webhook deliveries are expected. IGNORE silently skips the entire row if
-    // resend_id or message_id already exists. This is intentional -- the first
-    // ingestion wins and subsequent duplicates are discarded. If idempotent
-    // upsert semantics are ever needed, replace with INSERT OR REPLACE or add
-    // an ON CONFLICT DO UPDATE clause.
+    // webhook deliveries are expected. The UNIQUE constraint on `resend_id`
+    // (migration 000_init.sql) combined with IGNORE provides the authoritative
+    // DB-layer idempotency fence. The app-layer SELECT in Step 2.5 is a
+    // fast-path optimisation that avoids R2 writes on the common duplicate path;
+    // this INSERT OR IGNORE is the true race guard for concurrent deliveries.
     //
     // Column order in the INSERT and .bind() are kept in sync.
     try {
