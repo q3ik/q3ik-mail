@@ -33,7 +33,7 @@ function createMockDb(
             all: async () => {
               let results = [...rows];
 
-              if (normalizedSql.includes('created_at < ?') && args.length >= 4) {
+              if (normalizedSql.includes('ranked_emails.created_at < ?') && args.length >= 4) {
                 const [createdAt, equalCreatedAt, resendId] = args as [
                   string,
                   string,
@@ -54,8 +54,7 @@ function createMockDb(
                 });
               }
 
-              if (normalizedSql.includes('ORDER BY created_at DESC')) {
-                const useResendId = normalizedSql.includes('resend_id ASC');
+              if (normalizedSql.includes('ORDER BY ranked_emails.created_at DESC, ranked_emails.resend_id ASC')) {
                 results.sort((a, b) => {
                   const aCreatedAt = typeof a.created_at === 'string' ? a.created_at : '';
                   const bCreatedAt = typeof b.created_at === 'string' ? b.created_at : '';
@@ -64,8 +63,8 @@ function createMockDb(
                     return bCreatedAt.localeCompare(aCreatedAt);
                   }
 
-                  const aTie = String((useResendId ? a.resend_id : a.id) ?? '');
-                  const bTie = String((useResendId ? b.resend_id : b.id) ?? '');
+                  const aTie = String(a.resend_id ?? '');
+                  const bTie = String(b.resend_id ?? '');
                   return aTie.localeCompare(bTie);
                 });
               }
@@ -563,7 +562,7 @@ describe('getThreadListPage', () => {
     expect(page1.threads.map((t) => t.id)).toEqual(['a', 'b']);
     expect(page1.nextCursor).not.toBeNull();
     // Page 1 has no cursor — WHERE clause must not include the tiebreaker predicate.
-    expect(capturedSql).not.toContain('created_at < ?');
+    expect(capturedSql).not.toContain('ranked_emails.created_at < ?');
 
     // Fetch page 2 using the cursor from page 1 — should return rows c, d (no skip/duplicate).
     // Also assert the SQL carries the composite tiebreaker predicate.
@@ -579,8 +578,8 @@ describe('getThreadListPage', () => {
     expect(page2.threads.map((t) => t.id)).toEqual(['c', 'd']);
     expect(page2.nextCursor).not.toBeNull();
     // Verify the composite WHERE clause structure is emitted correctly.
-    expect(page2Sql).toContain('created_at < ?');
-    expect(page2Sql).toContain('created_at = ? AND resend_id > ?');
+    expect(page2Sql).toContain('ranked_emails.created_at < ?');
+    expect(page2Sql).toContain('ranked_emails.created_at = ? AND ranked_emails.resend_id > ?');
     expect(page2Args).toEqual([
       '2026-05-11T12:00:00Z',
       '2026-05-11T12:00:00Z',
