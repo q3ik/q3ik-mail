@@ -86,14 +86,18 @@ function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
 
 /**
  * Creates a spy-instrumented Env whose DB.prepare / .bind calls are recorded.
- * SELECT statements (thread-lookup) are routed to a silent non-spy stub so
- * bindSpy exclusively captures INSERT .bind() calls.
+ * SELECT statements are routed to a silent non-spy stub so bindSpy exclusively
+ * captures INSERT .bind() calls.
  *
- * `selectFirstResult` is the value returned by SELECT .first() — use an
- * object like `{ thread_id: 'x' }` to simulate a found parent, or `null`
- * for the orphan / no-parent path.
+ * `selectFirstResult` is the value returned by the thread-lookup SELECT
+ * (`WHERE message_id = ?`). Use an object like `{ thread_id: 'x' }` to simulate
+ * a found parent, or `null` for the orphan / no-parent path.
+ *
+ * `existingResendId` is the value returned by the duplicate-detection SELECT
+ * (`WHERE resend_id = ?`). Defaults to `null` (not a duplicate) so that tests
+ * reach the full ingestion path. Pass a non-null value to simulate a duplicate.
  */
-function makeThreadEnv(selectFirstResult: unknown = null) {
+function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unknown = null) {
   const bindSpy = vi.fn().mockReturnValue({
     first: async () => null,
     run: async () => ({ success: true }),
@@ -101,6 +105,12 @@ function makeThreadEnv(selectFirstResult: unknown = null) {
   const prepareSpy = vi.fn().mockImplementation((sql: string) => {
     // Route SELECTs to a silent non-spy stub so bindSpy only sees INSERT calls.
     if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
+      // The duplicate-detection query checks resend_id; use `existingResendId` so
+      // tests can simulate a duplicate without affecting the thread-lookup SELECT.
+      if (sql.includes('resend_id')) {
+        return { bind: () => ({ first: async () => existingResendId }) };
+      }
+      // All other SELECTs (e.g. thread-lookup by message_id) use the caller's value.
       return {
         bind: () => ({ first: async () => selectFirstResult }),
       };
@@ -494,6 +504,33 @@ describe('webhook handler', () => {
     );
     expect(attachmentPutCall).toBeDefined();
     expect(Array.from(attachmentPutCall![1] as Uint8Array)).toEqual([251, 239, 255]);
+  });
+
+  it('returns 200 and performs no R2/D1 writes when a duplicate resend_id is received', async () => {
+    // Pass `existingResendId` so the resend_id SELECT returns an existing row,
+    // simulating the resend_id already being present in D1.
+    const { env, prepareSpy, bindSpy, putSpy } = makeThreadEnv(null, { id: 'existing-email-id' });
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+
+    // Must return 200 OK immediately without touching R2 or D1 further.
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('Already ingested');
+
+    // No R2 writes should have occurred.
+    expect(putSpy).not.toHaveBeenCalled();
+
+    // No D1 INSERT should have occurred.
+    const insertCall = (prepareSpy.mock.calls as unknown[][]).find(
+      (args) => (args[0] as string).includes('INSERT'),
+    );
+    expect(insertCall).toBeUndefined();
+
+    // bindSpy should not have been called (the INSERT path was never reached).
+    expect(bindSpy).not.toHaveBeenCalled();
   });
 });
 

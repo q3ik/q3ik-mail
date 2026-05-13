@@ -419,6 +419,18 @@ const handler: ExportedHandler<Env> = {
 
     const emailId = event.data.email_id;
 
+    // --- Step 2.5: Duplicate detection — check for existing resend_id in D1 ---
+    // Resend guarantees at-least-once delivery; duplicate webhook deliveries
+    // must be detected *before* any R2 writes to prevent orphaned R2 objects.
+    // Return 200 immediately so Resend stops retrying.
+    const existing = await env.DB.prepare(
+      'SELECT id FROM emails WHERE resend_id = ? LIMIT 1'
+    ).bind(emailId).first();
+
+    if (existing) {
+      return new Response('Already ingested', { status: 200 });
+    }
+
     const resend = new Resend(env.RESEND_API_KEY);
 
     // --- Step 3: Fetch full email payload from Resend Receiving API ---
