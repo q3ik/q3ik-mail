@@ -31,7 +31,7 @@ function createMockDb(
             all: async () => {
               let results = [...rows];
 
-              if (sql.includes('created_at < ?') && args.length >= 4) {
+              if (sql.includes('ranked_emails.created_at < ?') && args.length >= 4) {
                 const [createdAt, equalCreatedAt, id] = args as [
                   string,
                   string,
@@ -493,7 +493,7 @@ describe('getThreadListPage', () => {
     expect(page1.threads.map((t) => t.id)).toEqual(['a', 'b']);
     expect(page1.nextCursor).not.toBeNull();
     // Page 1 has no cursor — WHERE clause must not include the tiebreaker predicate.
-    expect(capturedSql).not.toContain('created_at < ?');
+    expect(capturedSql).not.toContain('ranked_emails.created_at < ?');
 
     // Fetch page 2 using the cursor from page 1 — should return rows c, d (no skip/duplicate).
     // Also assert the SQL carries the composite tiebreaker predicate.
@@ -509,8 +509,8 @@ describe('getThreadListPage', () => {
     expect(page2.threads.map((t) => t.id)).toEqual(['c', 'd']);
     expect(page2.nextCursor).not.toBeNull();
     // Verify the composite WHERE clause structure is emitted correctly.
-    expect(page2Sql).toContain('created_at < ?');
-    expect(page2Sql).toContain('created_at = ? AND id > ?');
+    expect(page2Sql).toContain('ranked_emails.created_at < ?');
+    expect(page2Sql).toContain('ranked_emails.created_at = ? AND ranked_emails.id > ?');
     expect(page2Args).toEqual([
       '2026-05-11T12:00:00Z',
       '2026-05-11T12:00:00Z',
