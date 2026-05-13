@@ -87,8 +87,9 @@ export interface ThreadListPage {
 }
 
 interface ThreadListCursorPayload {
+  v: 2;
   createdAt: string;
-  id: string;
+  resendId: string;
 }
 
 function encodeThreadListCursor(cursor: ThreadListCursorPayload): string {
@@ -102,22 +103,42 @@ class InvalidCursorError extends Error {
   }
 }
 
+/**
+ * Thrown when a cursor was encoded with an older payload shape (v1: { createdAt, id }).
+ * The caller should restart pagination from the beginning rather than returning an empty page.
+ */
+class StaleVersionError extends Error {
+  constructor() {
+    super('Stale cursor version; restart pagination from the beginning');
+    this.name = 'StaleVersionError';
+  }
+}
+
 function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
-  let payload: Partial<ThreadListCursorPayload>;
+  let payload: unknown;
   try {
-    payload = JSON.parse(atob(cursor)) as Partial<ThreadListCursorPayload>;
+    payload = JSON.parse(atob(cursor));
   } catch {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  if (typeof payload.createdAt !== 'string' || typeof payload.id !== 'string') {
+  if (!payload || typeof payload !== 'object') {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  return {
-    createdAt: payload.createdAt,
-    id: payload.id,
-  };
+  const p = payload as Record<string, unknown>;
+
+  // Detect v1 shape: { createdAt, id } with no version field.
+  // These are in-flight cursors from before the resend_id tiebreaker migration.
+  if (typeof p.createdAt === 'string' && typeof p.id === 'string' && !('resendId' in p)) {
+    throw new StaleVersionError();
+  }
+
+  if (p.v !== 2 || typeof p.createdAt !== 'string' || typeof p.resendId !== 'string') {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  return { v: 2, createdAt: p.createdAt, resendId: p.resendId };
 }
 
 /**
@@ -204,7 +225,7 @@ export async function getLatestEmails(
          to_address, subject, message_id, in_reply_to, "references",
          is_read, is_sent, needs_rethreading, created_at
        FROM emails
-       ORDER BY created_at DESC, id ASC
+       ORDER BY created_at DESC, resend_id ASC
        LIMIT ?`
     )
     .bind(limit)
@@ -235,7 +256,7 @@ export async function getEmailsByThread(
       `SELECT *
        FROM emails
        WHERE thread_id = ?
-       ORDER BY created_at ASC, id ASC`
+       ORDER BY created_at ASC, resend_id ASC`
     )
     .bind(threadId)
     .all<Email>();
@@ -435,7 +456,7 @@ export async function searchEmails(
            emails.is_read, emails.is_sent, emails.needs_rethreading, emails.created_at,
            ROW_NUMBER() OVER (
              PARTITION BY emails.thread_id
-             ORDER BY bm25(emails_fts), emails.created_at DESC, emails.id ASC
+             ORDER BY bm25(emails_fts), emails.created_at DESC, emails.resend_id ASC
            ) AS thread_rank,
            bm25(emails_fts) AS rank
          FROM emails
@@ -443,7 +464,7 @@ export async function searchEmails(
          WHERE emails_fts MATCH ?
        ) ranked_results
        WHERE thread_rank = 1
-       ORDER BY rank ASC, created_at DESC, id ASC
+       ORDER BY rank ASC, created_at DESC, resend_id ASC
        LIMIT 50`
     )
     .bind(matchQuery)
@@ -472,7 +493,13 @@ export async function getThreadListPage(
       if (err instanceof InvalidCursorError) {
         return { threads: [], nextCursor: null };
       }
-      throw err;
+      if (err instanceof StaleVersionError) {
+        // v1 cursor from before the resend_id migration: restart from the beginning
+        // rather than returning an empty page, so the user sees their inbox.
+        decodedCursor = null;
+      } else {
+        throw err;
+      }
     }
   }
   const { sql, params } = buildThreadListQuery({
@@ -489,8 +516,9 @@ export async function getThreadListPage(
   const nextCursor =
     results.length > pageSize && lastThread
       ? encodeThreadListCursor({
+          v: 2,
           createdAt: lastThread.created_at,
-          id: lastThread.id,
+          resendId: lastThread.resend_id,
         })
       : null;
 

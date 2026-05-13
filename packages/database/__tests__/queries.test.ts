@@ -24,6 +24,7 @@ function createMockDb(
 ) {
   return {
     prepare: (sql: string) => {
+      const normalizedSql = sql.replace(/\s+/g, ' ').trim();
       onPrepare?.(sql);
       return {
         bind: (...args: unknown[]) => {
@@ -32,8 +33,8 @@ function createMockDb(
             all: async () => {
               let results = [...rows];
 
-              if (sql.includes('ranked_emails.created_at < ?') && args.length >= 4) {
-                const [createdAt, equalCreatedAt, id] = args as [
+              if (normalizedSql.includes('ranked_emails.created_at < ?') && args.length >= 4) {
+                const [createdAt, equalCreatedAt, resendId] = args as [
                   string,
                   string,
                   string,
@@ -42,18 +43,19 @@ function createMockDb(
 
                 results = results.filter((row) => {
                   const rowCreatedAt = row.created_at;
-                  const rowId = row.id;
+                  const rowResendId = row.resend_id;
 
                   return (
                     typeof rowCreatedAt === 'string' &&
-                    typeof rowId === 'string' &&
+                    typeof rowResendId === 'string' &&
                     (rowCreatedAt < createdAt ||
-                      (rowCreatedAt === equalCreatedAt && rowId > id))
+                      (rowCreatedAt === equalCreatedAt && rowResendId > resendId))
                   );
                 });
               }
 
-              if (sql.includes('ORDER BY ranked_emails.created_at DESC, ranked_emails.id ASC')) {
+              if (normalizedSql.includes('ORDER BY ranked_emails.created_at DESC, ranked_emails.id ASC')) {
+                const useResendId = normalizedSql.includes('resend_id ASC');
                 results.sort((a, b) => {
                   const aCreatedAt = typeof a.created_at === 'string' ? a.created_at : '';
                   const bCreatedAt = typeof b.created_at === 'string' ? b.created_at : '';
@@ -62,9 +64,9 @@ function createMockDb(
                     return bCreatedAt.localeCompare(aCreatedAt);
                   }
 
-                  const aId = typeof a.id === 'string' ? a.id : '';
-                  const bId = typeof b.id === 'string' ? b.id : '';
-                  return aId.localeCompare(bId);
+                  const aTie = String((useResendId ? a.resend_id : a.id) ?? '');
+                  const bTie = String((useResendId ? b.resend_id : b.id) ?? '');
+                  return aTie.localeCompare(bTie);
                 });
               }
 
@@ -455,38 +457,44 @@ describe('getThreadListPage', () => {
     let boundArgs: unknown[] = [];
     const cursor = btoa(
       JSON.stringify({
+        v: 2,
         createdAt: '2026-05-11T12:00:00Z',
-        id: '2',
+        resendId: 'resend-2',
       })
     );
 
     const rows = [
       {
         id: '1',
+        resend_id: 'resend-1',
         thread_id: 'thread-1',
         subject: 'Newest',
         created_at: '2026-05-11T13:00:00Z',
       },
       {
         id: '2',
+        resend_id: 'resend-2',
         thread_id: 'thread-2',
         subject: 'Middle',
         created_at: '2026-05-11T12:00:00Z',
       },
       {
         id: '3',
+        resend_id: 'resend-3',
         thread_id: 'thread-3',
         subject: 'Same second, later id',
         created_at: '2026-05-11T12:00:00Z',
       },
       {
         id: '4',
+        resend_id: 'resend-4',
         thread_id: 'thread-4',
         subject: 'Older',
         created_at: '2026-05-11T10:00:00Z',
       },
       {
         id: '5',
+        resend_id: 'resend-5',
         thread_id: 'thread-5',
         subject: 'Oldest',
         created_at: '2026-05-11T09:00:00Z',
@@ -511,7 +519,7 @@ describe('getThreadListPage', () => {
     expect(boundArgs).toEqual([
       '2026-05-11T12:00:00Z',
       '2026-05-11T12:00:00Z',
-      '2',
+      'resend-2',
       3,
     ]);
     expect(result.threads).toHaveLength(2);
@@ -519,8 +527,9 @@ describe('getThreadListPage', () => {
     expect(result.nextCursor).toBe(
       btoa(
         JSON.stringify({
+          v: 2,
           createdAt: '2026-05-11T10:00:00Z',
-          id: '4',
+          resendId: 'resend-4',
         })
       )
     );
@@ -530,19 +539,19 @@ describe('getThreadListPage', () => {
     // NOTE: createMockDb simulates the composite WHERE clause in-memory (not via real SQL).
     // This test verifies that cursor encode/decode round-trips correctly across page
     // boundaries and that the mock filters rows consistently with the intended
-    // (created_at < ?) OR (created_at = ? AND id > ?) predicate.
+    // (created_at < ?) OR (created_at = ? AND resend_id > ?) predicate.
     // SQL clause correctness against a real D1 database is covered by integration tests.
     //
     // All five threads: three share the same timestamp at the page boundary.
     // Page 1 (limit=2): threads A and B (both at '2026-05-11T12:00:00Z').
-    // Page 2 cursor encodes { createdAt: '2026-05-11T12:00:00Z', id: 'b' }.
-    // Page 2 must return C (same timestamp, id > 'b') and D — no skip, no duplicate.
+    // Page 2 cursor encodes { createdAt: '2026-05-11T12:00:00Z', resendId: 'resend-b' }.
+    // Page 2 must return C (same timestamp, resend_id > 'resend-b') and D — no skip, no duplicate.
     const allRows = [
-      { id: 'a', thread_id: 'thread-a', subject: 'A', created_at: '2026-05-11T12:00:00Z' },
-      { id: 'b', thread_id: 'thread-b', subject: 'B', created_at: '2026-05-11T12:00:00Z' },
-      { id: 'c', thread_id: 'thread-c', subject: 'C', created_at: '2026-05-11T12:00:00Z' },
-      { id: 'd', thread_id: 'thread-d', subject: 'D', created_at: '2026-05-11T10:00:00Z' },
-      { id: 'e', thread_id: 'thread-e', subject: 'E', created_at: '2026-05-11T09:00:00Z' },
+      { id: 'a', resend_id: 'resend-a', thread_id: 'thread-a', subject: 'A', created_at: '2026-05-11T12:00:00Z' },
+      { id: 'b', resend_id: 'resend-b', thread_id: 'thread-b', subject: 'B', created_at: '2026-05-11T12:00:00Z' },
+      { id: 'c', resend_id: 'resend-c', thread_id: 'thread-c', subject: 'C', created_at: '2026-05-11T12:00:00Z' },
+      { id: 'd', resend_id: 'resend-d', thread_id: 'thread-d', subject: 'D', created_at: '2026-05-11T10:00:00Z' },
+      { id: 'e', resend_id: 'resend-e', thread_id: 'thread-e', subject: 'E', created_at: '2026-05-11T09:00:00Z' },
     ];
 
     // Fetch page 1 (no cursor) — should return rows a, b.
@@ -575,7 +584,7 @@ describe('getThreadListPage', () => {
     expect(page2Args).toEqual([
       '2026-05-11T12:00:00Z',
       '2026-05-11T12:00:00Z',
-      'b',
+      'resend-b',
       3, // fetchLimit = pageSize + 1
     ]);
 
@@ -617,6 +626,24 @@ describe('getThreadListPage', () => {
 
     expect(result.threads).toEqual([]);
     expect(result.nextCursor).toBeNull();
+  });
+
+  it('restarts pagination from the first page when a stale v1 cursor is provided', async () => {
+    // v1 cursors ({ createdAt, id } with no resendId) are in-flight tokens from
+    // before the tiebreaker migration. They should yield the first page rather than
+    // an empty page so the user sees their inbox without loss of context.
+    const rows = [
+      { id: '1', resend_id: 'resend-1', thread_id: 'thread-1', subject: 'Newest', created_at: '2026-05-11T13:00:00Z' },
+      { id: '2', resend_id: 'resend-2', thread_id: 'thread-2', subject: 'Older', created_at: '2026-05-11T12:00:00Z' },
+    ];
+    const db = createMockDb(rows);
+    const staleV1Cursor = btoa(JSON.stringify({ createdAt: '2026-05-11T13:00:00Z', id: 'some-uuid' }));
+
+    const result = await getThreadListPage(db, { limit: 50, cursor: staleV1Cursor });
+
+    // Should return the first page, not an empty page.
+    expect(result.threads).toHaveLength(2);
+    expect(result.threads[0].id).toBe('1');
   });
 });
 

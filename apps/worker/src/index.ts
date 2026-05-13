@@ -306,6 +306,9 @@ async function loadAttachmentContent(
 export interface Env {
   DB: D1Database;
   EMAIL_BODIES?: R2Bucket;
+  WEBHOOK_RATE_LIMITER: {
+    limit: (input: { key: string }) => Promise<{ success: boolean }>;
+  };
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
   /** AUD tag from the Cloudflare Access application. Set via `wrangler secret put CLOUDFLARE_ACCESS_AUD`. */
@@ -342,6 +345,10 @@ function captureR2PutError(
     });
   }
 }
+
+// Issue 1 fix: TextEncoder is stateless; hoist to module scope to avoid
+// re-allocating it on every webhook invocation that processes attachments.
+const textEncoder = new TextEncoder();
 
 const handler: ExportedHandler<Env> = {
   // --------------------------------------------------------------------------
@@ -383,13 +390,37 @@ const handler: ExportedHandler<Env> = {
     }
 
     // --- Step 0: Verify Cloudflare Access JWT ---
-    // Validates the Cf-Access-Jwt-Assertion header before any webhook logic.
-    // An invalid or missing JWT returns a controlled 401 rather than exposing
-    // downstream errors to unauthenticated callers.
+    // This gate MUST precede any resource-consuming operation (rate limiter,
+    // D1 reads, R2 writes). Placing it first ensures unauthenticated callers
+    // are rejected before touching any metered binding.
     const accessResult = await validateCfAccessJwt(request, env);
     if (!accessResult.ok) {
       console.error('[worker] Cloudflare Access validation failed: ' + accessResult.error);
       return new Response('Unauthorized', { status: 401 });
+    }
+
+    // --- Rate limiting (after JWT verification) ---
+    // Blocker fix: the rate limiter now fires only after Step 0 (CF Access JWT)
+    // so that:
+    //   1. Unauthenticated callers cannot drive the metered WEBHOOK_RATE_LIMITER
+    //      binding (billing amplification vector).
+    //   2. CF-Connecting-IP is used as the key only for verified Cloudflare-
+    //      proxied requests, reducing the risk of IP spoofing abuse.
+    // Issue 4 fix: log a warning when CF-Connecting-IP is absent so the shared
+    // 'unknown' fallback is visible in production logs.
+    if (new URL(request.url).pathname === '/api/webhook') {
+      const clientIp = request.headers.get('CF-Connecting-IP');
+      if (!clientIp) {
+        console.warn(
+          '[worker] CF-Connecting-IP header absent; rate-limiting under shared key. ' +
+          'This may indicate a misconfigured proxy or a non-Cloudflare-proxied request.'
+        );
+      }
+      const rateLimitKey = clientIp ?? 'unknown';
+      const { success } = await env.WEBHOOK_RATE_LIMITER.limit({ key: rateLimitKey });
+      if (!success) {
+        return new Response('Too Many Requests', { status: 429 });
+      }
     }
 
     // Read raw body as text BEFORE any parsing -- required for signature verification
@@ -593,7 +624,18 @@ const handler: ExportedHandler<Env> = {
       console.warn('[worker] EMAIL_BODIES R2 bucket not bound; bodies will not be stored in R2', { emailId });
     }
 
-    // --- Step 7: Attachment ingestion (download from Resend, store in R2) ---
+    // --- Step 7: Build attachment descriptor list (download content from Resend) ---
+    // Issue 2 fix: R2 attachment puts now happen inside the if (inserted) block
+    // in Step 8, after the email INSERT OR IGNORE succeeds. This prevents
+    // redundant R2 writes and orphaned objects on duplicate deliveries.
+    // Here we only collect the metadata needed to decide what to upload.
+    const attachmentsToIngest: Array<{
+      safeFilename: string;
+      contentType: string;
+      attachmentKey: string;
+      data: ArrayBuffer | Uint8Array | string;
+    }> = [];
+
     if (r2Bucket) {
       const attachments = receivedEmail.attachments ?? [];
       for (const [index, attachment] of attachments.entries()) {
@@ -630,17 +672,7 @@ const handler: ExportedHandler<Env> = {
           'application/octet-stream';
         const attachmentKey = `emails/${internalEmailId}/attachments/${safeFilename}`;
 
-        try {
-          await r2Bucket.put(attachmentKey, attachmentData, {
-            httpMetadata: { contentType },
-          });
-        } catch (err) {
-          console.warn('[worker] failed to persist attachment to R2', {
-            emailId,
-            filename: safeFilename,
-            error: err,
-          });
-        }
+        attachmentsToIngest.push({ safeFilename, contentType, attachmentKey, data: attachmentData });
       }
     }
 
@@ -654,7 +686,7 @@ const handler: ExportedHandler<Env> = {
     //
     // Column order in the INSERT and .bind() are kept in sync.
     try {
-      await env.DB.prepare(`
+      const insertResult = await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
           (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
         VALUES
@@ -678,6 +710,73 @@ const handler: ExportedHandler<Env> = {
           needsRethreading,           // needs_rethreading (0 or 1)
         )
         .run();
+
+      // Issue 3 fix: D1Result.meta is typed as always-present; remove the
+      // optional chain (?.) that was masking a potential stub misconfiguration
+      // where absent meta would silently be treated as a non-duplicate.
+      const inserted = (insertResult.meta.changes ?? 0) > 0;
+      if (inserted) {
+        // Issue 2 fix: R2 attachment writes occur here, inside the inserted gate,
+        // so duplicate deliveries never trigger redundant R2 puts.
+        const persistedAttachments: Array<{
+          r2Key: string;
+          filename: string;
+          contentType: string | null;
+          sizeBytes: number;
+          createdAt: number;
+        }> = [];
+
+        for (const { safeFilename, contentType, attachmentKey, data } of attachmentsToIngest) {
+          try {
+            await r2Bucket!.put(attachmentKey, data, {
+              httpMetadata: { contentType },
+            });
+            persistedAttachments.push({
+              r2Key: attachmentKey,
+              filename: safeFilename,
+              contentType,
+              // Issue 1 fix: use module-level textEncoder instead of per-invocation allocation.
+              sizeBytes: typeof data === 'string'
+                ? textEncoder.encode(data).byteLength
+                : data.byteLength,
+              createdAt: Date.now(),
+            });
+          } catch (err) {
+            console.warn('[worker] failed to persist attachment to R2', {
+              emailId,
+              filename: safeFilename,
+              error: err,
+            });
+          }
+        }
+
+        await Promise.all(persistedAttachments.map(async (attachment) => {
+          try {
+            await env.DB.prepare(`
+              INSERT INTO attachments
+                (id, email_id, r2_key, filename, content_type, size_bytes, created_at)
+              VALUES
+                (?, ?, ?, ?, ?, ?, ?)
+            `)
+              .bind(
+                crypto.randomUUID(),
+                internalEmailId,
+                attachment.r2Key,
+                attachment.filename,
+                attachment.contentType,
+                attachment.sizeBytes,
+                attachment.createdAt,
+              )
+              .run();
+          } catch (err) {
+            console.warn('[worker] failed to persist attachment metadata to D1', {
+              emailId,
+              filename: attachment.filename,
+              error: err,
+            });
+          }
+        }));
+      }
     } catch (err) {
       if (env.SENTRY_DSN) {
         Sentry.captureException(err, {
