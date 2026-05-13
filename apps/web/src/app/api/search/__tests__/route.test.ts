@@ -60,7 +60,8 @@ describe('GET /api/search', () => {
   });
 
   it('returns a structured 500 response when search fails', async () => {
-    searchEmails.mockRejectedValue(new Error('D1 exploded'));
+    const dbError = new Error('D1 exploded');
+    searchEmails.mockRejectedValue(dbError);
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { GET } = await import('../route');
@@ -74,7 +75,7 @@ describe('GET /api/search', () => {
       error: 'Failed to search emails',
     });
     expect(errorSpy).toHaveBeenCalled();
-    expect(captureException).toHaveBeenCalledWith(expect.any(Error));
+    expect(captureException).toHaveBeenCalledWith(dbError);
     errorSpy.mockRestore();
   });
 
@@ -93,13 +94,16 @@ describe('GET /api/search', () => {
       error: 'Failed to search emails',
     });
     expect(errorSpy).toHaveBeenCalled();
-    expect(captureException).toHaveBeenCalledWith(expect.any(Error));
+    expect(captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Database binding (DB) is missing' }),
+    );
     errorSpy.mockRestore();
   });
 
   it('returns a structured 500 response when getRequestContext fails', async () => {
+    const contextError = new Error('Context failure');
     getRequestContext.mockImplementation(() => {
-      throw new Error('Context failure');
+      throw contextError;
     });
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -114,7 +118,7 @@ describe('GET /api/search', () => {
       error: 'Failed to search emails',
     });
     expect(errorSpy).toHaveBeenCalled();
-    expect(captureException).toHaveBeenCalledWith(expect.any(Error));
+    expect(captureException).toHaveBeenCalledWith(contextError);
     errorSpy.mockRestore();
   });
 });
