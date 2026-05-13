@@ -17,6 +17,7 @@ export default defineConfig({
     environmentMatchGlobs: [
       ['src/components/**/__tests__/**', 'happy-dom'],
     ],
+    setupFiles: ['./src/test/setup.ts'],
     exclude: ['e2e/**', 'node_modules/**'],
     reporters: ['verbose', ['junit', { outputFile: 'test-results/junit.xml' }]],
     coverage: {
