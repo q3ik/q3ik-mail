@@ -261,9 +261,9 @@ export async function migrateEmailBodiesToR2(
         });
         const bodyTextHead = await r2Bucket.head(bodyTextKey);
         if (!bodyTextHead) {
-          console.error(
-            `R2 write verification failed for email ${row.id}, key: ${bodyTextKey}. Skipping email; D1 body columns remain unchanged.`
-          );
+          const errorMsg = `R2 write verification failed for email ${row.id}, key: ${bodyTextKey}. Skipping email; D1 body columns remain unchanged.`;
+          console.error(errorMsg);
+          captureR2ReadError(new Error(errorMsg), { operation: 'r2.head.verify', key: bodyTextKey });
           continue;
         }
       }
@@ -273,9 +273,9 @@ export async function migrateEmailBodiesToR2(
         });
         const bodyHtmlHead = await r2Bucket.head(bodyHtmlKey);
         if (!bodyHtmlHead) {
-          console.error(
-            `R2 write verification failed for email ${row.id}, key: ${bodyHtmlKey}. Skipping email; D1 body columns remain unchanged.`
-          );
+          const errorMsg = `R2 write verification failed for email ${row.id}, key: ${bodyHtmlKey}. Skipping email; D1 body columns remain unchanged.`;
+          console.error(errorMsg);
+          captureR2ReadError(new Error(errorMsg), { operation: 'r2.head.verify', key: bodyHtmlKey });
           continue;
         }
       }
