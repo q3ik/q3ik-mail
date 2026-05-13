@@ -22,27 +22,32 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Cloudflare Access injects cf-access-jwt-assertion on authenticated requests.
-  // Reject any request missing this header — it means Access was bypassed or
-  // the route is being hit directly without the Access policy in front of it.
-  if (!hasAccessJwt(req)) {
-    Sentry.captureMessage('[api/email-body] missing or malformed Cloudflare Access JWT', {
-      level: 'warning',
-      tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
-      extra: { path: new URL(req.url).pathname },
+  try {
+    // Cloudflare Access injects cf-access-jwt-assertion on authenticated requests.
+    // Reject any request missing this header — it means Access was bypassed or
+    // the route is being hit directly without the Access policy in front of it.
+    if (!hasAccessJwt(req)) {
+      Sentry.captureMessage('[api/email-body] missing or malformed Cloudflare Access JWT', {
+        level: 'warning',
+        tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
+        extra: { path: new URL(req.url).pathname },
+      });
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const { env } = getRequestContext();
+
+    const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
+    const email = await getEmailById(env.DB, id, r2Bucket);
+    if (!email) return Response.json({ error: 'Not found' }, { status: 404 });
+
+    return Response.json({
+      body_html: email.body_html,
+      body_text: email.body_text,
     });
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  } catch (error) {
+    console.error('[api/emails/[id]/body] failed to load email body:', error);
+    return Response.json({ error: 'Failed to load email body' }, { status: 500 });
   }
-
-  const { id } = await params;
-  const { env } = getRequestContext();
-
-  const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
-  const email = await getEmailById(env.DB, id, r2Bucket);
-  if (!email) return Response.json({ error: 'Not found' }, { status: 404 });
-
-  return Response.json({
-    body_html: email.body_html,
-    body_text: email.body_text,
-  });
 }

@@ -38,8 +38,53 @@ describe('GET /api/emails', () => {
     });
   });
 
+  it('uses default values when parameters are missing', async () => {
+    getThreadListPage.mockResolvedValue({
+      threads: [],
+      nextCursor: null,
+    });
+
+    const { GET } = await import('../route');
+    const req = new Request('http://localhost/api/emails', {
+      method: 'GET',
+    });
+    const res = await GET(req as unknown as NextRequest);
+
+    expect(res.status).toBe(200);
+    // DEFAULT_LIMIT is 50, cursor should be undefined
+    expect(getThreadListPage).toHaveBeenCalledWith({}, { limit: 50, cursor: undefined });
+  });
+
+  it('handles invalid limit values by falling back to default', async () => {
+    getThreadListPage.mockResolvedValue({ threads: [] });
+
+    const { GET } = await import('../route');
+
+    // Non-numeric limit
+    const req1 = new Request('http://localhost/api/emails?limit=invalid');
+    await GET(req1 as unknown as NextRequest);
+    expect(getThreadListPage).toHaveBeenLastCalledWith({}, { limit: 50, cursor: undefined });
+
+    // Negative limit
+    const req2 = new Request('http://localhost/api/emails?limit=-10');
+    await GET(req2 as unknown as NextRequest);
+    expect(getThreadListPage).toHaveBeenLastCalledWith({}, { limit: 50, cursor: undefined });
+  });
+
+  it('caps the limit to MAX_LIMIT', async () => {
+    getThreadListPage.mockResolvedValue({ threads: [] });
+
+    const { GET } = await import('../route');
+    const req = new Request('http://localhost/api/emails?limit=1000');
+    await GET(req as unknown as NextRequest);
+
+    // MAX_LIMIT is 100
+    expect(getThreadListPage).toHaveBeenCalledWith({}, { limit: 100, cursor: undefined });
+  });
+
   it('returns a structured 500 response when loading fails', async () => {
-    getThreadListPage.mockRejectedValue(new Error('D1 exploded'));
+    const error = new Error('D1 exploded');
+    getThreadListPage.mockRejectedValue(error);
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { GET } = await import('../route');
@@ -52,7 +97,7 @@ describe('GET /api/emails', () => {
     await expect(res.json()).resolves.toEqual({
       error: 'Failed to load emails',
     });
-    expect(errorSpy).toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith('[api/emails] failed to load emails:', error);
     errorSpy.mockRestore();
   });
 });
