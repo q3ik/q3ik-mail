@@ -317,6 +317,7 @@ export interface Env {
   CLOUDFLARE_TEAM_DOMAIN: string;
   SENTRY_DSN?: string;           // optional -- worker runs without Sentry if unset
   ENVIRONMENT: string;           // set in wrangler.toml [vars]
+  CLOUDFLARE_D1_DATABASE_ID: string; // set in wrangler.toml [dev]
 }
 
 /**
