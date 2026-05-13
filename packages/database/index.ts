@@ -87,6 +87,7 @@ export interface ThreadListPage {
 }
 
 interface ThreadListCursorPayload {
+  v: 2;
   createdAt: string;
   resendId: string;
 }
@@ -102,22 +103,42 @@ class InvalidCursorError extends Error {
   }
 }
 
+/**
+ * Thrown when a cursor was encoded with an older payload shape (v1: { createdAt, id }).
+ * The caller should restart pagination from the beginning rather than returning an empty page.
+ */
+class StaleVersionError extends Error {
+  constructor() {
+    super('Stale cursor version; restart pagination from the beginning');
+    this.name = 'StaleVersionError';
+  }
+}
+
 function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
-  let payload: Partial<ThreadListCursorPayload>;
+  let payload: unknown;
   try {
-    payload = JSON.parse(atob(cursor)) as Partial<ThreadListCursorPayload>;
+    payload = JSON.parse(atob(cursor));
   } catch {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  if (!payload || typeof payload.createdAt !== 'string' || typeof payload.resendId !== 'string') {
+  if (!payload || typeof payload !== 'object') {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  return {
-    createdAt: payload.createdAt,
-    resendId: payload.resendId,
-  };
+  const p = payload as Record<string, unknown>;
+
+  // Detect v1 shape: { createdAt, id } with no version field.
+  // These are in-flight cursors from before the resend_id tiebreaker migration.
+  if (typeof p.createdAt === 'string' && typeof p.id === 'string' && !('resendId' in p)) {
+    throw new StaleVersionError();
+  }
+
+  if (p.v !== 2 || typeof p.createdAt !== 'string' || typeof p.resendId !== 'string') {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  return { v: 2, createdAt: p.createdAt, resendId: p.resendId };
 }
 const ORPHAN_RETHREAD_BATCH_SIZE = 100;
 
@@ -411,7 +432,13 @@ export async function getThreadListPage(
       if (err instanceof InvalidCursorError) {
         return { threads: [], nextCursor: null };
       }
-      throw err;
+      if (err instanceof StaleVersionError) {
+        // v1 cursor from before the resend_id migration: restart from the beginning
+        // rather than returning an empty page, so the user sees their inbox.
+        decodedCursor = null;
+      } else {
+        throw err;
+      }
     }
   }
   const whereClause = decodedCursor
@@ -457,6 +484,7 @@ export async function getThreadListPage(
   const nextCursor =
     results.length > pageSize && lastThread
       ? encodeThreadListCursor({
+          v: 2,
           createdAt: lastThread.created_at,
           resendId: lastThread.resend_id,
         })

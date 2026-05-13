@@ -23,6 +23,7 @@ function createMockDb(
 ) {
   return {
     prepare: (sql: string) => {
+      const normalizedSql = sql.replace(/\s+/g, ' ').trim();
       onPrepare?.(sql);
       return {
         bind: (...args: unknown[]) => {
@@ -31,7 +32,7 @@ function createMockDb(
             all: async () => {
               let results = [...rows];
 
-              if (sql.includes('created_at < ?') && args.length >= 4) {
+              if (normalizedSql.includes('created_at < ?') && args.length >= 4) {
                 const [createdAt, equalCreatedAt, resendId] = args as [
                   string,
                   string,
@@ -52,8 +53,8 @@ function createMockDb(
                 });
               }
 
-              if (sql.includes('ORDER BY created_at DESC')) {
-                const useResendId = sql.includes('resend_id ASC');
+              if (normalizedSql.includes('ORDER BY created_at DESC')) {
+                const useResendId = normalizedSql.includes('resend_id ASC');
                 results.sort((a, b) => {
                   const aCreatedAt = typeof a.created_at === 'string' ? a.created_at : '';
                   const bCreatedAt = typeof b.created_at === 'string' ? b.created_at : '';
@@ -395,6 +396,7 @@ describe('getThreadListPage', () => {
     let boundArgs: unknown[] = [];
     const cursor = btoa(
       JSON.stringify({
+        v: 2,
         createdAt: '2026-05-11T12:00:00Z',
         resendId: 'resend-2',
       })
@@ -464,6 +466,7 @@ describe('getThreadListPage', () => {
     expect(result.nextCursor).toBe(
       btoa(
         JSON.stringify({
+          v: 2,
           createdAt: '2026-05-11T10:00:00Z',
           resendId: 'resend-4',
         })
@@ -562,6 +565,24 @@ describe('getThreadListPage', () => {
 
     expect(result.threads).toEqual([]);
     expect(result.nextCursor).toBeNull();
+  });
+
+  it('restarts pagination from the first page when a stale v1 cursor is provided', async () => {
+    // v1 cursors ({ createdAt, id } with no resendId) are in-flight tokens from
+    // before the tiebreaker migration. They should yield the first page rather than
+    // an empty page so the user sees their inbox without loss of context.
+    const rows = [
+      { id: '1', resend_id: 'resend-1', thread_id: 'thread-1', subject: 'Newest', created_at: '2026-05-11T13:00:00Z' },
+      { id: '2', resend_id: 'resend-2', thread_id: 'thread-2', subject: 'Older', created_at: '2026-05-11T12:00:00Z' },
+    ];
+    const db = createMockDb(rows);
+    const staleV1Cursor = btoa(JSON.stringify({ createdAt: '2026-05-11T13:00:00Z', id: 'some-uuid' }));
+
+    const result = await getThreadListPage(db, { limit: 50, cursor: staleV1Cursor });
+
+    // Should return the first page, not an empty page.
+    expect(result.threads).toHaveLength(2);
+    expect(result.threads[0].id).toBe('1');
   });
 });
 
