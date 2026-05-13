@@ -263,6 +263,16 @@ describe('Cloudflare Access middleware', () => {
     expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
   });
 
+  it('bypasses the guard for webhook with trailing slash', async () => {
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/api/webhook/');
+
+    const res = await middleware(req);
+
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+    expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
+  });
+
   it('uses a matcher that excludes Next.js internals', async () => {
     const { config } = await import('../middleware');
 

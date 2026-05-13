@@ -105,8 +105,11 @@ const SECURITY_HEADERS: Record<string, string> = {
 };
 
 function isPublicPath(pathname: string): boolean {
+  // Normalize pathname by removing trailing slashes for exact matching.
+  // This ensures /api/webhook/ also matches /api/webhook in PUBLIC_PATH_SET.
+  const normalized = pathname.replace(/\/+$/, '') || '/';
   return (
-    PUBLIC_PATH_SET.has(pathname) ||
+    PUBLIC_PATH_SET.has(normalized) ||
     PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   );
 }
