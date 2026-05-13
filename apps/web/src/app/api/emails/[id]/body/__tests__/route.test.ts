@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const getEmailById = vi.fn();
+const captureException = vi.fn();
+const captureMessage = vi.fn();
 
 vi.mock('@cloudflare/next-on-pages', () => ({
   getRequestContext: () => ({
@@ -12,12 +14,19 @@ vi.mock('@q3ik-mail/database', () => ({
   getEmailById,
 }));
 
+vi.mock('@/lib/sentry', () => ({
+  captureException,
+  captureMessage,
+}));
+
 describe('GET /api/emails/[id]/body', () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
-  it('returns body payload when email exists', async () => {
+  const validJwt = 'header.payload.signature';
+
+  it('returns body payload when email exists and JWT is valid', async () => {
     getEmailById.mockResolvedValue({
       id: 'email-1',
       body_html: '<p>Hello</p>',
@@ -25,7 +34,10 @@ describe('GET /api/emails/[id]/body', () => {
     });
 
     const { GET } = await import('../route');
-    const res = await GET(new Request('http://localhost/api/emails/email-1/body'), {
+    const req = new Request('http://localhost/api/emails/email-1/body', {
+      headers: { 'cf-access-jwt-assertion': validJwt },
+    });
+    const res = await GET(req, {
       params: Promise.resolve({ id: 'email-1' }),
     });
 
@@ -37,15 +49,54 @@ describe('GET /api/emails/[id]/body', () => {
     });
   });
 
+  it('returns 401 when JWT is missing', async () => {
+    const { GET } = await import('../route');
+    const req = new Request('http://localhost/api/emails/email-1/body');
+    const res = await GET(req, {
+      params: Promise.resolve({ id: 'email-1' }),
+    });
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: 'Unauthorized' });
+    expect(captureMessage).toHaveBeenCalledWith('[api/email-body] missing or malformed Cloudflare Access JWT', {
+      level: 'warning',
+      tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
+      extra: { path: '/api/emails/email-1/body' },
+    });
+  });
+
   it('returns 404 when email does not exist', async () => {
     getEmailById.mockResolvedValue(null);
 
     const { GET } = await import('../route');
-    const res = await GET(new Request('http://localhost/api/emails/missing/body'), {
+    const req = new Request('http://localhost/api/emails/missing/body', {
+      headers: { 'cf-access-jwt-assertion': validJwt },
+    });
+    const res = await GET(req, {
       params: Promise.resolve({ id: 'missing' }),
     });
 
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: 'Not found' });
+  });
+
+  it('returns a structured 500 response when loading fails', async () => {
+    const error = new Error('D1 exploded');
+    getEmailById.mockRejectedValue(error);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { GET } = await import('../route');
+    const req = new Request('http://localhost/api/emails/email-1/body', {
+      headers: { 'cf-access-jwt-assertion': validJwt },
+    });
+    const res = await GET(req, {
+      params: Promise.resolve({ id: 'email-1' }),
+    });
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({ error: 'Failed to load email body' });
+    expect(captureException).toHaveBeenCalledWith(error);
+    expect(errorSpy).toHaveBeenCalledWith('[api/emails/[id]/body] failed to load email body:', error);
+    errorSpy.mockRestore();
   });
 });

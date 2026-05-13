@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup, waitFor } from '@testing-library/react';
 import type { Email } from '@q3ik-mail/database';
 
-
 // ---------------------------------------------------------------------------
 // DOMPurify mock — synchronous stub so tests don't need a real DOM purifier.
 // Hook logic (url() stripping) is tested by extracting and calling the
@@ -80,7 +79,7 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders an empty-state message when thread is empty', () => {
+  it('renders an empty-state message when thread is empty', async () => {
     render(<MailDisplay thread={[]} />);
     expect(screen.getByText('Select a thread to read')).toBeTruthy();
   });
