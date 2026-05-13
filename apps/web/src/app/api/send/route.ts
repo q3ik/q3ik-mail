@@ -4,7 +4,6 @@ import { getRequestContext } from '@cloudflare/next-on-pages';
 import { captureException } from '@/lib/sentry';
 import { z } from 'zod';
 import { buildReferencesHeader } from '@/lib/references';
-export { MAX_REFERENCES_IDS, MAX_REFERENCES_BYTES } from '@/lib/references';
 
 /**
  * All 400 responses share this shape so clients have one code path:
