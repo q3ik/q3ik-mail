@@ -41,7 +41,6 @@ describe('GET /api/emails/[id]', () => {
       references: null,
       is_read: true,
       is_sent: false,
-      needs_rethreading: false,
       created_at: '2024-01-01T00:00:00Z',
     });
 
