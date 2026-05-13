@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-const searchEmails = vi.fn();
-const getRequestContext = vi.fn();
+const { captureException, searchEmails, getRequestContext } = vi.hoisted(() => ({
+  captureException: vi.fn().mockResolvedValue(undefined),
+  searchEmails: vi.fn(),
+  getRequestContext: vi.fn(),
+}));
 
 vi.mock('@cloudflare/next-on-pages', () => ({
   getRequestContext: () => getRequestContext(),
@@ -10,6 +13,10 @@ vi.mock('@cloudflare/next-on-pages', () => ({
 
 vi.mock('@q3ik-mail/database', () => ({
   searchEmails,
+}));
+
+vi.mock('@/lib/sentry', () => ({
+  captureException,
 }));
 
 describe('GET /api/search', () => {
@@ -67,6 +74,7 @@ describe('GET /api/search', () => {
       error: 'Failed to search emails',
     });
     expect(errorSpy).toHaveBeenCalled();
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error));
     errorSpy.mockRestore();
   });
 
@@ -85,6 +93,7 @@ describe('GET /api/search', () => {
       error: 'Failed to search emails',
     });
     expect(errorSpy).toHaveBeenCalled();
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error));
     errorSpy.mockRestore();
   });
 
@@ -105,6 +114,7 @@ describe('GET /api/search', () => {
       error: 'Failed to search emails',
     });
     expect(errorSpy).toHaveBeenCalled();
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error));
     errorSpy.mockRestore();
   });
 });

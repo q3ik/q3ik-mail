@@ -1,7 +1,18 @@
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { searchEmails } from '@q3ik-mail/database';
+import { captureException } from '@/lib/sentry';
 
 export const runtime = 'edge';
+
+async function handleSearchError(error: unknown): Promise<Response> {
+  console.error('[api/search] failed to search emails:', error);
+  try {
+    await captureException(error);
+  } catch (captureError) {
+    console.error('[api/search] failed to capture search error:', captureError);
+  }
+  return Response.json({ error: 'Failed to search emails' }, { status: 500 });
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -18,7 +29,6 @@ export async function GET(req: Request) {
     }
     return Response.json(await searchEmails(env.DB, query));
   } catch (error) {
-    console.error('[api/search] failed to search emails:', error);
-    return Response.json({ error: 'Failed to search emails' }, { status: 500 });
+    return handleSearchError(error);
   }
 }
