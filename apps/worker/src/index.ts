@@ -418,6 +418,9 @@ const handler: ExportedHandler<Env> = {
     }
 
     const emailId = event.data.email_id;
+    if (!emailId) {
+      return new Response('Missing email_id', { status: 400 });
+    }
 
     // --- Step 2.5: Duplicate detection — check for existing resend_id in D1 ---
     // Resend guarantees at-least-once delivery; duplicate webhook deliveries
