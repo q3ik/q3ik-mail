@@ -53,6 +53,7 @@ function createMockDb(
               }
 
               if (sql.includes('ORDER BY created_at DESC')) {
+                const useResendId = sql.includes('resend_id ASC');
                 results.sort((a, b) => {
                   const aCreatedAt = typeof a.created_at === 'string' ? a.created_at : '';
                   const bCreatedAt = typeof b.created_at === 'string' ? b.created_at : '';
@@ -61,9 +62,9 @@ function createMockDb(
                     return bCreatedAt.localeCompare(aCreatedAt);
                   }
 
-                  const aResendId = typeof a.resend_id === 'string' ? a.resend_id : '';
-                  const bResendId = typeof b.resend_id === 'string' ? b.resend_id : '';
-                  return aResendId.localeCompare(bResendId);
+                  const aTie = String((useResendId ? a.resend_id : a.id) ?? '');
+                  const bTie = String((useResendId ? b.resend_id : b.id) ?? '');
+                  return aTie.localeCompare(bTie);
                 });
               }
 

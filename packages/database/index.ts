@@ -139,7 +139,7 @@ export async function getLatestEmails(
          to_address, subject, message_id, in_reply_to, "references",
          is_read, is_sent, needs_rethreading, created_at
        FROM emails
-       ORDER BY created_at DESC, id ASC
+       ORDER BY created_at DESC, resend_id ASC
        LIMIT ?`
     )
     .bind(limit)
@@ -170,7 +170,7 @@ export async function getEmailsByThread(
       `SELECT *
        FROM emails
        WHERE thread_id = ?
-       ORDER BY created_at ASC, id ASC`
+       ORDER BY created_at ASC, resend_id ASC`
     )
     .bind(threadId)
     .all<Email>();
@@ -374,7 +374,7 @@ export async function searchEmails(
            emails.is_read, emails.is_sent, emails.needs_rethreading, emails.created_at,
            ROW_NUMBER() OVER (
              PARTITION BY emails.thread_id
-             ORDER BY bm25(emails_fts), emails.created_at DESC, emails.id ASC
+             ORDER BY bm25(emails_fts), emails.created_at DESC, emails.resend_id ASC
            ) AS thread_rank,
            bm25(emails_fts) AS rank
          FROM emails
@@ -382,7 +382,7 @@ export async function searchEmails(
          WHERE emails_fts MATCH ?
        ) ranked_results
        WHERE thread_rank = 1
-       ORDER BY rank ASC, created_at DESC, id ASC
+       ORDER BY rank ASC, created_at DESC, resend_id ASC
        LIMIT 50`
     )
     .bind(matchQuery)
