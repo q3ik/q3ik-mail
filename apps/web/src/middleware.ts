@@ -39,8 +39,7 @@ type AccessConfig = {
   teamDomain: string;
 };
 
-// Module-level caches — valid for the lifetime of the edge worker instance.
-let cachedConfig: AccessConfig | null | undefined;
+// Module-level cache for JWKS — valid for the lifetime of the edge worker instance.
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 let cachedJwksTeamDomain: string | undefined;
 
@@ -70,21 +69,12 @@ function isPublicPath(pathname: string): boolean {
   );
 }
 
-/**
- * Reads and validates env vars, caching the result for the worker lifetime.
- * Returns null (and caches it) if either var is absent, the audience is
- * whitespace-only, or the team domain fails the allowlist pattern.
- */
+/** Reads and validates env vars on each request. */
 function getAccessConfig(): AccessConfig | null {
-  if (cachedConfig !== undefined) {
-    return cachedConfig;
-  }
-
   const rawTeamDomain = process.env.CLOUDFLARE_TEAM_DOMAIN;
   const rawAudience = process.env.CLOUDFLARE_ACCESS_AUD;
 
   if (!rawTeamDomain || !rawAudience) {
-    cachedConfig = null;
     return null;
   }
 
@@ -92,17 +82,15 @@ function getAccessConfig(): AccessConfig | null {
   const audience = rawAudience.trim();
 
   if (!audience || !TEAM_DOMAIN_PATTERN.test(teamDomain)) {
-    cachedConfig = null;
     return null;
   }
 
-  cachedConfig = {
+  return {
     audience,
     issuer: `https://${teamDomain}`,
     loginUrl: new URL(`https://${teamDomain}`),
     teamDomain,
   };
-  return cachedConfig;
 }
 
 function getJwks(teamDomain: string) {
