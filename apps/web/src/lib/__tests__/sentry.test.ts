@@ -39,4 +39,16 @@ describe('captureException', () => {
     expect(captureNextException).toHaveBeenCalledWith(error);
     expect(captureCloudflareException).not.toHaveBeenCalled();
   });
+
+  it('does not throw when the underlying SDK call fails', async () => {
+    captureCloudflareException.mockImplementation(() => {
+      throw new Error('SDK failure');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { captureException } = await import('../sentry');
+
+    await expect(captureException(new Error('original'))).resolves.toBeUndefined();
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });

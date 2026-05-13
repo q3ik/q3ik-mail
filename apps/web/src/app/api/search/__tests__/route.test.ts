@@ -59,6 +59,16 @@ describe('GET /api/search', () => {
     expect(searchEmails).not.toHaveBeenCalled();
   });
 
+  it('returns 400 when q is present but empty (?q=)', async () => {
+    const { GET } = await import('../route');
+    const req = new Request('http://localhost/api/search?q=', { method: 'GET' });
+    const res = await GET(req as unknown as NextRequest);
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'q is required' });
+    expect(searchEmails).not.toHaveBeenCalled();
+  });
+
   it('returns a structured 500 response when search fails', async () => {
     const dbError = new Error('D1 exploded');
     searchEmails.mockRejectedValue(dbError);

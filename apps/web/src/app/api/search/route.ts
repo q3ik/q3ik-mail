@@ -6,11 +6,7 @@ export const runtime = 'edge';
 
 async function handleSearchError(error: unknown): Promise<Response> {
   console.error('[api/search] failed to search emails:', error);
-  try {
-    await captureException(error);
-  } catch (captureError) {
-    console.error('[api/search] failed to capture search error:', captureError);
-  }
+  await captureException(error);
   return Response.json({ error: 'Failed to search emails' }, { status: 500 });
 }
 
