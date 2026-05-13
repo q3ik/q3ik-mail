@@ -1,8 +1,4 @@
-type SentryScope = {
-  setLevel: (level: 'error' | 'warning' | 'info' | 'debug') => void;
-  setTags: (tags: Record<string, string>) => void;
-  setExtras: (extra: Record<string, unknown>) => void;
-};
+import type { Scope } from '@sentry/cloudflare';
 
 export async function captureException(err: unknown): Promise<void> {
   const serverSdk = '@sentry/cloudflare';
@@ -50,7 +46,7 @@ export async function captureMessage(
   const sdkToImport = isServer ? '@sentry/cloudflare' : '@sentry/nextjs';
 
   const { captureMessage: captureMessageImpl, withScope } = await import(sdkToImport);
-  withScope((scope: SentryScope) => {
+  withScope((scope: Scope) => {
     if (context?.level) scope.setLevel(context.level);
     if (context?.tags) scope.setTags(context.tags);
     if (context?.extra) scope.setExtras(context.extra);
