@@ -125,18 +125,25 @@ function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
  * {@link getThreadList} and {@link getThreadListPage}.
  *
  * The inner subquery assigns `thread_rank = 1` to the most-recent email in
- * each thread (ordered by `created_at DESC, resend_id ASC` for a stable
- * tiebreaker). The outer query filters to rank-1 rows, applies an optional
- * cursor predicate for keyset pagination, and returns results ordered by
- * `created_at DESC, id ASC`.
+ * each thread (window ordered by `created_at DESC, resend_id ASC` for a
+ * stable per-thread tiebreaker). The outer query filters to rank-1 rows,
+ * applies an optional cursor predicate for keyset pagination, and returns
+ * results ordered by `ranked_emails.created_at DESC, ranked_emails.id ASC`.
+ *
+ * Note: the outer tiebreaker uses `id` (not `resend_id`). `id` is the UUID
+ * primary key encoded into the pagination cursor; `resend_id` is only used
+ * inside the window function to pick the representative row for each thread.
  *
  * @param opts.cursor - Optional keyset cursor; when present adds the composite
- *                      `(created_at < ?) OR (created_at = ? AND id > ?)` clause.
+ *                      `(ranked_emails.created_at < ?) OR
+ *                      (ranked_emails.created_at = ? AND ranked_emails.id > ?)`
+ *                      predicate. The `id` field of the cursor is the UUID
+ *                      primary key, matching the outer `ORDER BY` tiebreaker.
  * @param opts.limit  - Number of rows to fetch (callers add +1 for has-next-page
  *                      detection when needed).
  */
 function buildThreadListQuery(opts: {
-  cursor?: { createdAt: string; id: string } | null;
+  cursor?: ThreadListCursorPayload | null;
   limit: number;
 }): { sql: string; params: (string | number)[] } {
   const rankedSubquery = `SELECT
@@ -145,6 +152,8 @@ function buildThreadListQuery(opts: {
            is_read, is_sent, needs_rethreading, created_at,
            ROW_NUMBER() OVER (
              PARTITION BY thread_id
+             -- resend_id breaks ties within a thread to pick the representative row;
+             -- the outer ORDER BY uses id (the primary key) as the cursor tiebreaker.
              ORDER BY created_at DESC, resend_id ASC
            ) AS thread_rank
          FROM emails`;
@@ -165,7 +174,7 @@ function buildThreadListQuery(opts: {
          ${rankedSubquery}
        ) ranked_emails
        ${whereClause}
-       ORDER BY created_at DESC, id ASC
+       ORDER BY ranked_emails.created_at DESC, ranked_emails.id ASC
        LIMIT ?`;
 
   const params: (string | number)[] = opts.cursor
