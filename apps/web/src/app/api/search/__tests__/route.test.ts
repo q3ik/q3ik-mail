@@ -78,7 +78,7 @@ describe('GET /api/search', () => {
     const req = new Request('http://localhost/api/search?q=hello', {
       method: 'GET',
     });
-    const res = await GET(req as unknown as NextRequest);
+    const res = await GET(req);
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({
@@ -98,7 +98,7 @@ describe('GET /api/search', () => {
     const req = new Request('http://localhost/api/search?q=hello', {
       method: 'GET',
     });
-    const res = await GET(req as unknown as NextRequest);
+    const res = await GET(req);
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({
