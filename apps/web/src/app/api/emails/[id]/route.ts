@@ -25,7 +25,41 @@ export async function GET(
       }
     }
 
-    return Response.json(email);
+    const {
+      id: emailId,
+      thread_id,
+      resend_id,
+      from_address,
+      from_name,
+      to_address,
+      subject,
+      body_text,
+      body_html,
+      message_id,
+      in_reply_to,
+      references,
+      is_read,
+      is_sent,
+      created_at,
+    } = email;
+
+    return Response.json({
+      id: emailId,
+      thread_id,
+      resend_id,
+      from_address,
+      from_name,
+      to_address,
+      subject,
+      body_text,
+      body_html,
+      message_id,
+      in_reply_to,
+      references,
+      is_read,
+      is_sent,
+      created_at,
+    });
   } catch (error) {
     await captureException(error);
     console.error('[api/emails/[id]] failed to load email:', error);

@@ -27,7 +27,7 @@ export async function GET(
     // Reject any request missing this header — it means Access was bypassed or
     // the route is being hit directly without the Access policy in front of it.
     if (!hasAccessJwt(req)) {
-      await captureMessage('[api/email-body] missing or malformed Cloudflare Access JWT', {
+      void captureMessage('[api/email-body] missing or malformed Cloudflare Access JWT', {
         level: 'warning',
         tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
         extra: { path: new URL(req.url).pathname },

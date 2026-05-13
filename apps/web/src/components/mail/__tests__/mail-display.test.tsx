@@ -80,13 +80,11 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('renders an empty-state message when thread is empty', async () => {
-    const { MailDisplay } = await import('../mail-display');
     render(<MailDisplay thread={[]} />);
     expect(screen.getByText('Select a thread to read')).toBeTruthy();
   });
 
   it('calls DOMPurify.sanitize with FORCE_BODY and USE_PROFILES for an HTML email', async () => {
-    const { MailDisplay } = await import('../mail-display');
     const html = '<p style="color:red;font-size:14px">Hello</p>';
     const email = makeEmail({ body_html: html, body_text: null });
 
@@ -105,7 +103,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('does NOT pass FORBID_ATTR containing "style" (regression for C-1)', async () => {
-    const { MailDisplay } = await import('../mail-display');
     const email = makeEmail({ body_html: '<p style="margin:0">Hi</p>' });
     render(<MailDisplay thread={[email]} />);
 
@@ -116,7 +113,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('registers the afterSanitizeAttributes hook exactly once across multiple email renders', async () => {
-    const { MailDisplay } = await import('../mail-display');
     const email1 = makeEmail({ id: 'e1', body_html: '<p>One</p>' });
     const email2 = makeEmail({ id: 'e2', body_html: '<p>Two</p>' });
 
@@ -128,7 +124,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('renders sanitized HTML inside an <iframe> with sandbox=""', async () => {
-    const { MailDisplay } = await import('../mail-display');
     const sanitizedContent = '<p>Safe content</p>';
     mockSanitize.mockReturnValue(sanitizedContent);
 
@@ -144,7 +139,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('strips url() from style attributes via the afterSanitizeAttributes hook', async () => {
-    const { MailDisplay } = await import('../mail-display');
     render(<MailDisplay thread={[makeEmail()]} />);
 
     await waitFor(() => expect(mockAddHook).toHaveBeenCalled());
@@ -163,7 +157,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('preserves style attributes that contain no url() value', async () => {
-    const { MailDisplay } = await import('../mail-display');
     render(<MailDisplay thread={[makeEmail()]} />);
 
     await waitFor(() => expect(mockAddHook).toHaveBeenCalled());
@@ -178,7 +171,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('does not call DOMPurify.sanitize for plain-text-only emails', async () => {
-    const { MailDisplay } = await import('../mail-display');
     const email = makeEmail({ body_html: null, body_text: 'Plain text here' });
     render(<MailDisplay thread={[email]} />);
 
@@ -188,7 +180,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('shows loading state while body is being fetched from /api/emails/:id/body', async () => {
-    const { MailDisplay } = await import('../mail-display');
     let resolveFetch!: (v: unknown) => void;
     const pending = new Promise((resolve) => { resolveFetch = resolve; });
     vi.stubGlobal('fetch', vi.fn().mockReturnValue(pending));
@@ -208,7 +199,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('shows error state when the body fetch returns a non-ok status', async () => {
-    const { MailDisplay } = await import('../mail-display');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({ ok: false, status: 500 }),
@@ -223,7 +213,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('shows (no body) when the fetched payload has neither html nor text', async () => {
-    const { MailDisplay } = await import('../mail-display');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ body_html: null, body_text: null }),

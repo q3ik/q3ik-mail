@@ -28,8 +28,21 @@ describe('GET /api/emails/[id]', () => {
   it('returns email payload when email exists', async () => {
     getEmailById.mockResolvedValue({
       id: 'email-1',
+      thread_id: 'thread-1',
+      resend_id: 'resend-1',
+      from_address: 'sender@example.com',
+      from_name: 'Sender',
+      to_address: 'me@example.com',
       subject: 'Hello',
+      body_text: 'Hello text',
+      body_html: '<p>Hello</p>',
+      message_id: '<message-1>',
+      in_reply_to: null,
+      references: null,
       is_read: true,
+      is_sent: false,
+      needs_rethreading: false,
+      created_at: '2024-01-01T00:00:00Z',
     });
 
     const { GET } = await import('../route');
@@ -41,8 +54,20 @@ describe('GET /api/emails/[id]', () => {
     expect(getEmailById).toHaveBeenCalledWith({}, 'email-1', null);
     await expect(res.json()).resolves.toEqual({
       id: 'email-1',
+      thread_id: 'thread-1',
+      resend_id: 'resend-1',
+      from_address: 'sender@example.com',
+      from_name: 'Sender',
+      to_address: 'me@example.com',
       subject: 'Hello',
+      body_text: 'Hello text',
+      body_html: '<p>Hello</p>',
+      message_id: '<message-1>',
+      in_reply_to: null,
+      references: null,
       is_read: true,
+      is_sent: false,
+      created_at: '2024-01-01T00:00:00Z',
     });
   });
 
