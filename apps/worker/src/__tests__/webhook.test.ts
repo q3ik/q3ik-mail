@@ -49,6 +49,9 @@ const mockEnv = {
   RESEND_WEBHOOK_SECRET: 'test-secret',
   CLOUDFLARE_ACCESS_AUD: 'test-aud',
   CLOUDFLARE_TEAM_DOMAIN: 'team.cloudflareaccess.com',
+  WEBHOOK_RATE_LIMITER: {
+    limit: vi.fn().mockResolvedValue({ success: true }),
+  },
   EMAIL_BODIES: {
     put: async () => {},
   },
@@ -56,7 +59,7 @@ const mockEnv = {
     prepare: () => ({
       bind: () => ({
         first: async () => null,
-        run: async () => ({ success: true }),
+        run: async () => ({ success: true, meta: { changes: 1 } }),
       }),
     }),
   },
@@ -67,8 +70,12 @@ const mockCtx = {
   passThroughOnException: vi.fn(),
 } as unknown as ExecutionContext;
 
-function makeRequest(body: string, headers: Record<string, string> = {}) {
-  return new Request('https://worker.example.com/', {
+function makeRequest(
+  body: string,
+  headers: Record<string, string> = {},
+  path = '/'
+) {
+  return new Request(`https://worker.example.com${path}`, {
     method: 'POST',
     body,
     headers: {
@@ -107,7 +114,7 @@ function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
 function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unknown = null) {
   const bindSpy = vi.fn().mockReturnValue({
     first: async () => null,
-    run: async () => ({ success: true }),
+    run: async () => ({ success: true, meta: { changes: 1 } }),
   });
   // Separate spy for the duplicate-detection SELECT bind() so tests can assert
   // the correct emailId is passed without polluting the INSERT bindSpy.
@@ -130,15 +137,17 @@ function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unkn
     return { bind: bindSpy };
   });
   const putSpy = vi.fn().mockResolvedValue(undefined);
+  const rateLimitSpy = vi.fn().mockResolvedValue({ success: true });
   const env = {
     RESEND_API_KEY: 'test-key',
     RESEND_WEBHOOK_SECRET: 'test-secret',
     CLOUDFLARE_ACCESS_AUD: 'test-aud',
     CLOUDFLARE_TEAM_DOMAIN: 'team.cloudflareaccess.com',
+    WEBHOOK_RATE_LIMITER: { limit: rateLimitSpy },
     EMAIL_BODIES: { put: putSpy },
     DB: { prepare: prepareSpy },
   } as unknown as import('../index').Env;
-  return { env, prepareSpy, bindSpy, dedupBindSpy, putSpy };
+  return { env, prepareSpy, bindSpy, dedupBindSpy, putSpy, rateLimitSpy };
 }
 
 /**
@@ -251,6 +260,33 @@ describe('webhook handler', () => {
     });
     const res = await fetchWorker(req);
     expect(res.status).toBe(200);
+  });
+
+  it('returns 429 when the webhook rate limiter denies POST /api/webhook', async () => {
+    const { env, rateLimitSpy } = makeThreadEnv();
+    rateLimitSpy.mockResolvedValueOnce({ success: false });
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+      'CF-Connecting-IP': '203.0.113.5',
+    }, '/api/webhook');
+    const res = await fetchWorker(req, env);
+
+    expect(res.status).toBe(429);
+    expect(await res.text()).toBe('Too Many Requests');
+    expect(rateLimitSpy).toHaveBeenCalledWith({ key: '203.0.113.5' });
+  });
+
+  it('uses "unknown" as webhook rate limit key when CF-Connecting-IP is absent', async () => {
+    const { env, rateLimitSpy } = makeThreadEnv();
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    }, '/api/webhook');
+    const res = await fetchWorker(req, env);
+
+    expect(res.status).toBe(200);
+    expect(rateLimitSpy).toHaveBeenCalledWith({ key: 'unknown' });
   });
 
   it('stores text body in R2 and persists the `body_text_key` in D1', async () => {
@@ -476,6 +512,62 @@ describe('webhook handler', () => {
         httpMetadata: { contentType: 'application/pdf' },
       })
     );
+  });
+
+  it('persists attachment metadata rows in D1 after storing attachments in R2', async () => {
+    const { Resend } = await import('resend');
+    const { env, bindSpy } = makeThreadEnv();
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Bob <bob@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Attachment metadata',
+            text: null,
+            html: null,
+            attachments: [
+              {
+                filename: 'invoice.pdf',
+                content: 'aGVsbG8=',
+                content_type: 'application/pdf',
+              },
+            ],
+            headers: [{ name: 'Message-ID', value: '<attachment-meta@example.com>' }],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+    expect(res.status).toBe(200);
+
+    const emailInsertValues = bindSpy.mock.calls[0] as unknown[];
+    const attachmentInsertValues = bindSpy.mock.calls.find(
+      (call) => call.length === 7 && call.includes('invoice.pdf')
+    ) as unknown[] | undefined;
+
+    expect(attachmentInsertValues).toBeDefined();
+    const [
+      _attachmentId,
+      attachmentEmailId,
+      attachmentR2Key,
+      attachmentFilename,
+      attachmentContentType,
+      attachmentSizeBytes,
+      attachmentCreatedAt,
+    ] = attachmentInsertValues!;
+
+    expect(attachmentEmailId).toBe(emailInsertValues[0]);
+    expect(String(attachmentR2Key)).toMatch(/^emails\/.+\/attachments\/invoice\.pdf$/);
+    expect(attachmentFilename).toBe('invoice.pdf');
+    expect(attachmentContentType).toBe('application/pdf');
+    expect(attachmentSizeBytes).toBe(5);
+    expect(typeof attachmentCreatedAt).toBe('number');
   });
 
   it('decodes standard, URL-safe, and unpadded base64 attachment content', async () => {
