@@ -261,7 +261,9 @@ export async function migrateEmailBodiesToR2(
         });
         const bodyTextHead = await r2Bucket.head(bodyTextKey);
         if (!bodyTextHead) {
-          console.error(`R2 write verification failed for key: ${bodyTextKey}`);
+          console.error(
+            `R2 write verification failed for email ${row.id}, key: ${bodyTextKey}`
+          );
           continue;
         }
       }
@@ -271,7 +273,9 @@ export async function migrateEmailBodiesToR2(
         });
         const bodyHtmlHead = await r2Bucket.head(bodyHtmlKey);
         if (!bodyHtmlHead) {
-          console.error(`R2 write verification failed for key: ${bodyHtmlKey}`);
+          console.error(
+            `R2 write verification failed for email ${row.id}, key: ${bodyHtmlKey}`
+          );
           continue;
         }
       }

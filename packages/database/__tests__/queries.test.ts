@@ -441,7 +441,7 @@ describe('migrateEmailBodiesToR2', () => {
       expect(headSpy).toHaveBeenCalledWith('emails/email-1/body.txt');
       expect(updateRunSpy).not.toHaveBeenCalled();
       expect(errorSpy).toHaveBeenCalledWith(
-        'R2 write verification failed for key: emails/email-1/body.txt'
+        'R2 write verification failed for email email-1, key: emails/email-1/body.txt'
       );
     } finally {
       errorSpy.mockRestore();
