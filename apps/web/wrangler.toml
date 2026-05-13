@@ -9,7 +9,7 @@ pages_build_output_dir = ".vercel/output/static"
 [[d1_databases]]
 binding = "DB"
 database_name = "q3ik-mail-db"
-database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+database_id = "${CLOUDFLARE_D1_DATABASE_ID}"
 
 [[r2_buckets]]
 binding = "EMAIL_BODIES"
