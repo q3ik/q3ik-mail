@@ -658,7 +658,7 @@ const handler: ExportedHandler<Env> = {
             filename: safeFilename,
             contentType,
             sizeBytes: typeof attachmentData === 'string'
-              ? new TextEncoder().encode(attachmentData).byteLength
+              ? encoder.encode(attachmentData).byteLength
               : attachmentData.byteLength,
             createdAt: Date.now(),
           });
