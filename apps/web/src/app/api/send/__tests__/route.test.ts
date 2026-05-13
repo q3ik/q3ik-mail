@@ -506,15 +506,18 @@ describe('POST /api/send', () => {
     const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'r5' }, error: null });
     MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
 
-    // Each ID is 216 chars: "<" + "x".repeat(200) + "-N" + "@example.com" + ">"
-    // = 1 + 200 + 2 + 12 + 1 = 216 chars.
-    // 10 such IDs have total byte length 216 + 9*217 = 2169 > MAX_REFERENCES_BYTES (2000),
-    // while staying well below MAX_REFERENCES_IDS (12), so only the byte cap fires.
-    const makeId = (n: number) => `<${'x'.repeat(200)}-${n}@example.com>`;
+    // Each ID: "<" + "x".repeat(200) + "-" + 3-digit suffix + "@example.com" + ">"
+    //        = 1 + 200 + 1 + 3 + 12 + 1 = 218 chars (ASCII = 218 bytes).
+    // Using padStart(3,'0') ensures every ID is exactly 218 chars regardless of n.
+    // 10 IDs: 218 + 9*(1+218) = 218 + 9*219 = 2189 bytes > MAX_REFERENCES_BYTES (2000).
+    // 9 IDs:  218 + 8*219 = 1970 bytes < MAX_REFERENCES_BYTES.
+    // 10 IDs is well below MAX_REFERENCES_IDS (12), so only the byte cap fires.
+    const makeId = (n: number) =>
+      `<${'x'.repeat(200)}-${String(n).padStart(3, '0')}@example.com>`;
     const root = makeId(0);
     const tailIds = Array.from({ length: 8 }, (_, i) => makeId(i + 1));
     const replyToId = makeId(9);
-    // references has root + tail-1..tail-8; replyToId = tail-9 → 10 IDs total
+    // references has root + tail-001..tail-008; replyToId = tail-009 → 10 IDs total
     const references = [root, ...tailIds].join(' ');
 
     const { POST } = await import('../route');
@@ -532,8 +535,8 @@ describe('POST /api/send', () => {
 
     await POST(req as unknown as NextRequest);
     const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
-    // The byte cap (2000) forces the oldest tail ID (makeId(1)) to be dropped.
-    // Expected: root + makeId(2)..makeId(9) = 9 IDs, 216 + 8*217 = 1952 bytes.
+    // The byte cap (2000) forces the oldest tail ID (makeId(001)) to be dropped.
+    // Expected: root + makeId(002)..makeId(009) = 9 IDs, 1970 bytes.
     const expectedIds = [root, ...Array.from({ length: 8 }, (_, i) => makeId(i + 2))];
     expect(callArgs.headers?.['References']).toBe(expectedIds.join(' '));
   });

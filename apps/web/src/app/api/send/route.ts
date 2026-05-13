@@ -3,6 +3,8 @@ import { NextRequest } from 'next/server';
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { captureException } from '@/lib/sentry';
 import { z } from 'zod';
+import { buildReferencesHeader } from '@/lib/references';
+export { MAX_REFERENCES_IDS, MAX_REFERENCES_BYTES } from '@/lib/references';
 
 /**
  * All 400 responses share this shape so clients have one code path:
@@ -37,45 +39,6 @@ export const runtime = 'edge';
 
 const APP_FROM_ADDRESS = 'mail@q3ik.com';
 const APP_FROM_NAME = 'q3ik Mail';
-
-export const MAX_REFERENCES_IDS = 12;
-export const MAX_REFERENCES_BYTES = 2000;
-
-function buildReferencesHeader(
-  replyToId?: string,
-  references?: string
-): string | null {
-  if (!replyToId) return null;
-  // RFC 2822 References must be a space-separated chain of all ancestor
-  // Message-IDs. `references` is the persisted References value from the
-  // replied-to email (stored in D1). Appending `replyToId` grows the chain
-  // by one hop for each reply level. If references is absent (e.g. the
-  // replied-to email is the thread root), seed the chain with replyToId alone.
-  const chain = references
-    ? `${references} ${replyToId}`
-    : replyToId;
-
-  const ids = chain.split(/\s+/).filter(Boolean);
-  const rootId = ids[0];
-  const tail = ids.slice(1);
-  const dedupedTail = tail.filter((id) => id !== rootId);
-
-  const maxTailIds = Math.max(0, MAX_REFERENCES_IDS - 1);
-  const selectedTail = maxTailIds > 0 ? dedupedTail.slice(-maxTailIds) : [];
-
-  // Enforce the byte cap in O(n) by accumulating from the newest tail entries
-  // backward, stopping before exceeding MAX_REFERENCES_BYTES.
-  let byteCount = rootId.length;
-  const cappedTail: string[] = [];
-  for (let i = selectedTail.length - 1; i >= 0; i--) {
-    const next = 1 + selectedTail[i].length; // space + id
-    if (byteCount + next > MAX_REFERENCES_BYTES) break;
-    cappedTail.unshift(selectedTail[i]);
-    byteCount += next;
-  }
-
-  return [rootId, ...cappedTail].join(' ');
-}
 
 function buildEmailHeaders(
   messageId: string,
