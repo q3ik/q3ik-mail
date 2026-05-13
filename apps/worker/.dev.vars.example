@@ -1,6 +1,8 @@
 # apps/worker/.dev.vars
 
 # ---- CLOUDFLARE ---- #
+CLOUDFLARE_TEAM_DOMAIN=your-team.cloudflareaccess.com
+CLOUDFLARE_ACCESS_AUD=your-aud-value
 CLOUDFLARE_D1_DATABASE_ID=xxxxxxxxxxxxxxxxxx
 
 # ---- RESEND ---- #
