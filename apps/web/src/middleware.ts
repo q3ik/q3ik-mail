@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from 'next/server';
  *    exposing it on a public domain.
  */
 
-const PUBLIC_PATHS = ['/api/webhook'] as const;
+const PUBLIC_PATHS = ['/api/webhook', '/api/trigger-inbound'] as const;
 const PUBLIC_PREFIXES = ['/_next/static/', '/_next/image/'] as const;
 const PUBLIC_PATH_SET = new Set<string>(PUBLIC_PATHS);
 const TEAM_DOMAIN_PATTERN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.cloudflareaccess\.com$/;
@@ -173,5 +173,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api/webhook|_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };

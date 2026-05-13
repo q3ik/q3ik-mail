@@ -253,11 +253,21 @@ describe('Cloudflare Access middleware', () => {
     expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
   });
 
-  it('uses a matcher that excludes the webhook and Next.js internals', async () => {
+  it('bypasses the guard for trigger-inbound', async () => {
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/api/trigger-inbound');
+
+    const res = await middleware(req);
+
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+    expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
+  });
+
+  it('uses a matcher that excludes Next.js internals', async () => {
     const { config } = await import('../middleware');
 
     expect(config.matcher).toEqual([
-      '/((?!api/webhook|_next/static|_next/image|favicon.ico).*)',
+      '/((?!_next/static|_next/image|favicon.ico).*)',
     ]);
   });
 
