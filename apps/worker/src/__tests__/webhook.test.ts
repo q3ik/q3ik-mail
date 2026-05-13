@@ -456,7 +456,7 @@ describe('webhook handler', () => {
     );
   });
 
-  it('decodes URL-safe, unpadded base64 attachment content and stores bytes in R2', async () => {
+  it('decodes standard, URL-safe, and unpadded base64 attachment content', async () => {
     const { Resend } = await import('resend');
     const { env, putSpy } = makeThreadEnv();
 
@@ -466,16 +466,27 @@ describe('webhook handler', () => {
           get: vi.fn().mockResolvedValue({
             from: 'Alice <alice@example.com>',
             to: ['you@q3ik.com'],
-            subject: 'Attachment URL-safe b64',
+            subject: 'Attachment base64 variants',
             text: 'Body',
             html: null,
             headers: [],
             attachments: [
               {
-                filename: 'blob.bin',
+                filename: 'standard.bin',
                 content_type: 'application/octet-stream',
-                // URL-safe form of "++//" with padding stripped.
+                content: 'aGVsbG8=',
+              },
+              {
+                filename: 'url-safe.bin',
+                content_type: 'application/octet-stream',
+                // URL-safe base64 for bytes [251, 239, 255].
                 content: '--__',
+              },
+              {
+                filename: 'unpadded.bin',
+                content_type: 'application/octet-stream',
+                // Standard base64 without padding for "hello".
+                content: 'aGVsbG8',
               },
             ],
           }),
@@ -489,11 +500,19 @@ describe('webhook handler', () => {
     const res = await fetchWorker(req, env);
     expect(res.status).toBe(200);
 
-    const attachmentPutCall = putSpy.mock.calls.find((call) =>
-      String(call[0]).includes('/attachments/blob.bin')
-    );
-    expect(attachmentPutCall).toBeDefined();
-    expect(Array.from(attachmentPutCall![1] as Uint8Array)).toEqual([251, 239, 255]);
+    const expectedBytesByFilename: Record<string, number[]> = {
+      'standard.bin': [104, 101, 108, 108, 111],
+      'url-safe.bin': [251, 239, 255],
+      'unpadded.bin': [104, 101, 108, 108, 111],
+    };
+
+    for (const [filename, expectedBytes] of Object.entries(expectedBytesByFilename)) {
+      const attachmentPutCall = putSpy.mock.calls.find((call) =>
+        String(call[0]).includes(`/attachments/${filename}`)
+      );
+      expect(attachmentPutCall).toBeDefined();
+      expect(Array.from(attachmentPutCall![1] as Uint8Array)).toEqual(expectedBytes);
+    }
   });
 });
 
