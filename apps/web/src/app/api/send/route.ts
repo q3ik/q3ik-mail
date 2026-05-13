@@ -63,7 +63,7 @@ function buildReferencesHeader(
   const dedupedTail = tail.filter((id) => id !== rootId);
 
   const maxTailIds = Math.max(0, MAX_REFERENCES_IDS - 1);
-  let selectedTail = dedupedTail.slice(-maxTailIds);
+  let selectedTail = maxTailIds > 0 ? dedupedTail.slice(-maxTailIds) : [];
   let selected = [rootId, ...selectedTail];
 
   let joined = selected.join(' ');
