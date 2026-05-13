@@ -63,7 +63,7 @@ describe('MailList', () => {
         onSelectThread={vi.fn()}
       />
     );
-    expect(screen.getByText('No messages')).toBeInTheDocument();
+    expect(screen.getByText('No messages')).toBeDefined();
   });
 
   it('renders "Searching…" when isSearching is true', () => {
@@ -148,7 +148,7 @@ describe('MailList', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Loading…' })).toBeDefined();
-    expect(screen.getByRole('button', { name: 'Loading…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Loading…' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('renders unread state correctly', () => {
