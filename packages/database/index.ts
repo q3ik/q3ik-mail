@@ -152,8 +152,8 @@ function buildThreadListQuery(opts: {
   const whereClause = opts.cursor
     ? `WHERE thread_rank = 1
          AND (
-           created_at < ?
-           OR (created_at = ? AND id > ?)
+           ranked_emails.created_at < ?
+           OR (ranked_emails.created_at = ? AND ranked_emails.id > ?)
          )`
     : 'WHERE thread_rank = 1';
 
