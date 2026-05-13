@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup, waitFor } from '@testing-library/react';
 import type { Email } from '@q3ik-mail/database';
-import { MailDisplay } from '../mail-display';
+
 
 // ---------------------------------------------------------------------------
 // DOMPurify mock — synchronous stub so tests don't need a real DOM purifier.
@@ -67,7 +67,11 @@ const makeEmail = (overrides: Partial<Email> = {}): Email => ({
 // ---------------------------------------------------------------------------
 
 describe('MailDisplay — sanitization (C-1 fix)', () => {
-  beforeEach(() => {
+  let MailDisplay: React.ComponentType<{ thread: Email[]; onReply?: (payload: unknown) => void }>;
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import('../mail-display');
+    MailDisplay = mod.MailDisplay;
     vi.clearAllMocks();
     vi.resetModules();
   });
@@ -107,7 +111,7 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
     await waitFor(() => expect(mockSanitize).toHaveBeenCalled());
     const [, options] = mockSanitize.mock.calls[0] as [string, Record<string, unknown>];
     const forbidAttr = options['FORBID_ATTR'] as string[] | undefined;
-    expect(forbidAttr).not.toContain('style');
+    expect(forbidAttr ?? []).not.toContain('style');
   });
 
   it('registers the afterSanitizeAttributes hook exactly once across multiple email renders', async () => {
