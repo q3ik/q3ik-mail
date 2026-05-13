@@ -4,6 +4,9 @@ import { parseFrom } from '../utils/parseFrom';
 
 type WorkerFetch = NonNullable<typeof worker.fetch>;
 type WorkerRequest = Parameters<WorkerFetch>[0];
+type Uint8ArrayConstructorWithFromBase64 = Uint8ArrayConstructor & {
+  fromBase64?: (input: string) => Uint8Array;
+};
 
 // Mock svix — the worker uses `new Webhook(secret).verify()` directly.
 vi.mock('svix', () => ({
@@ -521,10 +524,8 @@ describe('webhook handler', () => {
     const { Resend } = await import('resend');
     const { env, putSpy } = makeThreadEnv();
 
-    const hadFromBase64 = Object.prototype.hasOwnProperty.call(Uint8Array, 'fromBase64');
-    const originalFromBase64 = (Uint8Array as Uint8ArrayConstructor & {
-      fromBase64?: (input: string) => Uint8Array;
-    }).fromBase64;
+    const hadFromBase64 = Object.hasOwn(Uint8Array, 'fromBase64');
+    const originalFromBase64 = (Uint8Array as Uint8ArrayConstructorWithFromBase64).fromBase64;
     Object.defineProperty(Uint8Array, 'fromBase64', {
       value: undefined,
       writable: true,
@@ -569,7 +570,7 @@ describe('webhook handler', () => {
       expect(Array.from(attachmentPutCall[1] as Uint8Array)).toEqual([251, 239, 255]);
     } finally {
       if (!hadFromBase64) {
-        delete (Uint8Array as Uint8ArrayConstructor & { fromBase64?: (input: string) => Uint8Array }).fromBase64;
+        delete (Uint8Array as Uint8ArrayConstructorWithFromBase64).fromBase64;
       } else {
         Object.defineProperty(Uint8Array, 'fromBase64', {
           value: originalFromBase64,
