@@ -54,8 +54,7 @@ function createMockDb(
                 });
               }
 
-              if (normalizedSql.includes('ORDER BY ranked_emails.created_at DESC, ranked_emails.id ASC')) {
-                const useResendId = normalizedSql.includes('resend_id ASC');
+              if (normalizedSql.includes('ORDER BY ranked_emails.created_at DESC, ranked_emails.resend_id ASC')) {
                 results.sort((a, b) => {
                   const aCreatedAt = typeof a.created_at === 'string' ? a.created_at : '';
                   const bCreatedAt = typeof b.created_at === 'string' ? b.created_at : '';
@@ -64,8 +63,8 @@ function createMockDb(
                     return bCreatedAt.localeCompare(aCreatedAt);
                   }
 
-                  const aTie = String((useResendId ? a.resend_id : a.id) ?? '');
-                  const bTie = String((useResendId ? b.resend_id : b.id) ?? '');
+                  const aTie = String(a.resend_id ?? '');
+                  const bTie = String(b.resend_id ?? '');
                   return aTie.localeCompare(bTie);
                 });
               }
