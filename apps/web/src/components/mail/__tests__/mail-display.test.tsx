@@ -73,7 +73,6 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
     const mod = await import('../mail-display');
     MailDisplay = mod.MailDisplay;
     vi.clearAllMocks();
-    vi.resetModules();
   });
 
   afterEach(() => {
