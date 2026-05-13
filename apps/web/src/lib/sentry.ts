@@ -1,3 +1,5 @@
+import type { Scope } from '@sentry/cloudflare';
+
 export async function captureException(err: unknown): Promise<void> {
   const serverSdk = '@sentry/cloudflare';
   const clientSdk = '@sentry/nextjs';
