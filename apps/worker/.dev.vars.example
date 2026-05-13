@@ -1,4 +1,7 @@
-# apps/web/.dev.vars
+# apps/worker/.dev.vars
+
+# ---- CLOUDFLARE ---- #
+CLOUDFLARE_D1_DATABASE_ID=xxxxxxxxxxxxxxxxxx
 
 # ---- RESEND ---- #
 RESEND_API_KEY=re_xxxxxxxxx

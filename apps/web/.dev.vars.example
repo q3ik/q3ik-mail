@@ -1,0 +1,22 @@
+# apps/web/.dev.vars
+
+# ---- AUTH ---- #
+AUTH_SECRET=your-value
+
+# ---- RESEND ---- #
+RESEND_API_KEY=re_xxxxxxxxx
+RESEND_WEBHOOK_SECRET=wxxxxxxxxx
+
+# ---- CLOUDFLARE ---- #
+CLOUDFLARE_TEAM_DOMAIN=your-team.cloudflareaccess.com
+CLOUDFLARE_ACCESS_AUD=your-aud-value
+
+# ---- SENTRY ---- #
+# (server/edge — not exposed to browser)
+SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
+SENTRY_TRACES_SAMPLE_RATE=1
+
+# ---- SENTRY ---- #
+# (client — NEXT_PUBLIC_ prefix required for browser exposure)
+NEXT_PUBLIC_SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
+NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=1
