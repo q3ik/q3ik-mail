@@ -27,8 +27,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # For pull_request events, skip test pipeline jobs when the PR carries
+  # the `skip-tests` label. Push and workflow_dispatch runs are unaffected.
+  # This avoids re-running tests on every PR update while the label is present.
+  #
+  # Reusable expression:
+  #   - true for non-PR events
+  #   - true for PRs without `skip-tests`
+  #   - false for PRs with `skip-tests`
+  #
+  # NOTE: Keep this in sync across all test-pipeline jobs.
+  #
+  #   github.event_name != 'pull_request' ||
+  #   !contains(github.event.pull_request.labels.*.name, 'skip-tests')
   config-guard:
     name: Config Validation
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-tests')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,6 +74,7 @@ jobs:
 
   typecheck:
     name: TypeScript
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-tests')
     runs-on: ubuntu-latest
     needs: config-guard
     permissions:
@@ -78,6 +93,7 @@ jobs:
 
   lint:
     name: Lint
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-tests')
     runs-on: ubuntu-latest
     needs: config-guard
     permissions:
@@ -95,6 +111,7 @@ jobs:
 
   unit-test:
     name: Unit & Integration Tests
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-tests')
     runs-on: ubuntu-latest
     needs: [typecheck, lint]
     permissions:
@@ -128,6 +145,7 @@ jobs:
 
   e2e:
     name: E2E Tests
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-tests')
     runs-on: ubuntu-latest
     needs: unit-test
     permissions:
