@@ -271,6 +271,58 @@ describe('Cloudflare Access middleware', () => {
     ]);
   });
 
+  // ── Auth regression: protected API routes ────────────────────────────────
+
+  it('redirects /api/emails/[id]/body when no JWT is present — middleware is the sole auth gate', async () => {
+    // Regression guard: the route handler no longer has its own auth check.
+    // This test proves that a request to the body endpoint without a valid
+    // CF Access JWT is rejected at the middleware layer. If this test fails,
+    // the endpoint is reachable without authentication.
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/api/emails/email-1/body');
+
+    const res = await middleware(req);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe(
+      'https://team.example.cloudflareaccess.com/',
+    );
+    expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
+  });
+
+  it('redirects /api/emails/[id]/body when a syntactically valid but cryptographically invalid JWT is presented', async () => {
+    // Regression guard: proves that a forged "a.b.c" token (which the old
+    // hasAccessJwt() syntactic check would have accepted) is correctly
+    // rejected by the cryptographic jwtVerify in middleware.
+    const verifyError = new Error('signature verification failed');
+    joseMocks.jwtVerify.mockRejectedValueOnce(verifyError);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { middleware } = await import('../middleware');
+      const req = new NextRequest('http://localhost/api/emails/email-1/body', {
+        headers: { 'CF-Access-Jwt-Assertion': 'a.b.c' },
+      });
+
+      const res = await middleware(req);
+
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe(
+        'https://team.example.cloudflareaccess.com/',
+      );
+      // jwtVerify WAS called — the token was not trivially accepted
+      expect(joseMocks.jwtVerify).toHaveBeenCalledWith(
+        'a.b.c',
+        joseMocks.remoteJwkSet,
+        expect.objectContaining({
+          audience: 'test-audience',
+          issuer: 'https://team.example.cloudflareaccess.com',
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   // ── Security headers ─────────────────────────────────────────────────────
 
   it('attaches X-Content-Type-Options: nosniff on authenticated responses', async () => {
