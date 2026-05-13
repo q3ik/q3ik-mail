@@ -59,7 +59,7 @@ const mockEnv = {
     prepare: () => ({
       bind: () => ({
         first: async () => null,
-        run: async () => ({ success: true }),
+        run: async () => ({ success: true, meta: { changes: 1 } }),
       }),
     }),
   },
@@ -114,7 +114,7 @@ function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
 function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unknown = null) {
   const bindSpy = vi.fn().mockReturnValue({
     first: async () => null,
-    run: async () => ({ success: true }),
+    run: async () => ({ success: true, meta: { changes: 1 } }),
   });
   // Separate spy for the duplicate-detection SELECT bind() so tests can assert
   // the correct emailId is passed without polluting the INSERT bindSpy.
@@ -546,13 +546,28 @@ describe('webhook handler', () => {
     const res = await fetchWorker(req, env);
     expect(res.status).toBe(200);
 
-    const attachmentInsertValues = bindSpy.mock.calls[1] as unknown[];
-    expect(attachmentInsertValues[1]).toBe(bindSpy.mock.calls[0][0]);
-    expect(String(attachmentInsertValues[2])).toMatch(/^emails\/.+\/attachments\/invoice\.pdf$/);
-    expect(attachmentInsertValues[3]).toBe('invoice.pdf');
-    expect(attachmentInsertValues[4]).toBe('application/pdf');
-    expect(attachmentInsertValues[5]).toBe(5);
-    expect(typeof attachmentInsertValues[6]).toBe('number');
+    const emailInsertValues = bindSpy.mock.calls[0] as unknown[];
+    const attachmentInsertValues = bindSpy.mock.calls.find(
+      (call) => call.length === 7 && call.includes('invoice.pdf')
+    ) as unknown[] | undefined;
+
+    expect(attachmentInsertValues).toBeDefined();
+    const [
+      _attachmentId,
+      attachmentEmailId,
+      attachmentR2Key,
+      attachmentFilename,
+      attachmentContentType,
+      attachmentSizeBytes,
+      attachmentCreatedAt,
+    ] = attachmentInsertValues!;
+
+    expect(attachmentEmailId).toBe(emailInsertValues[0]);
+    expect(String(attachmentR2Key)).toMatch(/^emails\/.+\/attachments\/invoice\.pdf$/);
+    expect(attachmentFilename).toBe('invoice.pdf');
+    expect(attachmentContentType).toBe('application/pdf');
+    expect(attachmentSizeBytes).toBe(5);
+    expect(typeof attachmentCreatedAt).toBe('number');
   });
 
   it('decodes standard, URL-safe, and unpadded base64 attachment content', async () => {

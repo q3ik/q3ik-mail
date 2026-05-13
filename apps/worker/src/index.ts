@@ -707,7 +707,19 @@ const handler: ExportedHandler<Env> = {
         )
         .run();
 
-      const inserted = (insertResult.meta?.changes ?? 1) > 0;
+      let inserted = (insertResult.meta?.changes ?? 0) > 0;
+      if (insertResult.meta?.changes === undefined && persistedAttachments.length > 0) {
+        const insertedRow = await env.DB
+          .prepare('SELECT id FROM emails WHERE id = ? LIMIT 1')
+          .bind(internalEmailId)
+          .first<{ id: string }>();
+        inserted = Boolean(insertedRow);
+        if (!inserted) {
+          console.warn('[worker] email insert result did not include meta.changes; skipping attachment metadata insert', {
+            emailId,
+          });
+        }
+      }
       if (inserted) {
         for (const attachment of persistedAttachments) {
           try {
