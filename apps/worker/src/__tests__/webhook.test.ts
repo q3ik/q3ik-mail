@@ -520,6 +520,12 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('Already ingested');
 
+    // The duplicate-detection SELECT must have been issued with the correct resend_id.
+    const dedupSelectCall = (prepareSpy.mock.calls as unknown[][]).find(
+      (args) => (args[0] as string).includes('resend_id'),
+    );
+    expect(dedupSelectCall).toBeDefined();
+
     // No R2 writes should have occurred.
     expect(putSpy).not.toHaveBeenCalled();
 
