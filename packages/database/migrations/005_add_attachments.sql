@@ -1,4 +1,4 @@
--- Migration 004: add attachment metadata table for R2 attachment objects
+-- Migration 005: add attachment metadata table for R2 attachment objects
 
 CREATE TABLE IF NOT EXISTS attachments (
   id TEXT PRIMARY KEY,
