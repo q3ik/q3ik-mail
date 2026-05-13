@@ -259,11 +259,21 @@ export async function migrateEmailBodiesToR2(
         await r2Bucket.put(bodyTextKey, row.body_text, {
           httpMetadata: { contentType: 'text/plain; charset=utf-8' },
         });
+        const bodyTextHead = await r2Bucket.head(bodyTextKey);
+        if (!bodyTextHead) {
+          console.error(`R2 write verification failed for key: ${bodyTextKey}`);
+          continue;
+        }
       }
       if (row.body_html !== null && row.body_html_key === null && bodyHtmlKey !== null) {
         await r2Bucket.put(bodyHtmlKey, row.body_html, {
           httpMetadata: { contentType: 'text/html; charset=utf-8' },
         });
+        const bodyHtmlHead = await r2Bucket.head(bodyHtmlKey);
+        if (!bodyHtmlHead) {
+          console.error(`R2 write verification failed for key: ${bodyHtmlKey}`);
+          continue;
+        }
       }
 
       const clearBodyText = bodyTextKey !== null && row.body_text !== null;

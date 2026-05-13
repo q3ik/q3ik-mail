@@ -3,6 +3,7 @@ import { getLatestEmails,
         getEmailsByThread, 
         markAsRead, 
         getEmailById, 
+        migrateEmailBodiesToR2,
         getThreadList, 
         getThreadListPage,
         searchEmails,
@@ -385,6 +386,66 @@ describe('getThreadList', () => {
     const result = await getThreadList(db, 3);
     expect(result).toHaveLength(3);
     expect(lastBoundLimit).toBe(3); // Confirms the LIMIT arg is exactly 3, not 4 (limit+1)
+  });
+});
+
+describe('migrateEmailBodiesToR2', () => {
+  it('skips D1 update when put succeeds but head verification fails', async () => {
+    const selectRows = [
+      {
+        id: 'email-1',
+        body_text: 'Plain body',
+        body_html: null,
+        body_text_key: null,
+        body_html_key: null,
+      },
+    ];
+
+    const updateRunSpy = vi.fn(async () => ({ success: true }));
+
+    const db = {
+      prepare: (sql: string) => ({
+        bind: (..._args: unknown[]) => ({
+          all: async () => {
+            if (sql.includes('SELECT id, body_text, body_html, body_text_key, body_html_key')) {
+              return { results: selectRows };
+            }
+            throw new Error(`Unexpected SQL in all(): ${sql}`);
+          },
+          run: async () => {
+            if (sql.includes('UPDATE emails')) {
+              return updateRunSpy();
+            }
+            throw new Error(`Unexpected SQL in run(): ${sql}`);
+          },
+        }),
+      }),
+    } as unknown as D1Database;
+
+    const putSpy = vi.fn(async () => undefined);
+    const headSpy = vi.fn(async () => null);
+    const bucket = {
+      put: putSpy,
+      head: headSpy,
+    } as unknown as R2Bucket;
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const migrated = await migrateEmailBodiesToR2(db, bucket, 10);
+
+      expect(migrated).toBe(0);
+      expect(putSpy).toHaveBeenCalledWith('emails/email-1/body.txt', 'Plain body', {
+        httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+      });
+      expect(headSpy).toHaveBeenCalledWith('emails/email-1/body.txt');
+      expect(updateRunSpy).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        'R2 write verification failed for key: emails/email-1/body.txt'
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 
