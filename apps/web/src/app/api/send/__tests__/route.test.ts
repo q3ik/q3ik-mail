@@ -401,7 +401,11 @@ describe('POST /api/send', () => {
     }
   });
 
-  it('omits References when replyToId is absent (empty references)', async () => {
+  it('omits References header when replyToId is absent', async () => {
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'r0' }, error: null });
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
+
     const { POST } = await import('../route');
     const req = new Request('http://localhost/api/send', {
       method: 'POST',
@@ -415,8 +419,6 @@ describe('POST /api/send', () => {
     });
 
     await POST(req as unknown as NextRequest);
-    const MockedResend = Resend as MockedClass<typeof Resend>;
-    const sendSpy = MockedResend.mock.results[0]?.value.emails.send as ReturnType<typeof vi.fn>;
     const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
     expect(callArgs.headers?.['References']).toBeUndefined();
   });
@@ -497,6 +499,43 @@ describe('POST /api/send', () => {
     expect(callArgs.headers?.['References']).toBe(
       '<root@example.com> <msg-1@example.com> <msg-2@example.com> <msg-3@example.com>'
     );
+  });
+
+  it('enforces byte-length cap dropping oldest tail IDs when below ID count cap', async () => {
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'r5' }, error: null });
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
+
+    // Each ID is 216 chars: "<" + "x".repeat(200) + "-N" + "@example.com" + ">"
+    // = 1 + 200 + 2 + 12 + 1 = 216 chars.
+    // 10 such IDs have total byte length 216 + 9*217 = 2169 > MAX_REFERENCES_BYTES (2000),
+    // while staying well below MAX_REFERENCES_IDS (12), so only the byte cap fires.
+    const makeId = (n: number) => `<${'x'.repeat(200)}-${n}@example.com>`;
+    const root = makeId(0);
+    const tailIds = Array.from({ length: 8 }, (_, i) => makeId(i + 1));
+    const replyToId = makeId(9);
+    // references has root + tail-1..tail-8; replyToId = tail-9 → 10 IDs total
+    const references = [root, ...tailIds].join(' ');
+
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        to: 'a@b.com',
+        subject: 'Re: Hi',
+        content: 'Hi back',
+        replyToId,
+        references,
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    await POST(req as unknown as NextRequest);
+    const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
+    // The byte cap (2000) forces the oldest tail ID (makeId(1)) to be dropped.
+    // Expected: root + makeId(2)..makeId(9) = 9 IDs, 216 + 8*217 = 1952 bytes.
+    const expectedIds = [root, ...Array.from({ length: 8 }, (_, i) => makeId(i + 2))];
+    expect(callArgs.headers?.['References']).toBe(expectedIds.join(' '));
   });
 
   it('still returns 200 when D1 persistence fails after send succeeds', async () => {

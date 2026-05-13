@@ -56,24 +56,25 @@ function buildReferencesHeader(
     : replyToId;
 
   const ids = chain.split(/\s+/).filter(Boolean);
-  if (ids.length === 0) return null;
-
   const rootId = ids[0];
   const tail = ids.slice(1);
   const dedupedTail = tail.filter((id) => id !== rootId);
 
   const maxTailIds = Math.max(0, MAX_REFERENCES_IDS - 1);
-  let selectedTail = maxTailIds > 0 ? dedupedTail.slice(-maxTailIds) : [];
-  let selected = [rootId, ...selectedTail];
+  const selectedTail = maxTailIds > 0 ? dedupedTail.slice(-maxTailIds) : [];
 
-  let joined = selected.join(' ');
-  while (selectedTail.length > 0 && joined.length > MAX_REFERENCES_BYTES) {
-    selectedTail = selectedTail.slice(1);
-    selected = [rootId, ...selectedTail];
-    joined = selected.join(' ');
+  // Enforce the byte cap in O(n) by accumulating from the newest tail entries
+  // backward, stopping before exceeding MAX_REFERENCES_BYTES.
+  let byteCount = rootId.length;
+  const cappedTail: string[] = [];
+  for (let i = selectedTail.length - 1; i >= 0; i--) {
+    const next = 1 + selectedTail[i].length; // space + id
+    if (byteCount + next > MAX_REFERENCES_BYTES) break;
+    cappedTail.unshift(selectedTail[i]);
+    byteCount += next;
   }
 
-  return joined;
+  return [rootId, ...cappedTail].join(' ');
 }
 
 function buildEmailHeaders(
