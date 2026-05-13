@@ -88,7 +88,7 @@ export interface ThreadListPage {
 
 interface ThreadListCursorPayload {
   createdAt: string;
-  id: string;
+  resendId: string;
 }
 
 function encodeThreadListCursor(cursor: ThreadListCursorPayload): string {
@@ -110,13 +110,13 @@ function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  if (typeof payload.createdAt !== 'string' || typeof payload.id !== 'string') {
+  if (typeof payload.createdAt !== 'string' || typeof payload.resendId !== 'string') {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
   return {
     createdAt: payload.createdAt,
-    id: payload.id,
+    resendId: payload.resendId,
   };
 }
 const ORPHAN_RETHREAD_BATCH_SIZE = 100;
@@ -330,7 +330,7 @@ export async function getThreadList(
          FROM emails
        ) ranked_emails
        WHERE thread_rank = 1
-       ORDER BY created_at DESC, id ASC
+       ORDER BY created_at DESC, resend_id ASC
        LIMIT ?`
     )
     .bind(limit)
@@ -418,7 +418,7 @@ export async function getThreadListPage(
     ? `WHERE thread_rank = 1
          AND (
            created_at < ?
-           OR (created_at = ? AND id > ?)
+           OR (created_at = ? AND resend_id > ?)
          )`
     : 'WHERE thread_rank = 1';
   const sql = `SELECT
@@ -437,13 +437,13 @@ export async function getThreadListPage(
                  FROM emails
                ) ranked_emails
                ${whereClause}
-               ORDER BY created_at DESC, id ASC
+               ORDER BY created_at DESC, resend_id ASC
                LIMIT ?`;
   const bindArgs = decodedCursor
     ? [
         decodedCursor.createdAt,
         decodedCursor.createdAt,
-        decodedCursor.id,
+        decodedCursor.resendId,
         fetchLimit,
       ]
     : [fetchLimit];
@@ -458,7 +458,7 @@ export async function getThreadListPage(
     results.length > pageSize && lastThread
       ? encodeThreadListCursor({
           createdAt: lastThread.created_at,
-          id: lastThread.id,
+          resendId: lastThread.resend_id,
         })
       : null;
 
