@@ -580,7 +580,7 @@ describe('getThreadListPage', () => {
     expect(page2.nextCursor).not.toBeNull();
     // Verify the composite WHERE clause structure is emitted correctly.
     expect(page2Sql).toContain('ranked_emails.created_at < ?');
-    expect(page2Sql).toContain('ranked_emails.created_at = ? AND ranked_emails.id > ?');
+    expect(page2Sql).toContain('ranked_emails.created_at = ? AND ranked_emails.resend_id > ?');
     expect(page2Args).toEqual([
       '2026-05-11T12:00:00Z',
       '2026-05-11T12:00:00Z',
