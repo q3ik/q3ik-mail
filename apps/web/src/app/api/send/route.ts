@@ -3,6 +3,8 @@ import { NextRequest } from 'next/server';
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { captureException } from '@/lib/sentry';
 import { z } from 'zod';
+import { buildReferencesHeader } from '@/lib/references';
+export { MAX_REFERENCES_IDS, MAX_REFERENCES_BYTES } from '@/lib/references';
 
 /**
  * All 400 responses share this shape so clients have one code path:
@@ -37,21 +39,6 @@ export const runtime = 'edge';
 
 const APP_FROM_ADDRESS = 'mail@q3ik.com';
 const APP_FROM_NAME = 'q3ik Mail';
-
-function buildReferencesHeader(
-  replyToId?: string,
-  references?: string
-): string | null {
-  if (!replyToId) return null;
-  // RFC 2822 References must be a space-separated chain of all ancestor
-  // Message-IDs. `references` is the persisted References value from the
-  // replied-to email (stored in D1). Appending `replyToId` grows the chain
-  // by one hop for each reply level. If references is absent (e.g. the
-  // replied-to email is the thread root), seed the chain with replyToId alone.
-  return references
-    ? `${references} ${replyToId}`
-    : replyToId;
-}
 
 function buildEmailHeaders(
   messageId: string,
