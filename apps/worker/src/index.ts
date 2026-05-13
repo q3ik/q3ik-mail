@@ -306,6 +306,9 @@ async function loadAttachmentContent(
 export interface Env {
   DB: D1Database;
   EMAIL_BODIES?: R2Bucket;
+  WEBHOOK_RATE_LIMITER: {
+    limit: (input: { key: string }) => Promise<{ success: boolean }>;
+  };
   RESEND_API_KEY: string;
   RESEND_WEBHOOK_SECRET: string;
   /** AUD tag from the Cloudflare Access application. Set via `wrangler secret put CLOUDFLARE_ACCESS_AUD`. */
@@ -380,6 +383,15 @@ const handler: ExportedHandler<Env> = {
     // Only accept POST requests
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });
+    }
+
+    if (new URL(request.url).pathname === '/api/webhook') {
+      const { success } = await env.WEBHOOK_RATE_LIMITER.limit({
+        key: request.headers.get('CF-Connecting-IP') ?? 'unknown',
+      });
+      if (!success) {
+        return new Response('Too Many Requests', { status: 429 });
+      }
     }
 
     // --- Step 0: Verify Cloudflare Access JWT ---
@@ -594,6 +606,13 @@ const handler: ExportedHandler<Env> = {
     }
 
     // --- Step 7: Attachment ingestion (download from Resend, store in R2) ---
+    const persistedAttachments: Array<{
+      r2Key: string;
+      filename: string;
+      contentType: string | null;
+      sizeBytes: number;
+      createdAt: number;
+    }> = [];
     if (r2Bucket) {
       const attachments = receivedEmail.attachments ?? [];
       for (const [index, attachment] of attachments.entries()) {
@@ -634,6 +653,15 @@ const handler: ExportedHandler<Env> = {
           await r2Bucket.put(attachmentKey, attachmentData, {
             httpMetadata: { contentType },
           });
+          persistedAttachments.push({
+            r2Key: attachmentKey,
+            filename: safeFilename,
+            contentType,
+            sizeBytes: typeof attachmentData === 'string'
+              ? new TextEncoder().encode(attachmentData).byteLength
+              : attachmentData.byteLength,
+            createdAt: Date.now(),
+          });
         } catch (err) {
           console.warn('[worker] failed to persist attachment to R2', {
             emailId,
@@ -654,7 +682,7 @@ const handler: ExportedHandler<Env> = {
     //
     // Column order in the INSERT and .bind() are kept in sync.
     try {
-      await env.DB.prepare(`
+      const insertResult = await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
           (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
         VALUES
@@ -678,6 +706,36 @@ const handler: ExportedHandler<Env> = {
           needsRethreading,           // needs_rethreading (0 or 1)
         )
         .run();
+
+      const inserted = (insertResult.meta?.changes ?? 1) > 0;
+      if (inserted) {
+        for (const attachment of persistedAttachments) {
+          try {
+            await env.DB.prepare(`
+              INSERT INTO attachments
+                (id, email_id, r2_key, filename, content_type, size_bytes, created_at)
+              VALUES
+                (?, ?, ?, ?, ?, ?, ?)
+            `)
+              .bind(
+                crypto.randomUUID(),
+                internalEmailId,
+                attachment.r2Key,
+                attachment.filename,
+                attachment.contentType,
+                attachment.sizeBytes,
+                attachment.createdAt,
+              )
+              .run();
+          } catch (err) {
+            console.warn('[worker] failed to persist attachment metadata to D1', {
+              emailId,
+              filename: attachment.filename,
+              error: err,
+            });
+          }
+        }
+      }
     } catch (err) {
       if (env.SENTRY_DSN) {
         Sentry.captureException(err, {

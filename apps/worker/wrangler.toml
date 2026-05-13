@@ -24,6 +24,12 @@ migrations_dir = "../../packages/database/migrations"
 binding = "EMAIL_BODIES"
 bucket_name = "q3ik-mail-bodies"
 
+[[unsafe.bindings]]
+name = "WEBHOOK_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1"
+simple = { limit = 60, period = 60 }
+
 [vars]
 ENVIRONMENT = "production"
 # The following secrets must be set via `wrangler secret put <NAME>`:
