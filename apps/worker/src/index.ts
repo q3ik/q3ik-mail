@@ -415,7 +415,34 @@ const handler: ExportedHandler<Env> = {
       return new Response('OK', { status: 200 });
     }
 
+    // Issue 2 fix: guard emailId immediately after assignment, before any
+    // further dereference. Nothing between here and Step 2.5 touches emailId.
     const emailId = event.data.email_id;
+    if (!emailId) {
+      return new Response('Missing email_id', { status: 400 });
+    }
+
+    // --- Step 2.5: Duplicate detection — fast-exit on known resend_id ---
+    //
+    // Issue 3: this block intentionally runs AFTER Step 0 (CF Access JWT) and
+    // Step 1 (svix signature) so unauthenticated callers cannot drive D1 reads.
+    //
+    // Issue 1: the application-layer SELECT here is an optimisation only — it
+    // short-circuits before any R2 writes and avoids redundant Resend API calls.
+    // The authoritative idempotency guarantee is enforced at the DB layer:
+    // `resend_id TEXT UNIQUE NOT NULL` (schema migration 000_init.sql) combined
+    // with `INSERT OR IGNORE` in Step 8 means concurrent duplicate deliveries
+    // that race past this SELECT will be silently discarded by the DB, with no
+    // data duplication and no orphaned R2 objects.
+    //
+    // Return 200 immediately so Resend stops retrying on duplicates.
+    const existing = await env.DB.prepare(
+      'SELECT id FROM emails WHERE resend_id = ? LIMIT 1'
+    ).bind(emailId).first();
+
+    if (existing) {
+      return new Response('Already ingested', { status: 200 });
+    }
 
     const resend = new Resend(env.RESEND_API_KEY);
 
