@@ -1,4 +1,4 @@
-# Migration Notes for Duplicate `003_` Prefix Rename
+# Migration Notes: Renumbering Migration Files to Fix Duplicate `003_` Prefix
 
 This PR renumbers migration filenames to remove a duplicate `003_` prefix:
 
