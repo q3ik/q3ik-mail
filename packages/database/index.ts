@@ -315,11 +315,25 @@ export async function migrateEmailBodiesToR2(
         await r2Bucket.put(bodyTextKey, row.body_text, {
           httpMetadata: { contentType: 'text/plain; charset=utf-8' },
         });
+        const bodyTextHead = await r2Bucket.head(bodyTextKey);
+        if (!bodyTextHead) {
+          const errorMsg = `R2 write verification failed for email ${row.id}, key: ${bodyTextKey}. Skipping email; D1 body columns remain unchanged.`;
+          console.error(errorMsg);
+          captureR2ReadError(new Error(errorMsg), { operation: 'r2.head.verify', key: bodyTextKey });
+          continue;
+        }
       }
       if (row.body_html !== null && row.body_html_key === null && bodyHtmlKey !== null) {
         await r2Bucket.put(bodyHtmlKey, row.body_html, {
           httpMetadata: { contentType: 'text/html; charset=utf-8' },
         });
+        const bodyHtmlHead = await r2Bucket.head(bodyHtmlKey);
+        if (!bodyHtmlHead) {
+          const errorMsg = `R2 write verification failed for email ${row.id}, key: ${bodyHtmlKey}. Skipping email; D1 body columns remain unchanged.`;
+          console.error(errorMsg);
+          captureR2ReadError(new Error(errorMsg), { operation: 'r2.head.verify', key: bodyHtmlKey });
+          continue;
+        }
       }
 
       const clearBodyText = bodyTextKey !== null && row.body_text !== null;
