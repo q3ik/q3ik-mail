@@ -119,6 +119,62 @@ function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
     id: payload.id,
   };
 }
+
+/**
+ * Builds the ranked thread list SQL and bind parameters shared by
+ * {@link getThreadList} and {@link getThreadListPage}.
+ *
+ * The inner subquery assigns `thread_rank = 1` to the most-recent email in
+ * each thread (ordered by `created_at DESC, resend_id ASC` for a stable
+ * tiebreaker). The outer query filters to rank-1 rows, applies an optional
+ * cursor predicate for keyset pagination, and returns results ordered by
+ * `created_at DESC, id ASC`.
+ *
+ * @param opts.cursor - Optional keyset cursor; when present adds the composite
+ *                      `(created_at < ?) OR (created_at = ? AND id > ?)` clause.
+ * @param opts.limit  - Number of rows to fetch (callers add +1 for has-next-page
+ *                      detection when needed).
+ */
+function buildThreadListQuery(opts: {
+  cursor?: { createdAt: string; id: string } | null;
+  limit: number;
+}): { sql: string; params: (string | number)[] } {
+  const rankedSubquery = `SELECT
+           id, resend_id, thread_id, from_address, from_name,
+           to_address, subject, message_id, in_reply_to, "references",
+           is_read, is_sent, needs_rethreading, created_at,
+           ROW_NUMBER() OVER (
+             PARTITION BY thread_id
+             ORDER BY created_at DESC, resend_id ASC
+           ) AS thread_rank
+         FROM emails`;
+
+  const whereClause = opts.cursor
+    ? `WHERE thread_rank = 1
+         AND (
+           created_at < ?
+           OR (created_at = ? AND id > ?)
+         )`
+    : 'WHERE thread_rank = 1';
+
+  const sql = `SELECT
+         id, resend_id, thread_id, from_address, from_name,
+         to_address, subject, message_id, in_reply_to, "references",
+         is_read, is_sent, needs_rethreading, created_at
+       FROM (
+         ${rankedSubquery}
+       ) ranked_emails
+       ${whereClause}
+       ORDER BY created_at DESC, id ASC
+       LIMIT ?`;
+
+  const params: (string | number)[] = opts.cursor
+    ? [opts.cursor.createdAt, opts.cursor.createdAt, opts.cursor.id, opts.limit]
+    : [opts.limit];
+
+  return { sql, params };
+}
+
 const ORPHAN_RETHREAD_BATCH_SIZE = 100;
 
 /**
@@ -312,28 +368,10 @@ export async function getThreadList(
   db: D1Database,
   limit: number = 50
 ): Promise<EmailSummary[]> {
+  const { sql, params } = buildThreadListQuery({ limit });
   const { results } = await db
-    .prepare(
-      `SELECT
-         id, resend_id, thread_id, from_address, from_name,
-         to_address, subject, message_id, in_reply_to, "references",
-         is_read, is_sent, needs_rethreading, created_at
-       FROM (
-         SELECT
-           id, resend_id, thread_id, from_address, from_name,
-           to_address, subject, message_id, in_reply_to, "references",
-           is_read, is_sent, needs_rethreading, created_at,
-           ROW_NUMBER() OVER (
-             PARTITION BY thread_id
-             ORDER BY created_at DESC, resend_id ASC
-           ) AS thread_rank
-         FROM emails
-       ) ranked_emails
-       WHERE thread_rank = 1
-       ORDER BY created_at DESC, id ASC
-       LIMIT ?`
-    )
-    .bind(limit)
+    .prepare(sql)
+    .bind(...params)
     .all<EmailSummary>();
   return results;
 }
@@ -414,42 +452,13 @@ export async function getThreadListPage(
       throw err;
     }
   }
-  const whereClause = decodedCursor
-    ? `WHERE thread_rank = 1
-         AND (
-           created_at < ?
-           OR (created_at = ? AND id > ?)
-         )`
-    : 'WHERE thread_rank = 1';
-  const sql = `SELECT
-                 id, resend_id, thread_id, from_address, from_name,
-                 to_address, subject, message_id, in_reply_to, "references",
-                 is_read, is_sent, needs_rethreading, created_at
-               FROM (
-                 SELECT
-                   id, resend_id, thread_id, from_address, from_name,
-                   to_address, subject, message_id, in_reply_to, "references",
-                   is_read, is_sent, needs_rethreading, created_at,
-                   ROW_NUMBER() OVER (
-                     PARTITION BY thread_id
-                     ORDER BY created_at DESC, resend_id ASC
-                   ) AS thread_rank
-                 FROM emails
-               ) ranked_emails
-               ${whereClause}
-               ORDER BY created_at DESC, id ASC
-               LIMIT ?`;
-  const bindArgs = decodedCursor
-    ? [
-        decodedCursor.createdAt,
-        decodedCursor.createdAt,
-        decodedCursor.id,
-        fetchLimit,
-      ]
-    : [fetchLimit];
+  const { sql, params } = buildThreadListQuery({
+    cursor: decodedCursor,
+    limit: fetchLimit,
+  });
   const { results } = await db
     .prepare(sql)
-    .bind(...bindArgs)
+    .bind(...params)
     .all<EmailSummary>();
 
   const threads = results.slice(0, pageSize);
