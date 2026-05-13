@@ -4,6 +4,9 @@ import { parseFrom } from '../utils/parseFrom';
 
 type WorkerFetch = NonNullable<typeof worker.fetch>;
 type WorkerRequest = Parameters<WorkerFetch>[0];
+type Uint8ArrayConstructorWithFromBase64 = Uint8ArrayConstructor & {
+  fromBase64?: (input: string) => Uint8Array;
+};
 
 // Mock svix — the worker uses `new Webhook(secret).verify()` directly.
 vi.mock('svix', () => ({
@@ -466,7 +469,7 @@ describe('webhook handler', () => {
     );
   });
 
-  it('decodes URL-safe, unpadded base64 attachment content and stores bytes in R2', async () => {
+  it('decodes standard, URL-safe, and unpadded base64 attachment content', async () => {
     const { Resend } = await import('resend');
     const { env, putSpy } = makeThreadEnv();
 
@@ -476,16 +479,27 @@ describe('webhook handler', () => {
           get: vi.fn().mockResolvedValue({
             from: 'Alice <alice@example.com>',
             to: ['you@q3ik.com'],
-            subject: 'Attachment URL-safe b64',
+            subject: 'Attachment base64 variants',
             text: 'Body',
             html: null,
             headers: [],
             attachments: [
               {
-                filename: 'blob.bin',
+                filename: 'standard.bin',
                 content_type: 'application/octet-stream',
-                // URL-safe form of "++//" with padding stripped.
+                content: 'aGVsbG8=',
+              },
+              {
+                filename: 'url-safe.bin',
+                content_type: 'application/octet-stream',
+                // URL-safe base64 for bytes [251, 239, 255].
                 content: '--__',
+              },
+              {
+                filename: 'unpadded.bin',
+                content_type: 'application/octet-stream',
+                // Standard base64 without padding for "hello".
+                content: 'aGVsbG8',
               },
             ],
           }),
@@ -499,11 +513,82 @@ describe('webhook handler', () => {
     const res = await fetchWorker(req, env);
     expect(res.status).toBe(200);
 
-    const attachmentPutCall = putSpy.mock.calls.find((call) =>
-      String(call[0]).includes('/attachments/blob.bin')
-    );
-    expect(attachmentPutCall).toBeDefined();
-    expect(Array.from(attachmentPutCall![1] as Uint8Array)).toEqual([251, 239, 255]);
+    const expectedBytesByFilename: Record<string, number[]> = {
+      'standard.bin': [104, 101, 108, 108, 111],
+      'url-safe.bin': [251, 239, 255],
+      'unpadded.bin': [104, 101, 108, 108, 111],
+    };
+
+    for (const [filename, expectedBytes] of Object.entries(expectedBytesByFilename)) {
+      const attachmentPutCall = putSpy.mock.calls.find((call) =>
+        String(call[0]).includes(`/attachments/${filename}`)
+      );
+      if (!attachmentPutCall) {
+        throw new Error(`No R2 put call found for attachment: ${filename}`);
+      }
+      expect(Array.from(attachmentPutCall[1] as Uint8Array)).toEqual(expectedBytes);
+    }
+  });
+
+  it('falls back to atob decoding when Uint8Array.fromBase64 is unavailable', async () => {
+    const { Resend } = await import('resend');
+    const { env, putSpy } = makeThreadEnv();
+
+    const hadFromBase64 = Object.hasOwn(Uint8Array, 'fromBase64');
+    const originalFromBase64 = (Uint8Array as Uint8ArrayConstructorWithFromBase64).fromBase64;
+    Object.defineProperty(Uint8Array, 'fromBase64', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+
+    try {
+      (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+        emails: {
+          receiving: {
+            get: vi.fn().mockResolvedValue({
+              from: 'Alice <alice@example.com>',
+              to: ['you@q3ik.com'],
+              subject: 'Attachment fallback decode',
+              text: 'Body',
+              html: null,
+              headers: [],
+              attachments: [
+                {
+                  filename: 'fallback.bin',
+                  content_type: 'application/octet-stream',
+                  content: '--__',
+                },
+              ],
+            }),
+          },
+        },
+      }));
+
+      const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+        'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+      });
+      const res = await fetchWorker(req, env);
+      expect(res.status).toBe(200);
+
+      const attachmentPutCall = putSpy.mock.calls.find((call) =>
+        String(call[0]).includes('/attachments/fallback.bin')
+      );
+      if (!attachmentPutCall) {
+        throw new Error('No R2 put call found for attachment: fallback.bin');
+      }
+      expect(Array.from(attachmentPutCall[1] as Uint8Array)).toEqual([251, 239, 255]);
+    } finally {
+      if (!hadFromBase64) {
+        delete (Uint8Array as Uint8ArrayConstructorWithFromBase64).fromBase64;
+      } else {
+        Object.defineProperty(Uint8Array, 'fromBase64', {
+          value: originalFromBase64,
+          writable: true,
+          configurable: true,
+        });
+      }
+    }
   });
 
   it('returns 200 and performs no R2/D1 writes when a duplicate resend_id is received', async () => {
