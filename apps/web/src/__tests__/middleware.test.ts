@@ -253,12 +253,84 @@ describe('Cloudflare Access middleware', () => {
     expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
   });
 
-  it('uses a matcher that excludes the webhook and Next.js internals', async () => {
+  it('bypasses the guard for trigger-inbound', async () => {
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/api/trigger-inbound');
+
+    const res = await middleware(req);
+
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+    expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
+  });
+
+  it('bypasses the guard for webhook with trailing slash', async () => {
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/api/webhook/');
+
+    const res = await middleware(req);
+
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+    expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
+  });
+
+  it('uses a matcher that excludes Next.js internals', async () => {
     const { config } = await import('../middleware');
 
     expect(config.matcher).toEqual([
-      '/((?!api/webhook|_next/static|_next/image|favicon.ico).*)',
+      '/((?!_next/static|_next/image|favicon.ico).*)',
     ]);
+  });
+
+  // ── Auth regression: protected API routes ────────────────────────────────
+
+  it('redirects /api/emails/[id]/body when no JWT is present — middleware is the sole auth gate', async () => {
+    // Regression guard: the route handler no longer has its own auth check.
+    // This test proves that a request to the body endpoint without a valid
+    // CF Access JWT is rejected at the middleware layer. If this test fails,
+    // the endpoint is reachable without authentication.
+    const { middleware } = await import('../middleware');
+    const req = new NextRequest('http://localhost/api/emails/email-1/body');
+
+    const res = await middleware(req);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe(
+      'https://team.example.cloudflareaccess.com/',
+    );
+    expect(joseMocks.jwtVerify).not.toHaveBeenCalled();
+  });
+
+  it('redirects /api/emails/[id]/body when a syntactically valid but cryptographically invalid JWT is presented', async () => {
+    // Regression guard: proves that a forged "a.b.c" token (which the old
+    // hasAccessJwt() syntactic check would have accepted) is correctly
+    // rejected by the cryptographic jwtVerify in middleware.
+    const verifyError = new Error('signature verification failed');
+    joseMocks.jwtVerify.mockRejectedValueOnce(verifyError);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { middleware } = await import('../middleware');
+      const req = new NextRequest('http://localhost/api/emails/email-1/body', {
+        headers: { 'CF-Access-Jwt-Assertion': 'a.b.c' },
+      });
+
+      const res = await middleware(req);
+
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe(
+        'https://team.example.cloudflareaccess.com/',
+      );
+      // jwtVerify WAS called — the token was not trivially accepted
+      expect(joseMocks.jwtVerify).toHaveBeenCalledWith(
+        'a.b.c',
+        joseMocks.remoteJwkSet,
+        expect.objectContaining({
+          audience: 'test-audience',
+          issuer: 'https://team.example.cloudflareaccess.com',
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   // ── Security headers ─────────────────────────────────────────────────────
