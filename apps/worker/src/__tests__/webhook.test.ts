@@ -89,21 +89,40 @@ function fetchWorker(req: Request, env = mockEnv, ctx = mockCtx) {
 
 /**
  * Creates a spy-instrumented Env whose DB.prepare / .bind calls are recorded.
- * SELECT statements (thread-lookup) are routed to a silent non-spy stub so
- * bindSpy exclusively captures INSERT .bind() calls.
+ * SELECT statements are routed to silent non-spy stubs so bindSpy exclusively
+ * captures INSERT .bind() calls.
  *
- * `selectFirstResult` is the value returned by SELECT .first() — use an
- * object like `{ thread_id: 'x' }` to simulate a found parent, or `null`
- * for the orphan / no-parent path.
+ * `selectFirstResult` is the value returned by the thread-lookup SELECT
+ * (`WHERE message_id = ?`). Use an object like `{ thread_id: 'x' }` to simulate
+ * a found parent, or `null` for the orphan / no-parent path.
+ *
+ * `existingResendId` is the value returned by the duplicate-detection SELECT
+ * (`WHERE resend_id = ?`). Defaults to `null` (not a duplicate) so that tests
+ * reach the full ingestion path. Pass a non-null value to simulate a duplicate.
+ *
+ * `dedupBindSpy` is a separate spy wired into the resend_id SELECT stub.
+ * Inspect it to assert that the dedup query was called with the correct emailId.
+ * It is distinct from `bindSpy` (which only captures INSERT .bind() calls).
  */
-function makeThreadEnv(selectFirstResult: unknown = null) {
+function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unknown = null) {
   const bindSpy = vi.fn().mockReturnValue({
     first: async () => null,
     run: async () => ({ success: true }),
   });
+  // Separate spy for the duplicate-detection SELECT bind() so tests can assert
+  // the correct emailId is passed without polluting the INSERT bindSpy.
+  const dedupBindSpy = vi.fn().mockReturnValue({
+    first: async () => existingResendId,
+  });
   const prepareSpy = vi.fn().mockImplementation((sql: string) => {
-    // Route SELECTs to a silent non-spy stub so bindSpy only sees INSERT calls.
+    // Route SELECTs to silent non-spy stubs so bindSpy only sees INSERT calls.
     if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
+      // The duplicate-detection query checks resend_id — use dedupBindSpy so
+      // tests can assert the correct emailId is passed to the dedup query.
+      if (sql.includes('resend_id')) {
+        return { bind: dedupBindSpy };
+      }
+      // All other SELECTs (e.g. thread-lookup by message_id) use the caller's value.
       return {
         bind: () => ({ first: async () => selectFirstResult }),
       };
@@ -119,7 +138,7 @@ function makeThreadEnv(selectFirstResult: unknown = null) {
     EMAIL_BODIES: { put: putSpy },
     DB: { prepare: prepareSpy },
   } as unknown as import('../index').Env;
-  return { env, prepareSpy, bindSpy, putSpy };
+  return { env, prepareSpy, bindSpy, dedupBindSpy, putSpy };
 }
 
 /**
@@ -579,6 +598,49 @@ describe('webhook handler', () => {
         });
       }
     }
+  });
+
+  it('returns 200 and performs no R2/D1 writes when a duplicate resend_id is received', async () => {
+    // `existingResendId` causes the resend_id SELECT stub to return an existing
+    // row, simulating a duplicate delivery. `dedupBindSpy` captures what value
+    // was passed to .bind() on the dedup SELECT, proving the correct emailId
+    // is used — not undefined or a hardcoded value.
+    const { env, prepareSpy, bindSpy, dedupBindSpy, putSpy } = makeThreadEnv(
+      null,
+      { id: 'existing-email-id' },
+    );
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+
+    // Must return 200 OK immediately without touching R2 or D1 further.
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('Already ingested');
+
+    // The dedup SELECT must have been prepared with a query referencing resend_id.
+    const dedupSelectCall = (prepareSpy.mock.calls as unknown[][]).find(
+      (args) => (args[0] as string).includes('resend_id'),
+    );
+    expect(dedupSelectCall).toBeDefined();
+
+    // The dedup SELECT bind() must have been called with the correct emailId.
+    // The svix mock returns email_id = 'resend-test-id'; verify that exact value
+    // was passed — catches any regression where undefined or a wrong ID is bound.
+    expect(dedupBindSpy).toHaveBeenCalledWith('resend-test-id');
+
+    // No R2 writes should have occurred.
+    expect(putSpy).not.toHaveBeenCalled();
+
+    // No D1 INSERT should have been prepared.
+    const insertCall = (prepareSpy.mock.calls as unknown[][]).find(
+      (args) => (args[0] as string).includes('INSERT'),
+    );
+    expect(insertCall).toBeUndefined();
+
+    // bindSpy (INSERT path) must not have been called — the early-exit fired.
+    expect(bindSpy).not.toHaveBeenCalled();
   });
 });
 
