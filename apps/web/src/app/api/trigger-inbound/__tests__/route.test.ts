@@ -174,4 +174,21 @@ describe('POST /api/trigger-inbound', () => {
     // thread_id must be a plain UUID, not an RFC 5322 message-ID (<...> format)
     expect(threadId).toMatch(/^[0-9a-f-]{36}$/);
   });
+  it('returns 400 when the JSON body is malformed', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/trigger-inbound', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-e2e-test-secret': 'secret-123',
+      },
+      body: '{ invalid json }',
+    });
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'Invalid JSON body' });
+    expect(routeMocks.prepare).not.toHaveBeenCalled();
+  });
 });

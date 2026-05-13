@@ -66,9 +66,12 @@ const makeEmail = (overrides: Partial<Email> = {}): Email => ({
 // ---------------------------------------------------------------------------
 
 describe('MailDisplay — sanitization (C-1 fix)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  let MailDisplay: React.ComponentType<{ thread: Email[]; onReply?: (payload: unknown) => void }>;
+  beforeEach(async () => {
     vi.resetModules();
+    const mod = await import('../mail-display');
+    MailDisplay = mod.MailDisplay;
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -108,8 +111,8 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
 
     await waitFor(() => expect(mockSanitize).toHaveBeenCalled());
     const [, options] = mockSanitize.mock.calls[0] as [string, Record<string, unknown>];
-    const forbidAttr = (options['FORBID_ATTR'] as string[] | undefined) || [];
-    expect(forbidAttr).not.toContain('style');
+    const forbidAttr = options['FORBID_ATTR'] as string[] | undefined;
+    expect(forbidAttr ?? []).not.toContain('style');
   });
 
   it('registers the afterSanitizeAttributes hook exactly once across multiple email renders', async () => {
