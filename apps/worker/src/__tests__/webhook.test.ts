@@ -121,6 +121,10 @@ function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unkn
   const dedupBindSpy = vi.fn().mockReturnValue({
     first: async () => existingResendId,
   });
+  // Spy for UPDATE queries (e.g., body_text_key/body_html_key updates)
+  const updateBindSpy = vi.fn().mockReturnValue({
+    run: async () => ({ success: true, meta: { changes: 1 } }),
+  });
   const prepareSpy = vi.fn().mockImplementation((sql: string) => {
     // Route SELECTs to silent non-spy stubs so bindSpy only sees INSERT calls.
     if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
@@ -133,6 +137,10 @@ function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unkn
       return {
         bind: () => ({ first: async () => selectFirstResult }),
       };
+    }
+    // Route UPDATEs (body key updates) to updateBindSpy
+    if (sql.trimStart().toUpperCase().startsWith('UPDATE')) {
+      return { bind: updateBindSpy };
     }
     return { bind: bindSpy };
   });
@@ -147,7 +155,7 @@ function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unkn
     EMAIL_BODIES: { put: putSpy },
     DB: { prepare: prepareSpy },
   } as unknown as import('../index').Env;
-  return { env, prepareSpy, bindSpy, dedupBindSpy, putSpy, rateLimitSpy };
+  return { env, prepareSpy, bindSpy, dedupBindSpy, putSpy, rateLimitSpy, updateBindSpy };
 }
 
 /**
@@ -291,7 +299,7 @@ describe('webhook handler', () => {
 
   it('stores text body in R2 and persists the `body_text_key` in D1', async () => {
     const { Resend } = await import('resend');
-    const { env, prepareSpy, bindSpy, putSpy } = makeThreadEnv();
+    const { env, prepareSpy, bindSpy, putSpy, updateBindSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -301,9 +309,6 @@ describe('webhook handler', () => {
             to: ['you@q3ik.com'],
             subject: 'Body Mapping',
             text: 'Plain text from text field',
-            // A `body_text` key in the payload must NOT reach D1 body_text;
-            // the worker must always read from `text`, never from `body_text`.
-            body_text: 'legacy field should be ignored',
             html: null,
             headers: [{ name: 'Message-ID', value: '<body-map@example.com>' }],
           }),
@@ -318,21 +323,28 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    // INSERT should have null for body keys (they're set via UPDATE after R2 write)
     expect(values[columns.indexOf('body_text')]).toBeNull();
-    const bodyTextKey = values[columns.indexOf('body_text_key')];
-    expect(bodyTextKey).toMatch(/^emails\/.+\/body\.txt$/);
+    expect(values[columns.indexOf('body_text_key')]).toBeNull();
+
+    // R2 put should happen
     expect(putSpy).toHaveBeenCalledWith(
-      bodyTextKey,
+      expect.any(String),
       'Plain text from text field',
       expect.objectContaining({
         httpMetadata: { contentType: 'text/plain; charset=utf-8' },
       })
     );
+    // Verify UPDATE was called with the body key
+    expect(updateBindSpy).toHaveBeenCalled();
+    const updateCall = updateBindSpy.mock.calls[0];
+    expect(updateCall[0]).toMatch(/^emails\/.+\/body\.txt$/); // body_text_key
+    expect(updateCall[1]).toBeNull(); // body_html_key (not provided)
   });
 
   it('accepts HTML-only email where `text` key is absent (no 502)', async () => {
     const { Resend } = await import('resend');
-    const { env, prepareSpy, bindSpy, putSpy } = makeThreadEnv();
+    const { env, prepareSpy, bindSpy, putSpy, updateBindSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -357,18 +369,25 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
+    // INSERT should have null for body keys (they're set via UPDATE after R2 write)
     expect(values[columns.indexOf('body_text')]).toBeNull();
     expect(values[columns.indexOf('body_html')]).toBeNull();
     expect(values[columns.indexOf('body_text_key')]).toBeNull();
-    const bodyHtmlKey = values[columns.indexOf('body_html_key')];
-    expect(bodyHtmlKey).toMatch(/^emails\/.+\/body\.html$/);
+    expect(values[columns.indexOf('body_html_key')]).toBeNull();
+
+    // R2 put should happen
     expect(putSpy).toHaveBeenCalledWith(
-      bodyHtmlKey,
+      expect.any(String),
       '<p>HTML body</p>',
       expect.objectContaining({
         httpMetadata: { contentType: 'text/html; charset=utf-8' },
       })
     );
+    // Verify UPDATE was called with the body key
+    expect(updateBindSpy).toHaveBeenCalled();
+    const updateCall = updateBindSpy.mock.calls[0];
+    expect(updateCall[0]).toBeNull(); // body_text_key (not provided)
+    expect(updateCall[1]).toMatch(/^emails\/.+\/body\.html$/); // body_html_key
   });
 
   it('returns 502 when Resend payload has a non-string, non-null `text` field', async () => {

@@ -615,39 +615,30 @@ const handler: ExportedHandler<Env> = {
       : (typeof toRaw === 'string' ? toRaw : '');
 
     const internalEmailId = crypto.randomUUID();
-    const r2Bucket = env.EMAIL_BODIES;
 
-    // --- Step 6: Store body content in R2 and persist key columns in D1 ---
-    // R2 write failures are NON-FATAL: we log+warn and proceed with null keys
-    // so the D1 INSERT always completes. This prevents the Resend retry
-    // contract from creating orphaned R2 objects: if a 500 were returned here,
-    // Resend would retry, INSERT OR IGNORE would skip the duplicate resend_id,
-    // and any already-written R2 objects would be permanently orphaned.
-    let bodyTextKey: string | null = null;
-    let bodyHtmlKey: string | null = null;
+    // --- Step 6: Collect body content for deferred R2 write ---
+    // Issue H2 fix: Body R2 writes are deferred until after D1 INSERT succeeds.
+    // This prevents orphaned R2 objects when D1 INSERT fails or gets dedup'd
+    // by a concurrent delivery. Body content is kept in memory until Step 8
+    // confirms the D1 row was inserted.
+    const pendingBodyContent: Array<{ key: string; content: string; contentType: string }> = [];
+
+    const r2Bucket = env.EMAIL_BODIES;
     if (r2Bucket) {
       if (receivedEmail.text !== null && receivedEmail.text !== undefined) {
-        bodyTextKey = getBodyTextKey(internalEmailId);
-        try {
-          await r2Bucket.put(bodyTextKey, receivedEmail.text, {
-            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-          });
-        } catch (err) {
-          captureR2PutError(err, env, { emailId, operation: 'body_text', objectKey: bodyTextKey });
-          bodyTextKey = null;
-        }
+        pendingBodyContent.push({
+          key: getBodyTextKey(internalEmailId),
+          content: receivedEmail.text,
+          contentType: 'text/plain; charset=utf-8',
+        });
       }
 
       if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
-        bodyHtmlKey = getBodyHtmlKey(internalEmailId);
-        try {
-          await r2Bucket.put(bodyHtmlKey, receivedEmail.html, {
-            httpMetadata: { contentType: 'text/html; charset=utf-8' },
-          });
-        } catch (err) {
-          captureR2PutError(err, env, { emailId, operation: 'body_html', objectKey: bodyHtmlKey });
-          bodyHtmlKey = null;
-        }
+        pendingBodyContent.push({
+          key: getBodyHtmlKey(internalEmailId),
+          content: receivedEmail.html,
+          contentType: 'text/html; charset=utf-8',
+        });
       }
     } else {
       console.warn('[worker] EMAIL_BODIES R2 bucket not bound; bodies will not be stored in R2', { emailId });
@@ -755,8 +746,8 @@ const handler: ExportedHandler<Env> = {
           receivedEmail.subject ?? null,
           null,                       // DEPRECATED: body_text now stored in R2
           null,                       // DEPRECATED: body_html now stored in R2
-          bodyTextKey,                // body_text_key
-          bodyHtmlKey,                // body_html_key
+          null,                       // body_text_key (set after R2 write in inserted block)
+          null,                       // body_html_key (set after R2 write in inserted block)
           messageId,                  // message_id (nullable)
           inReplyTo,                  // in_reply_to (nullable)
           referencesHeader,           // references (nullable)
@@ -769,6 +760,34 @@ const handler: ExportedHandler<Env> = {
       // where absent meta would silently be treated as a non-duplicate.
       const inserted = (insertResult.meta.changes ?? 0) > 0;
       if (inserted) {
+        // Issue H2 fix: Body R2 writes occur here, inside the inserted gate,
+        // so duplicate deliveries never trigger redundant R2 puts.
+        // Issue H3 fix: R2 write failures are FATAL — return 503 so Resend retries.
+        const writtenBodyKeys: Array<{ key: string; r2Key: string }> = [];
+        for (const { key, content, contentType } of pendingBodyContent) {
+          try {
+            await r2Bucket!.put(key, content, {
+              httpMetadata: { contentType },
+            });
+            writtenBodyKeys.push({ key, r2Key: key });
+          } catch (err) {
+            captureR2PutError(err, env, { emailId, operation: 'body_write', objectKey: key });
+            // Issue H3 fix: Return 503 to trigger Resend retry instead of silently losing content
+            return new Response('Body storage failed', { status: 503 });
+          }
+        }
+
+        // If body keys were written, UPDATE the row with the R2 keys
+        if (writtenBodyKeys.length > 0) {
+          const bodyTextKeyUpdate = writtenBodyKeys.find((k) => k.key.endsWith('.txt'))?.r2Key ?? null;
+          const bodyHtmlKeyUpdate = writtenBodyKeys.find((k) => k.key.endsWith('.html'))?.r2Key ?? null;
+          await env.DB.prepare(`
+            UPDATE emails SET body_text_key = ?, body_html_key = ? WHERE id = ?
+          `)
+            .bind(bodyTextKeyUpdate, bodyHtmlKeyUpdate, internalEmailId)
+            .run();
+        }
+
         // Issue 2 fix: R2 attachment writes occur here, inside the inserted gate,
         // so duplicate deliveries never trigger redundant R2 puts.
         const persistedAttachments: Array<{
