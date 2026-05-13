@@ -25,40 +25,22 @@ export async function GET(
       }
     }
 
-    const {
-      id: emailId,
-      thread_id,
-      resend_id,
-      from_address,
-      from_name,
-      to_address,
-      subject,
-      body_text,
-      body_html,
-      message_id,
-      in_reply_to,
-      references,
-      is_read,
-      is_sent,
-      created_at,
-    } = email;
-
     return Response.json({
-      id: emailId,
-      thread_id,
-      resend_id,
-      from_address,
-      from_name,
-      to_address,
-      subject,
-      body_text,
-      body_html,
-      message_id,
-      in_reply_to,
-      references,
-      is_read,
-      is_sent,
-      created_at,
+      id: email.id,
+      thread_id: email.thread_id,
+      resend_id: email.resend_id,
+      from_address: email.from_address,
+      from_name: email.from_name,
+      to_address: email.to_address,
+      subject: email.subject,
+      body_text: email.body_text,
+      body_html: email.body_html,
+      message_id: email.message_id,
+      in_reply_to: email.in_reply_to,
+      references: email.references,
+      is_read: email.is_read,
+      is_sent: email.is_sent,
+      created_at: email.created_at,
     });
   } catch (error) {
     await captureException(error);
