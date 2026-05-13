@@ -21,6 +21,7 @@
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
+    "@sentry/cloudflare": "^10.52.0",
     "@sentry/nextjs": "^9.14.0",
     "@tailwindcss/typography": "^0.5.16",
     "class-variance-authority": "^0.7.1",
@@ -38,8 +39,8 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@q3ik-mail/testing": "workspace:*",
     "@cloudflare/workers-types": "^4.20250508.0",
+    "@q3ik-mail/testing": "workspace:*",
     "@tailwindcss/postcss": "^4.3.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
