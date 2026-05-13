@@ -614,6 +614,7 @@ const handler: ExportedHandler<Env> = {
       createdAt: number;
     }> = [];
     if (r2Bucket) {
+      const encoder = new TextEncoder();
       const attachments = receivedEmail.attachments ?? [];
       for (const [index, attachment] of attachments.entries()) {
         const safeFilename = sanitizeAttachmentFilename(
@@ -707,21 +708,9 @@ const handler: ExportedHandler<Env> = {
         )
         .run();
 
-      let inserted = (insertResult.meta?.changes ?? 0) > 0;
-      if (insertResult.meta?.changes === undefined && persistedAttachments.length > 0) {
-        const insertedRow = await env.DB
-          .prepare('SELECT id FROM emails WHERE id = ? LIMIT 1')
-          .bind(internalEmailId)
-          .first<{ id: string }>();
-        inserted = Boolean(insertedRow);
-        if (!inserted) {
-          console.warn('[worker] email insert result did not include meta.changes; skipping attachment metadata insert', {
-            emailId,
-          });
-        }
-      }
+      const inserted = (insertResult.meta?.changes ?? 0) > 0;
       if (inserted) {
-        for (const attachment of persistedAttachments) {
+        await Promise.all(persistedAttachments.map(async (attachment) => {
           try {
             await env.DB.prepare(`
               INSERT INTO attachments
@@ -746,7 +735,7 @@ const handler: ExportedHandler<Env> = {
               error: err,
             });
           }
-        }
+        }));
       }
     } catch (err) {
       if (env.SENTRY_DSN) {
