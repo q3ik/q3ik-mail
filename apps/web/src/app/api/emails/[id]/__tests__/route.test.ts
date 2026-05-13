@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 
 const getEmailById = vi.fn();
 const markAsRead = vi.fn();
+const captureException = vi.fn();
 
 vi.mock('@cloudflare/next-on-pages', () => ({
   getRequestContext: () => ({
@@ -13,6 +14,10 @@ vi.mock('@cloudflare/next-on-pages', () => ({
 vi.mock('@q3ik-mail/database', () => ({
   getEmailById,
   markAsRead,
+}));
+
+vi.mock('@/lib/sentry', () => ({
+  captureException,
 }));
 
 describe('GET /api/emails/[id]', () => {
@@ -101,6 +106,7 @@ describe('GET /api/emails/[id]', () => {
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: 'Failed to load email' });
+    expect(captureException).toHaveBeenCalledWith(error);
     expect(errorSpy).toHaveBeenCalledWith('[api/emails/[id]] failed to load email:', error);
     errorSpy.mockRestore();
   });

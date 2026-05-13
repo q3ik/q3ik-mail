@@ -1,6 +1,6 @@
-import * as Sentry from '@sentry/cloudflare';
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { getEmailById } from '@q3ik-mail/database';
+import { captureException, captureMessage } from '@/lib/sentry';
 
 export const runtime = 'edge';
 
@@ -27,7 +27,7 @@ export async function GET(
     // Reject any request missing this header — it means Access was bypassed or
     // the route is being hit directly without the Access policy in front of it.
     if (!hasAccessJwt(req)) {
-      Sentry.captureMessage('[api/email-body] missing or malformed Cloudflare Access JWT', {
+      await captureMessage('[api/email-body] missing or malformed Cloudflare Access JWT', {
         level: 'warning',
         tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
         extra: { path: new URL(req.url).pathname },
@@ -47,6 +47,7 @@ export async function GET(
       body_text: email.body_text,
     });
   } catch (error) {
+    await captureException(error);
     console.error('[api/emails/[id]/body] failed to load email body:', error);
     return Response.json({ error: 'Failed to load email body' }, { status: 500 });
   }

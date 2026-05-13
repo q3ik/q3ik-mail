@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const getEmailById = vi.fn();
+const captureException = vi.fn();
+const captureMessage = vi.fn();
 
 vi.mock('@cloudflare/next-on-pages', () => ({
   getRequestContext: () => ({
@@ -12,8 +14,9 @@ vi.mock('@q3ik-mail/database', () => ({
   getEmailById,
 }));
 
-vi.mock('@sentry/cloudflare', () => ({
-  captureMessage: vi.fn(),
+vi.mock('@/lib/sentry', () => ({
+  captureException,
+  captureMessage,
 }));
 
 describe('GET /api/emails/[id]/body', () => {
@@ -55,6 +58,11 @@ describe('GET /api/emails/[id]/body', () => {
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({ error: 'Unauthorized' });
+    expect(captureMessage).toHaveBeenCalledWith('[api/email-body] missing or malformed Cloudflare Access JWT', {
+      level: 'warning',
+      tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
+      extra: { path: '/api/emails/email-1/body' },
+    });
   });
 
   it('returns 404 when email does not exist', async () => {
@@ -87,6 +95,7 @@ describe('GET /api/emails/[id]/body', () => {
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: 'Failed to load email body' });
+    expect(captureException).toHaveBeenCalledWith(error);
     expect(errorSpy).toHaveBeenCalledWith('[api/emails/[id]/body] failed to load email body:', error);
     errorSpy.mockRestore();
   });
