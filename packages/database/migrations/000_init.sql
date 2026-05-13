@@ -2,6 +2,7 @@
 -- Applied automatically via: npx wrangler d1 migrations apply q3ik-mail-db
 -- (run from the apps/worker directory, or any directory containing a wrangler.toml
 --  that declares this migrations_dir)
+-- NOTE: migration prefix 001_* was intentionally squashed into this initial migration.
 
 CREATE TABLE IF NOT EXISTS emails (
   id                TEXT PRIMARY KEY,                     -- UUID
