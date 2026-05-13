@@ -2,24 +2,30 @@ export async function captureException(err: unknown): Promise<void> {
   const serverSdk = '@sentry/cloudflare';
   const clientSdk = '@sentry/nextjs';
 
-  // Next.js uses both server runtime labels; in either case we must stay on
-  // the Cloudflare SDK to avoid pulling Node-only Sentry internals into Pages.
-  if (process.env.NEXT_RUNTIME === 'edge' || process.env.NEXT_RUNTIME === 'nodejs') {
-    const { captureException: captureExceptionImpl } = await import(serverSdk);
-    captureExceptionImpl(err);
-    return;
-  }
+  try {
+    // Next.js uses both server runtime labels; in either case we must stay on
+    // the Cloudflare SDK to avoid pulling Node-only Sentry internals into Pages.
+    if (process.env.NEXT_RUNTIME === 'edge' || process.env.NEXT_RUNTIME === 'nodejs') {
+      const { captureException: captureExceptionImpl } = await import(serverSdk);
+      captureExceptionImpl(err);
+      return;
+    }
 
-  // Fallback for test/non-Next execution where NEXT_RUNTIME is unset but the
-  // code still runs without a browser global.
-  if (typeof window === 'undefined') {
-    const { captureException: captureExceptionImpl } = await import(serverSdk);
-    captureExceptionImpl(err);
-    return;
-  }
+    // Fallback for test/non-Next execution where NEXT_RUNTIME is unset but the
+    // code still runs without a browser global.
+    if (typeof window === 'undefined') {
+      const { captureException: captureExceptionImpl } = await import(serverSdk);
+      captureExceptionImpl(err);
+      return;
+    }
 
-  const { captureException: captureExceptionImpl } = await import(clientSdk);
-  captureExceptionImpl(err);
+    const { captureException: captureExceptionImpl } = await import(clientSdk);
+    captureExceptionImpl(err);
+  } catch (captureError) {
+    // Absorb any SDK-level failures so callers are never interrupted by a
+    // Sentry reporting failure. Log to console as a last-resort signal.
+    console.error('[sentry] captureException failed:', captureError);
+  }
 }
 
 export async function captureMessage(

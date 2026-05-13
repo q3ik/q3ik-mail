@@ -1,7 +1,14 @@
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { searchEmails } from '@q3ik-mail/database';
+import { captureException } from '@/lib/sentry';
 
 export const runtime = 'edge';
+
+async function handleSearchError(error: unknown): Promise<Response> {
+  console.error('[api/search] failed to search emails:', error);
+  await captureException(error);
+  return Response.json({ error: 'Failed to search emails' }, { status: 500 });
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -11,12 +18,13 @@ export async function GET(req: Request) {
     return Response.json({ error: 'q is required' }, { status: 400 });
   }
 
-  const { env } = getRequestContext();
-
   try {
+    const { env } = getRequestContext();
+    if (!env?.DB) {
+      throw new Error('Database binding (DB) is missing');
+    }
     return Response.json(await searchEmails(env.DB, query));
   } catch (error) {
-    console.error('[api/search] failed to search emails:', error);
-    return Response.json({ error: 'Failed to search emails' }, { status: 500 });
+    return handleSearchError(error);
   }
 }
