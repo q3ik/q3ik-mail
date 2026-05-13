@@ -2,11 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
 const searchEmails = vi.fn();
+const getRequestContext = vi.fn();
 
 vi.mock('@cloudflare/next-on-pages', () => ({
-  getRequestContext: () => ({
-    env: { DB: {} },
-  }),
+  getRequestContext: () => getRequestContext(),
 }));
 
 vi.mock('@q3ik-mail/database', () => ({
@@ -16,6 +15,7 @@ vi.mock('@q3ik-mail/database', () => ({
 describe('GET /api/search', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    getRequestContext.mockReturnValue({ env: { DB: {} } });
   });
 
   it('returns search results on success', async () => {
@@ -54,6 +54,44 @@ describe('GET /api/search', () => {
 
   it('returns a structured 500 response when search fails', async () => {
     searchEmails.mockRejectedValue(new Error('D1 exploded'));
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { GET } = await import('../route');
+    const req = new Request('http://localhost/api/search?q=hello', {
+      method: 'GET',
+    });
+    const res = await GET(req as unknown as NextRequest);
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Failed to search emails',
+    });
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('returns a structured 500 response when DB binding is missing', async () => {
+    getRequestContext.mockReturnValue({ env: {} });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { GET } = await import('../route');
+    const req = new Request('http://localhost/api/search?q=hello', {
+      method: 'GET',
+    });
+    const res = await GET(req as unknown as NextRequest);
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Failed to search emails',
+    });
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('returns a structured 500 response when getRequestContext fails', async () => {
+    getRequestContext.mockImplementation(() => {
+      throw new Error('Context failure');
+    });
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { GET } = await import('../route');

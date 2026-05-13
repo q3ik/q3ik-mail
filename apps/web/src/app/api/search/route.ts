@@ -11,9 +11,11 @@ export async function GET(req: Request) {
     return Response.json({ error: 'q is required' }, { status: 400 });
   }
 
-  const { env } = getRequestContext();
-
   try {
+    const { env } = getRequestContext();
+    if (!env?.DB) {
+      throw new Error('Database binding (DB) is missing');
+    }
     return Response.json(await searchEmails(env.DB, query));
   } catch (error) {
     console.error('[api/search] failed to search emails:', error);
