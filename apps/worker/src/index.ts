@@ -221,7 +221,6 @@ function decodeBase64ToUint8Array(base64: string): Uint8Array {
   }
 
   const CHUNK = 65_536;
-  console.assert(CHUNK % 4 === 0, 'Base64 chunk size must be a multiple of 4');
 
   const chunks: Uint8Array[] = [];
   let offset = 0;

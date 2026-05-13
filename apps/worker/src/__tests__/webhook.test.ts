@@ -521,6 +521,7 @@ describe('webhook handler', () => {
     const { Resend } = await import('resend');
     const { env, putSpy } = makeThreadEnv();
 
+    const hadFromBase64 = Object.prototype.hasOwnProperty.call(Uint8Array, 'fromBase64');
     const originalFromBase64 = (Uint8Array as Uint8ArrayConstructor & {
       fromBase64?: (input: string) => Uint8Array;
     }).fromBase64;
@@ -567,7 +568,7 @@ describe('webhook handler', () => {
       }
       expect(Array.from(attachmentPutCall[1] as Uint8Array)).toEqual([251, 239, 255]);
     } finally {
-      if (originalFromBase64 === undefined) {
+      if (!hadFromBase64) {
         delete (Uint8Array as Uint8ArrayConstructor & { fromBase64?: (input: string) => Uint8Array }).fromBase64;
       } else {
         Object.defineProperty(Uint8Array, 'fromBase64', {
