@@ -52,7 +52,7 @@ function createMockDb(
                 });
               }
 
-              if (sql.includes('ORDER BY created_at DESC, resend_id ASC')) {
+              if (sql.includes('ORDER BY created_at DESC')) {
                 results.sort((a, b) => {
                   const aCreatedAt = typeof a.created_at === 'string' ? a.created_at : '';
                   const bCreatedAt = typeof b.created_at === 'string' ? b.created_at : '';

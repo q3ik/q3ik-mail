@@ -110,7 +110,7 @@ function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  if (typeof payload.createdAt !== 'string' || typeof payload.resendId !== 'string') {
+  if (!payload || typeof payload.createdAt !== 'string' || typeof payload.resendId !== 'string') {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
