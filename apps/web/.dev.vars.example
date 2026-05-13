@@ -10,6 +10,7 @@ RESEND_WEBHOOK_SECRET=wxxxxxxxxx
 # ---- CLOUDFLARE ---- #
 CLOUDFLARE_TEAM_DOMAIN=your-team.cloudflareaccess.com
 CLOUDFLARE_ACCESS_AUD=your-aud-value
+CLOUDFLARE_D1_DATABASE_ID=xxxxxxxxxxxxxxxxxx
 
 # ---- SENTRY ---- #
 # (server/edge — not exposed to browser)
