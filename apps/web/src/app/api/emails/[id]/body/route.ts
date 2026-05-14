@@ -4,11 +4,20 @@ import { captureException, captureMessage } from '@/lib/sentry';
 
 export const runtime = 'edge';
 
+/** Validates that a string is a well-formed UUID v4 (lowercase hex + hyphens). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /**
  * Validates the Cloudflare Access JWT from the CF-Access-Jwt-Assertion header.
- * Returns true if the token is present and well-formed (3-part JWT).
- * Full cryptographic verification is handled upstream by Cloudflare Access;
- * this guard ensures the route is never served without the Access layer active.
+ *
+ * SECURITY NOTE: This performs structural validation only (3-part JWT format).
+ * Full cryptographic verification is handled upstream by the Cloudflare Access
+ * proxy which sits in front of this Pages deployment. This guard exists as a
+ * defense-in-depth check to ensure the route is never served without the Access
+ * layer active (e.g., if the domain is accidentally exposed without an Access
+ * policy). It is NOT a substitute for cryptographic verification — if this
+ * route is ever moved outside the CF Access proxy, replace this with full JWT
+ * verification (see apps/worker/src/middleware/cfAccess.ts for reference).
  */
 function hasAccessJwt(request: Request): boolean {
   const jwt = request.headers.get('cf-access-jwt-assertion');
@@ -36,6 +45,11 @@ export async function GET(
     }
 
     const { id } = await params;
+
+    if (!UUID_RE.test(id)) {
+      return Response.json({ error: 'Invalid email ID format' }, { status: 400 });
+    }
+
     const { env } = getRequestContext();
 
     const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;

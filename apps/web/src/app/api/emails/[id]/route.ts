@@ -4,12 +4,20 @@ import { captureException } from '@/lib/sentry';
 
 export const runtime = 'edge';
 
+/** Validates that a string is a well-formed UUID v4 (lowercase hex + hyphens). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+
+    if (!UUID_RE.test(id)) {
+      return Response.json({ error: 'Invalid email ID format' }, { status: 400 });
+    }
+
     const { env } = getRequestContext();
     const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
     const email = await getEmailById(env.DB, id, r2Bucket);
