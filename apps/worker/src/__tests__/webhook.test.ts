@@ -917,12 +917,13 @@ describe('webhook handler', () => {
   });
   it('returns 200 and performs no R2/D1 writes when a duplicate resend_id is received', async () => {
     // `existingResendId` causes the resend_id SELECT stub to return an existing
-    // row, simulating a duplicate delivery. `dedupBindSpy` captures what value
-    // was passed to .bind() on the dedup SELECT, proving the correct emailId
-    // is used — not undefined or a hardcoded value.
+    // row, simulating a duplicate delivery. body_text_key is non-null so the worker
+    // treats it as fully ingested and returns 200 without any R2/D1 writes.
+    // `dedupBindSpy` captures what value was passed to .bind() on the dedup SELECT,
+    // proving the correct emailId is used — not undefined or a hardcoded value.
     const { env, prepareSpy, bindSpy, dedupBindSpy, putSpy } = makeThreadEnv(
       null,
-      { id: 'existing-email-id' },
+      { id: 'existing-email-id', body_text_key: 'emails/existing-email-id/body.txt', body_html_key: null },
     );
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
@@ -956,6 +957,60 @@ describe('webhook handler', () => {
 
     // bindSpy (INSERT path) must not have been called — the early-exit fired.
     expect(bindSpy).not.toHaveBeenCalled();
+  });
+
+  it('completes R2 write and UPDATE on retry when existing row has null body keys (partial ingestion resume)', async () => {
+    // Simulate a prior attempt that inserted the D1 row but failed the R2 write.
+    // The dedup SELECT returns a row with null body keys, triggering resume mode.
+    const { Resend } = await import('resend');
+    const { env, prepareSpy, bindSpy, putSpy, updateBindSpy } = makeThreadEnv(
+      null,
+      { id: 'partial-email-id', body_text_key: null, body_html_key: null },
+    );
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Resume Test',
+            text: 'Body to retry',
+            html: null,
+            headers: [],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+
+    // Must return 200 OK after completing the R2 write.
+    expect(res.status).toBe(200);
+
+    // No INSERT should be prepared — we resume with the existing row.
+    const insertCall = (prepareSpy.mock.calls as unknown[][]).find(
+      (args) => (args[0] as string).includes('INSERT OR IGNORE INTO emails'),
+    );
+    expect(insertCall).toBeUndefined();
+    expect(bindSpy).not.toHaveBeenCalled();
+
+    // R2 put must have been called with the body content using the existing record's ID.
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^emails\/partial-email-id\/body\.txt$/),
+      'Body to retry',
+      expect.objectContaining({ httpMetadata: { contentType: 'text/plain; charset=utf-8' } }),
+    );
+
+    // UPDATE must have been called to set the body key on the existing row.
+    expect(updateBindSpy).toHaveBeenCalled();
+    const updateCall = updateBindSpy.mock.calls[0];
+    expect(updateCall[0]).toMatch(/^emails\/partial-email-id\/body\.txt$/); // body_text_key
+    expect(updateCall[1]).toBeNull(); // body_html_key (not provided)
+    expect(updateCall[2]).toBe('partial-email-id'); // WHERE id = existing record's ID
   });
 });
 
