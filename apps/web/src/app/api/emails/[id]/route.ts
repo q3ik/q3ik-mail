@@ -1,11 +1,9 @@
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { getEmailById, markAsRead } from '@q3ik-mail/database';
 import { captureException } from '@/lib/sentry';
+import { UUID_RE } from '@/lib/validation';
 
 export const runtime = 'edge';
-
-/** Validates that a string is a well-formed UUID v4 (lowercase hex + hyphens). */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export async function GET(
   _req: Request,

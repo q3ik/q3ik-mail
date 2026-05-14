@@ -69,31 +69,28 @@ async function ingestInboundEmail(
 /**
  * Constant-time string comparison to prevent timing attacks.
  * Returns true only when both strings are non-empty and identical.
+ * Both strings are always hashed to a fixed length before comparison to
+ * eliminate length-based timing leaks.
  */
 async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   if (!a || !b) return false;
   const encoder = new TextEncoder();
   const aBytes = encoder.encode(a);
   const bBytes = encoder.encode(b);
-  // Length mismatch: hash both to avoid leaking length info via timing
-  if (aBytes.byteLength !== bBytes.byteLength) {
-    const aHash = await crypto.subtle.digest('SHA-256', aBytes);
-    const bHash = await crypto.subtle.digest('SHA-256', bBytes);
-    // Compare the hashes (constant-time at fixed 32-byte length)
-    const aArr = new Uint8Array(aHash);
-    const bArr = new Uint8Array(bHash);
-    let diff = 0;
-    for (let i = 0; i < aArr.length; i++) {
-      diff |= aArr[i] ^ bArr[i];
-    }
-    return diff === 0;
-  }
-  // Same length: XOR compare directly
+  // Always hash both strings to a fixed 32-byte length so that the comparison
+  // time is independent of the input lengths, mitigating length-based timing attacks.
+  const [aHash, bHash] = await Promise.all([
+    crypto.subtle.digest('SHA-256', aBytes),
+    crypto.subtle.digest('SHA-256', bBytes),
+  ]);
+  const aArr = new Uint8Array(aHash);
+  const bArr = new Uint8Array(bHash);
   let diff = 0;
-  for (let i = 0; i < aBytes.length; i++) {
-    diff |= aBytes[i] ^ bBytes[i];
+  for (let i = 0; i < aArr.length; i++) {
+    diff |= aArr[i] ^ bArr[i];
   }
-  return diff === 0;
+  // Also verify original length equality to prevent theoretical hash collisions.
+  return diff === 0 && a.length === b.length;
 }
 
 export async function POST(req: Request) {
