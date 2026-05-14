@@ -61,6 +61,13 @@ const PUBLIC_PATHS = [
    * cron invocations.
    */
   '/api/trigger-inbound',
+  /**
+   * Sentry tunnel route — proxies client-side error/performance events to
+   * Sentry's ingest endpoint.  Configured via `tunnelRoute` in next.config.js
+   * (`withSentryConfig`).  Must be publicly reachable so browser-originated
+   * event payloads are not blocked by Cloudflare Access JWT verification.
+   */
+  '/monitoring',
 ] as const;
 const PUBLIC_PREFIXES = ['/_next/static/', '/_next/image/'] as const;
 const PUBLIC_PATH_SET = new Set<string>(PUBLIC_PATHS);

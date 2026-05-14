@@ -1,29 +1,34 @@
+/**
+ * Runtime-adaptive Sentry helpers.
+ *
+ * On Cloudflare Pages the server runs in workerd (V8 isolate) so we must use
+ * `@sentry/cloudflare` for server-side capture, while the browser bundle uses
+ * `@sentry/nextjs`.  These thin wrappers dynamically import the correct SDK so
+ * that callers (middleware, API routes, components) don't need to care.
+ *
+ * The SDK is already initialised by the time these helpers are called:
+ *   - Server/edge: via `src/instrumentation.ts` → `@sentry/cloudflare` init
+ *   - Client: via `sentry.client.config.ts` → `@sentry/nextjs` init
+ */
+
+const SERVER_SDK = '@sentry/cloudflare';
+const CLIENT_SDK = '@sentry/nextjs';
+
+function isServer(): boolean {
+  return (
+    process.env.NEXT_RUNTIME === 'edge' ||
+    process.env.NEXT_RUNTIME === 'nodejs' ||
+    typeof window === 'undefined'
+  );
+}
+
 export async function captureException(err: unknown): Promise<void> {
-  const serverSdk = '@sentry/cloudflare';
-  const clientSdk = '@sentry/nextjs';
-
   try {
-    // Next.js uses both server runtime labels; in either case we must stay on
-    // the Cloudflare SDK to avoid pulling Node-only Sentry internals into Pages.
-    if (process.env.NEXT_RUNTIME === 'edge' || process.env.NEXT_RUNTIME === 'nodejs') {
-      const { captureException: captureExceptionImpl } = await import(serverSdk);
-      captureExceptionImpl(err);
-      return;
-    }
-
-    // Fallback for test/non-Next execution where NEXT_RUNTIME is unset but the
-    // code still runs without a browser global.
-    if (typeof window === 'undefined') {
-      const { captureException: captureExceptionImpl } = await import(serverSdk);
-      captureExceptionImpl(err);
-      return;
-    }
-
-    const { captureException: captureExceptionImpl } = await import(clientSdk);
-    captureExceptionImpl(err);
+    const sdk = await import(isServer() ? SERVER_SDK : CLIENT_SDK);
+    sdk.captureException(err);
   } catch (captureError) {
     // Absorb any SDK-level failures so callers are never interrupted by a
-    // Sentry reporting failure. Log to console as a last-resort signal.
+    // Sentry reporting failure.  Log to console as a last-resort signal.
     console.error('[sentry] captureException failed:', captureError);
   }
 }
@@ -36,22 +41,20 @@ export async function captureMessage(
     extra?: Record<string, unknown>;
   },
 ): Promise<void> {
-  const isServer =
-    process.env.NEXT_RUNTIME === 'edge' ||
-    process.env.NEXT_RUNTIME === 'nodejs' ||
-    typeof window === 'undefined';
+  try {
+    const sdk = await import(isServer() ? SERVER_SDK : CLIENT_SDK);
 
-  const sdkToImport = isServer ? '@sentry/cloudflare' : '@sentry/nextjs';
-
-  const sdk = await import(sdkToImport);
-  const captureMessageImpl = sdk.captureMessage;
-
-  if (context && typeof captureMessageImpl === 'function') {
-    // Context support is best-effort; when SDK scope helpers are unavailable
-    // in the current runtime/test harness, still emit the message.
-    captureMessageImpl(message);
-    return;
+    if (context) {
+      sdk.withScope((scope: { setLevel: (l: string) => void; setTags: (t: Record<string, string>) => void; setExtras: (e: Record<string, unknown>) => void }) => {
+        if (context.level) scope.setLevel(context.level);
+        if (context.tags) scope.setTags(context.tags);
+        if (context.extra) scope.setExtras(context.extra);
+        sdk.captureMessage(message);
+      });
+    } else {
+      sdk.captureMessage(message);
+    }
+  } catch (captureError) {
+    console.error('[sentry] captureMessage failed:', captureError);
   }
-
-  captureMessageImpl(message);
 }

@@ -1,6 +1,17 @@
 // @ts-check
+const { withSentryConfig } = require('@sentry/nextjs');
 
 const isDev = process.env.NODE_ENV === 'development';
+
+/**
+ * Sentry ingest domain for the CSP connect-src directive.
+ *
+ * Client-side events are routed through the `/monitoring` tunnel (same origin),
+ * but the ingest domain is still allowed as a fallback — e.g. when the tunnel
+ * response is blocked by an upstream proxy, or for Session Replay which may
+ * open a direct connection.
+ */
+const sentryIngestDomain = 'https://*.ingest.us.sentry.io';
 
 /**
  * Content-Security-Policy for the q3ik-mail web app.
@@ -18,7 +29,8 @@ const cspHeader = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: cid:",
   "font-src 'self'",
-  "connect-src 'self'",
+  `connect-src 'self' ${sentryIngestDomain}`,
+  "worker-src 'self' blob:",
   "frame-src 'none'",
   "object-src 'none'",
   "base-uri 'self'",
@@ -54,4 +66,20 @@ if (isDev) {
   })();
 }
 
-module.exports = nextConfig;
+module.exports = withSentryConfig(nextConfig, {
+  // Sentry org & project for source-map uploads.
+  // Requires SENTRY_AUTH_TOKEN in the build environment.
+  org: 'q3ik',
+  project: 'q3ik-mail-web',
+
+  // Only print upload logs in CI.
+  silent: !process.env.CI,
+
+  // Upload a wider set of source maps for better stack traces.
+  widenClientFileUpload: true,
+
+  // Route client-side Sentry events through a same-origin tunnel to avoid
+  // ad-blockers and simplify CSP. Events sent to /monitoring are proxied to
+  // Sentry's ingest endpoint.
+  tunnelRoute: '/monitoring',
+});
