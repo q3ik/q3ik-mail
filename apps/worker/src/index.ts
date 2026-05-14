@@ -321,8 +321,7 @@ function estimateAttachmentBytes(attachment: ResendReceivedAttachment): number {
     return attachment.size;
   }
   if (typeof attachment.content === 'string') {
-    const normalized = attachment.content.replace(/\s/g, '');
-    return Math.floor((normalized.length * 3) / 4);
+    return Math.floor((attachment.content.length * 3) / 4);
   }
   return 0;
 }
