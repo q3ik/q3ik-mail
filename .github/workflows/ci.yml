@@ -361,7 +361,9 @@ jobs:
   # Only runs on pushes to trunk (i.e. merged PRs) and manual triggers.
   #
   # Required repo secrets (Settings → Secrets and variables → Actions):
-  #   CLOUDFLARE_API_TOKEN    – API Token with Workers Scripts:Edit permission
+  #   CLOUDFLARE_API_TOKEN    – API Token with Workers Scripts:Edit and D1:Edit
+  #                              permissions (or use separate tokens for deploy
+  #                              and remote D1 migrations)
   #   CLOUDFLARE_ACCOUNT_ID   – Cloudflare account ID
   #   CLOUDFLARE_D1_DATABASE_ID – D1 database UUID (already configured)
   deploy-worker:
