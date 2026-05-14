@@ -89,8 +89,9 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   for (let i = 0; i < aArr.length; i++) {
     diff |= aArr[i] ^ bArr[i];
   }
-  // Also verify original length equality to prevent theoretical hash collisions.
-  return diff === 0 && a.length === b.length;
+  // Check hash equality — SHA-256 collision resistance makes a separate length
+  // check redundant (different inputs produce different digests).
+  return diff === 0;
 }
 
 export async function POST(req: Request) {
