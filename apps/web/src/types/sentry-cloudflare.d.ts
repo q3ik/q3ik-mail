@@ -5,6 +5,13 @@ declare module '@sentry/cloudflare' {
     setExtras(extra: Record<string, unknown>): void;
   }
 
+  export function init(options: {
+    dsn?: string;
+    tracesSampleRate?: number;
+    environment?: string;
+    [key: string]: unknown;
+  }): void;
+
   export function withScope(callback: (scope: Scope) => void): void;
 
   export function captureMessage(
