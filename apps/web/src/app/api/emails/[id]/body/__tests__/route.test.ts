@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const getEmailById = vi.fn();
 const captureException = vi.fn();
-const captureMessage = vi.fn();
 
 vi.mock('@cloudflare/next-on-pages', () => ({
   getRequestContext: () => ({
@@ -16,7 +15,6 @@ vi.mock('@q3ik-mail/database', () => ({
 
 vi.mock('@/lib/sentry', () => ({
   captureException,
-  captureMessage,
 }));
 
 describe('GET /api/emails/[id]/body', () => {
@@ -24,9 +22,7 @@ describe('GET /api/emails/[id]/body', () => {
     vi.resetAllMocks();
   });
 
-  const validJwt = 'header.payload.signature';
-
-  it('returns body payload when email exists and JWT is valid', async () => {
+  it('returns body payload when email exists', async () => {
     getEmailById.mockResolvedValue({
       id: 'email-1',
       body_html: '<p>Hello</p>',
@@ -34,9 +30,7 @@ describe('GET /api/emails/[id]/body', () => {
     });
 
     const { GET } = await import('../route');
-    const req = new Request('http://localhost/api/emails/email-1/body', {
-      headers: { 'cf-access-jwt-assertion': validJwt },
-    });
+    const req = new Request('http://localhost/api/emails/email-1/body');
     const res = await GET(req, {
       params: Promise.resolve({ id: 'email-1' }),
     });
@@ -49,29 +43,11 @@ describe('GET /api/emails/[id]/body', () => {
     });
   });
 
-  it('returns 401 when JWT is missing', async () => {
-    const { GET } = await import('../route');
-    const req = new Request('http://localhost/api/emails/email-1/body');
-    const res = await GET(req, {
-      params: Promise.resolve({ id: 'email-1' }),
-    });
-
-    expect(res.status).toBe(401);
-    await expect(res.json()).resolves.toEqual({ error: 'Unauthorized' });
-    expect(captureMessage).toHaveBeenCalledWith('[api/email-body] missing or malformed Cloudflare Access JWT', {
-      level: 'warning',
-      tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
-      extra: { path: '/api/emails/email-1/body' },
-    });
-  });
-
   it('returns 404 when email does not exist', async () => {
     getEmailById.mockResolvedValue(null);
 
     const { GET } = await import('../route');
-    const req = new Request('http://localhost/api/emails/missing/body', {
-      headers: { 'cf-access-jwt-assertion': validJwt },
-    });
+    const req = new Request('http://localhost/api/emails/missing/body');
     const res = await GET(req, {
       params: Promise.resolve({ id: 'missing' }),
     });
@@ -86,9 +62,7 @@ describe('GET /api/emails/[id]/body', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const { GET } = await import('../route');
-    const req = new Request('http://localhost/api/emails/email-1/body', {
-      headers: { 'cf-access-jwt-assertion': validJwt },
-    });
+    const req = new Request('http://localhost/api/emails/email-1/body');
     const res = await GET(req, {
       params: Promise.resolve({ id: 'email-1' }),
     });

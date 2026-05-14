@@ -1,6 +1,6 @@
 import { getRequestContext } from '@cloudflare/next-on-pages';
 import { getEmailById } from '@q3ik-mail/database';
-import { captureException, captureMessage } from '@/lib/sentry';
+import { captureException } from '@/lib/sentry';
 
 export const runtime = 'edge';
 
@@ -32,18 +32,6 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Cloudflare Access injects cf-access-jwt-assertion on authenticated requests.
-    // Reject any request missing this header — it means Access was bypassed or
-    // the route is being hit directly without the Access policy in front of it.
-    if (!hasAccessJwt(req)) {
-      void captureMessage('[api/email-body] missing or malformed Cloudflare Access JWT', {
-        level: 'warning',
-        tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
-        extra: { path: new URL(req.url).pathname },
-      });
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { id } = await params;
 
     if (!UUID_RE.test(id)) {
