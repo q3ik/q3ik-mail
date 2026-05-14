@@ -301,7 +301,7 @@ async function loadAttachmentContent(
     if (!response.ok) {
       return null;
     }
-    return response.arrayBuffer();
+    return response.body ?? null;
   }
 
   return null;
@@ -663,6 +663,7 @@ const handler: ExportedHandler<Env> = {
       contentType: string;
       attachmentKey: string;
       data: ArrayBuffer | Uint8Array | string | ReadableStream<Uint8Array>;
+      estimatedSizeBytes: number;
     }> = [];
 
     if (r2Bucket) {
@@ -695,7 +696,7 @@ const handler: ExportedHandler<Env> = {
           attachment.filename ?? `attachment-${index + 1}`,
           index
         );
-        let attachmentData: ArrayBuffer | Uint8Array | string | null = null;
+        let attachmentData: ArrayBuffer | Uint8Array | string | ReadableStream<Uint8Array> | null = null;
         try {
           attachmentData = await loadAttachmentContent(
             attachment,
@@ -724,7 +725,7 @@ const handler: ExportedHandler<Env> = {
           'application/octet-stream';
         const attachmentKey = `emails/${internalEmailId}/attachments/${safeFilename}`;
 
-        attachmentsToIngest.push({ safeFilename, contentType, attachmentKey, data: attachmentData });
+        attachmentsToIngest.push({ safeFilename, contentType, attachmentKey, data: attachmentData, estimatedSizeBytes });
       }
     }
 
@@ -778,7 +779,7 @@ const handler: ExportedHandler<Env> = {
           createdAt: number;
         }> = [];
 
-        for (const { safeFilename, contentType, attachmentKey, data } of attachmentsToIngest) {
+        for (const { safeFilename, contentType, attachmentKey, data, estimatedSizeBytes } of attachmentsToIngest) {
           try {
             await r2Bucket!.put(attachmentKey, data, {
               httpMetadata: { contentType },
@@ -788,9 +789,12 @@ const handler: ExportedHandler<Env> = {
               filename: safeFilename,
               contentType,
               // Issue 1 fix: use module-level textEncoder instead of per-invocation allocation.
-              sizeBytes: typeof data === 'string'
-                ? textEncoder.encode(data).byteLength
-                : data.byteLength,
+              // For ReadableStream data, byteLength is unavailable so fall back to estimatedSizeBytes.
+              sizeBytes: data instanceof ReadableStream
+                ? estimatedSizeBytes
+                : typeof data === 'string'
+                  ? textEncoder.encode(data).byteLength
+                  : data.byteLength,
               createdAt: Date.now(),
             });
           } catch (err) {
