@@ -28,6 +28,8 @@ interface ResendReceivedAttachment {
   content_type?: string;
   contentType?: string;
   url?: string;
+  size?: number;
+  content_length?: number;
 }
 
 /**
@@ -124,6 +126,12 @@ function parseResendReceivedEmail(
       }
       if (a.url !== undefined && typeof a.url !== 'string') {
         return { ok: false, field: 'attachments[*].url' };
+      }
+      if (a.size !== undefined && typeof a.size !== 'number') {
+        return { ok: false, field: 'attachments[*].size' };
+      }
+      if (a.content_length !== undefined && typeof a.content_length !== 'number') {
+        return { ok: false, field: 'attachments[*].content_length' };
       }
     }
   }
@@ -256,7 +264,7 @@ async function loadAttachmentContent(
   attachment: ResendReceivedAttachment,
   resendEmailId: string,
   resendApiKey: string
-): Promise<ArrayBuffer | Uint8Array | string | null> {
+): Promise<ArrayBuffer | Uint8Array | string | ReadableStream<Uint8Array> | null> {
   if (attachment.content) {
     try {
       return decodeBase64ToUint8Array(attachment.content);
@@ -278,7 +286,7 @@ async function loadAttachmentContent(
     if (!response.ok) {
       return null;
     }
-    return response.arrayBuffer();
+    return response.body ?? null;
   }
 
   if (attachment.id) {
@@ -299,6 +307,26 @@ async function loadAttachmentContent(
   return null;
 }
 
+function parseAttachmentLimit(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+}
+
+function estimateAttachmentBytes(attachment: ResendReceivedAttachment): number {
+  if (typeof attachment.content_length === 'number' && attachment.content_length >= 0) {
+    return attachment.content_length;
+  }
+  if (typeof attachment.size === 'number' && attachment.size >= 0) {
+    return attachment.size;
+  }
+  if (typeof attachment.content === 'string') {
+    const normalized = attachment.content.replace(/\s/g, '');
+    return Math.floor((normalized.length * 3) / 4);
+  }
+  return 0;
+}
+
 // Env interface -- matches wrangler.toml bindings and secrets
 // DB is the D1 binding; secrets are set via `wrangler secret put`
 // EMAIL_BODIES is optional: the worker degrades gracefully (body keys = null)
@@ -317,6 +345,8 @@ export interface Env {
   CLOUDFLARE_TEAM_DOMAIN: string;
   SENTRY_DSN?: string;           // optional -- worker runs without Sentry if unset
   ENVIRONMENT: string;           // set in wrangler.toml [vars]
+  MAX_TOTAL_ATTACHMENT_BYTES?: string;
+  MAX_SINGLE_ATTACHMENT_BYTES?: string;
 }
 
 /**
@@ -633,12 +663,35 @@ const handler: ExportedHandler<Env> = {
       safeFilename: string;
       contentType: string;
       attachmentKey: string;
-      data: ArrayBuffer | Uint8Array | string;
+      data: ArrayBuffer | Uint8Array | string | ReadableStream<Uint8Array>;
     }> = [];
 
     if (r2Bucket) {
+      const maxTotalAttachmentBytes = parseAttachmentLimit(env.MAX_TOTAL_ATTACHMENT_BYTES, 25 * 1024 * 1024);
+      const maxSingleAttachmentBytes = parseAttachmentLimit(env.MAX_SINGLE_ATTACHMENT_BYTES, 20 * 1024 * 1024);
+      let cumulativeAttachmentBytes = 0;
       const attachments = receivedEmail.attachments ?? [];
       for (const [index, attachment] of attachments.entries()) {
+        const estimatedSizeBytes = estimateAttachmentBytes(attachment);
+        if (estimatedSizeBytes > maxSingleAttachmentBytes) {
+          console.warn('[worker] skipping attachment; single-file size limit exceeded', {
+            emailId,
+            filename: attachment.filename ?? `attachment-${index + 1}`,
+            estimatedSizeBytes,
+            maxSingleAttachmentBytes,
+          });
+          continue;
+        }
+
+        cumulativeAttachmentBytes += estimatedSizeBytes;
+        if (cumulativeAttachmentBytes > maxTotalAttachmentBytes) {
+          console.warn('[worker] skipping remaining attachments; cumulative size limit exceeded', {
+            emailId,
+            cumulativeAttachmentBytes,
+            maxTotalAttachmentBytes,
+          });
+          break;
+        }
         const safeFilename = sanitizeAttachmentFilename(
           attachment.filename ?? `attachment-${index + 1}`,
           index

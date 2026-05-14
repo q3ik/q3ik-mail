@@ -692,6 +692,101 @@ describe('webhook handler', () => {
     }
   });
 
+
+  it('enforces single and cumulative attachment size limits before loading content', async () => {
+    const { Resend } = await import('resend');
+    const { env, putSpy } = makeThreadEnv();
+
+    env.MAX_SINGLE_ATTACHMENT_BYTES = '10';
+    env.MAX_TOTAL_ATTACHMENT_BYTES = '16';
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Bob <bob@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Attachment limits',
+            text: null,
+            html: null,
+            attachments: [
+              { filename: 'too-large.bin', size: 12, content: 'aGVsbG8=' },
+              { filename: 'first-ok.bin', size: 9, content: 'aGVsbG8=' },
+              { filename: 'would-exceed-total.bin', size: 9, content: 'aGVsbG8=' },
+            ],
+            headers: [{ name: 'Message-ID', value: '<attachment-limits@example.com>' }],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+    expect(res.status).toBe(200);
+
+    const attachmentPutKeys = putSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((key) => key.includes('/attachments/'));
+
+    expect(attachmentPutKeys.some((key) => key.endsWith('/first-ok.bin'))).toBe(true);
+    expect(attachmentPutKeys.some((key) => key.endsWith('/too-large.bin'))).toBe(false);
+    expect(attachmentPutKeys.some((key) => key.endsWith('/would-exceed-total.bin'))).toBe(false);
+  });
+
+  it('streams URL-based attachments directly to R2 without arrayBuffer buffering', async () => {
+    const { Resend } = await import('resend');
+    const { env, putSpy } = makeThreadEnv();
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3]));
+          controller.close();
+        },
+      }), { status: 200 })
+    );
+
+    try {
+      (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+        emails: {
+          receiving: {
+            get: vi.fn().mockResolvedValue({
+              from: 'Bob <bob@example.com>',
+              to: ['you@q3ik.com'],
+              subject: 'URL attachment',
+              text: null,
+              html: null,
+              attachments: [
+                {
+                  filename: 'remote.pdf',
+                  url: 'https://example.com/remote.pdf',
+                  content_type: 'application/pdf',
+                  size: 3,
+                },
+              ],
+              headers: [{ name: 'Message-ID', value: '<attachment-url@example.com>' }],
+            }),
+          },
+        },
+      }));
+
+      const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+        'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+      });
+      const res = await fetchWorker(req, env);
+      expect(res.status).toBe(200);
+
+      const attachmentPutCall = putSpy.mock.calls.find((call) =>
+        String(call[0]).includes('/attachments/remote.pdf')
+      );
+      expect(attachmentPutCall).toBeDefined();
+      expect(attachmentPutCall?.[1]).toBeInstanceOf(ReadableStream);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
   it('returns 200 and performs no R2/D1 writes when a duplicate resend_id is received', async () => {
     // `existingResendId` causes the resend_id SELECT stub to return an existing
     // row, simulating a duplicate delivery. `dedupBindSpy` captures what value
