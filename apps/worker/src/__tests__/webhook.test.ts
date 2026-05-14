@@ -323,8 +323,8 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
-    // INSERT should have null for body keys (they're set via UPDATE after R2 write)
-    expect(values[columns.indexOf('body_text')]).toBeNull();
+    // Issue H1 fix: body_text is now stored in D1 for FTS5 searchability
+    expect(values[columns.indexOf('body_text')]).toBe('Plain text from text field');
     expect(values[columns.indexOf('body_text_key')]).toBeNull();
 
     // R2 put should happen
@@ -369,9 +369,9 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
-    // INSERT should have null for body keys (they're set via UPDATE after R2 write)
-    expect(values[columns.indexOf('body_text')]).toBeNull();
-    expect(values[columns.indexOf('body_html')]).toBeNull();
+    // Issue H1 fix: body content is stored in D1 for FTS5 searchability
+    expect(values[columns.indexOf('body_text')]).toBeNull(); // text not provided
+    expect(values[columns.indexOf('body_html')]).toBe('<p>HTML body</p>'); // HTML is stored
     expect(values[columns.indexOf('body_text_key')]).toBeNull();
     expect(values[columns.indexOf('body_html_key')]).toBeNull();
 

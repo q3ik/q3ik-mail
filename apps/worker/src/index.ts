@@ -631,7 +631,11 @@ const handler: ExportedHandler<Env> = {
     // This prevents orphaned R2 objects when D1 INSERT fails or gets dedup'd
     // by a concurrent delivery. Body content is kept in memory until Step 8
     // confirms the D1 row was inserted.
+    //
+    // Issue H1 fix (GitHub #126): Also store body content in D1 columns for FTS5 searchability.
     const pendingBodyContent: Array<{ type: 'text' | 'html'; key: string; content: string; contentType: string }> = [];
+    let pendingBodyTextForD1: string | null = null;
+    let pendingBodyHtmlForD1: string | null = null;
 
     const r2Bucket = env.EMAIL_BODIES;
     if (r2Bucket) {
@@ -642,6 +646,8 @@ const handler: ExportedHandler<Env> = {
           content: receivedEmail.text,
           contentType: 'text/plain; charset=utf-8',
         });
+        // Issue H1 fix: Store in D1 for FTS5 searchability
+        pendingBodyTextForD1 = receivedEmail.text;
       }
 
       if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
@@ -651,9 +657,18 @@ const handler: ExportedHandler<Env> = {
           content: receivedEmail.html,
           contentType: 'text/html; charset=utf-8',
         });
+        // Issue H1 fix: Store in D1 for FTS5 searchability
+        pendingBodyHtmlForD1 = receivedEmail.html;
       }
     } else {
       console.warn('[worker] EMAIL_BODIES R2 bucket not bound; bodies will not be stored in R2', { emailId });
+      // Fallback: still write to D1 when R2 is not available
+      if (receivedEmail.text !== null && receivedEmail.text !== undefined) {
+        pendingBodyTextForD1 = receivedEmail.text;
+      }
+      if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
+        pendingBodyHtmlForD1 = receivedEmail.html;
+      }
     }
 
     // --- Step 7: Build attachment descriptor list (download content from Resend) ---
@@ -759,8 +774,8 @@ const handler: ExportedHandler<Env> = {
             fromName,                   // from_name (nullable)
             toAddress,                  // to_address
             receivedEmail.subject ?? null,
-            null,                       // DEPRECATED: body_text now stored in R2
-            null,                       // DEPRECATED: body_html now stored in R2
+            pendingBodyTextForD1,       // Issue H1 fix: body_text in D1 for FTS5 searchability
+            pendingBodyHtmlForD1,       // Issue H1 fix: body_html in D1 for FTS5 searchability
             null,                       // body_text_key (set after R2 write in inserted block)
             null,                       // body_html_key (set after R2 write in inserted block)
             messageId,                  // message_id (nullable)
