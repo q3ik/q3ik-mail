@@ -1,4 +1,3 @@
-export const runtime = 'edge';
 
 import { fetchThreadListPage, fetchThread } from '@/app/actions/mail';
 import { Mail } from '@/components/mail/mail';

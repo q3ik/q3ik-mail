@@ -3,8 +3,8 @@ import type { NextRequest } from 'next/server';
 
 const getThreadListPage = vi.fn();
 
-vi.mock('@cloudflare/next-on-pages', () => ({
-  getRequestContext: () => ({
+vi.mock('@opennextjs/cloudflare', () => ({
+  getCloudflareContext: () => ({
     env: { DB: {} },
   }),
 }));

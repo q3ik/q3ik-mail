@@ -38,6 +38,7 @@
   "exclude": [
     "node_modules", 
     "**/__tests__/**", 
-    "e2e/**"
+    "e2e/**",
+    "open-next.config.ts"
   ]
 }

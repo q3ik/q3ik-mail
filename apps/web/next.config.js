@@ -4,10 +4,6 @@ const isDev = process.env.NODE_ENV === 'development';
 
 /**
  * Sentry ingest domain for the CSP connect-src directive.
- *
- * Client-side events are sent directly to the ingest endpoint (no tunnel) to
- * stay compatible with @cloudflare/next-on-pages which does not support the
- * Sentry tunnel rewrite.
  */
 const sentryIngestDomain = 'https://*.ingest.us.sentry.io';
 
@@ -58,26 +54,20 @@ const nextConfig = {
 
 if (isDev) {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { setupDevPlatform } = require('@cloudflare/next-on-pages/next-dev');
-  (async () => {
-    await setupDevPlatform();
-  })();
+  const { initOpenNextCloudflareForDev } = require('@opennextjs/cloudflare');
+  initOpenNextCloudflareForDev();
 }
 
 /**
- * `withSentryConfig` is intentionally NOT used here.
+ * `withSentryConfig` is not used here.
  *
- * The Sentry webpack plugin wraps every route handler and page, which causes
- * @cloudflare/next-on-pages to emit a "duplicated identifier" error during
- * its post-build bundling step.
- *
- * Sentry still works without it:
+ * Sentry works without it via the instrumentation hooks:
  *   - Server-side: `src/instrumentation.ts` calls `Sentry.init()`
  *   - Client-side: `instrumentation-client.ts` calls `Sentry.init()`
  *   - Error helpers: `src/lib/sentry.ts` uses `@sentry/nextjs` directly
  *   - CSP above allows `connect-src` to Sentry's ingest domain
  *
  * Source-map uploads can be added later via `sentry-cli` in CI once
- * SENTRY_AUTH_TOKEN is configured.
+ * SENTRY_AUTH_TOKEN is configured, or by adding `withSentryConfig` here.
  */
 module.exports = nextConfig;

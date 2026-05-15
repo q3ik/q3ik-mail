@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-const { captureException, searchEmails, getRequestContext } = vi.hoisted(() => ({
+const { captureException, searchEmails, getCloudflareContext } = vi.hoisted(() => ({
   captureException: vi.fn().mockResolvedValue(undefined),
   searchEmails: vi.fn(),
-  getRequestContext: vi.fn(),
+  getCloudflareContext: vi.fn(),
 }));
 
-vi.mock('@cloudflare/next-on-pages', () => ({
-  getRequestContext: () => getRequestContext(),
+vi.mock('@opennextjs/cloudflare', () => ({
+  getCloudflareContext: () => getCloudflareContext(),
 }));
 
 vi.mock('@q3ik-mail/database', () => ({
@@ -22,7 +22,7 @@ vi.mock('@/lib/sentry', () => ({
 describe('GET /api/search', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    getRequestContext.mockReturnValue({ env: { DB: {} } });
+    getCloudflareContext.mockReturnValue({ env: { DB: {} } });
   });
 
   it('returns search results on success', async () => {
@@ -90,7 +90,7 @@ describe('GET /api/search', () => {
   });
 
   it('returns a structured 500 response when DB binding is missing', async () => {
-    getRequestContext.mockReturnValue({ env: {} });
+    getCloudflareContext.mockReturnValue({ env: {} });
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { GET } = await import('../route');
@@ -110,9 +110,9 @@ describe('GET /api/search', () => {
     errorSpy.mockRestore();
   });
 
-  it('returns a structured 500 response when getRequestContext fails', async () => {
+  it('returns a structured 500 response when getCloudflareContext fails', async () => {
     const contextError = new Error('Context failure');
-    getRequestContext.mockImplementation(() => {
+    getCloudflareContext.mockImplementation(() => {
       throw contextError;
     });
 

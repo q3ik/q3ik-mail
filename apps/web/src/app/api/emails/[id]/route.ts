@@ -1,8 +1,7 @@
-import { getRequestContext } from '@cloudflare/next-on-pages';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { getEmailById, markAsRead } from '@q3ik-mail/database';
 import { captureException } from '@/lib/sentry';
 
-export const runtime = 'edge';
 
 export async function GET(
   _req: Request,
@@ -10,7 +9,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const { env } = getRequestContext();
+    const { env } = getCloudflareContext();
     const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
     const email = await getEmailById(env.DB, id, r2Bucket);
     if (!email) return Response.json({ error: 'Not found' }, { status: 404 });

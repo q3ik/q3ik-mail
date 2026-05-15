@@ -1,41 +1,29 @@
 /**
  * Sentry capture helpers.
  *
- * This file is imported by both client components (e.g. `global-error.tsx`)
- * and server/edge code (middleware, API routes), so it must use **dynamic
- * imports** — never a top-level `import * as Sentry from '...'`.
- *
- * Why dynamic imports?
- *   @cloudflare/next-on-pages bundles every edge function into a single
- *   worker file.  A static `import * as Sentry` causes the full
- *   `@sentry/nextjs` module graph to be inlined into every function that
- *   touches this helper, producing duplicate identifiers that
- *   next-on-pages rejects at build time.
- *
- * We use `@sentry/nextjs` for both server and client — it handles
- * Node.js, edge, and browser runtimes transparently.
+ * With @opennextjs/cloudflare the full Node.js runtime is available,
+ * so standard static imports of @sentry/nextjs work without the
+ * duplicate-identifier issues that plagued @cloudflare/next-on-pages.
  */
+import * as Sentry from '@sentry/nextjs';
 
-export async function captureException(err: unknown): Promise<void> {
+export function captureException(err: unknown): void {
   try {
-    const Sentry = await import('@sentry/nextjs');
     Sentry.captureException(err);
   } catch (captureError) {
     console.error('[sentry] captureException failed:', captureError);
   }
 }
 
-export async function captureMessage(
+export function captureMessage(
   message: string,
   context?: {
     level?: 'error' | 'warning' | 'info' | 'debug';
     tags?: Record<string, string>;
     extra?: Record<string, unknown>;
   },
-): Promise<void> {
+): void {
   try {
-    const Sentry = await import('@sentry/nextjs');
-
     if (context) {
       Sentry.withScope((scope) => {
         if (context.level) scope.setLevel(context.level);
