@@ -331,6 +331,8 @@ export async function migrateEmailBodiesToR2(
 
   for (const row of results) {
     try {
+      let allWritesSucceeded = true;
+
       const bodyTextKey =
         row.body_text !== null
           ? (row.body_text_key ?? `emails/${row.id}/body.txt`)
@@ -349,10 +351,16 @@ export async function migrateEmailBodiesToR2(
           const errorMsg = `R2 write verification failed for email ${row.id}, key: ${bodyTextKey}. Skipping email; D1 body columns remain unchanged.`;
           console.error(errorMsg);
           captureR2ReadError(new Error(errorMsg), { operation: 'r2.head.verify', key: bodyTextKey });
-          continue;
+          allWritesSucceeded = false;
         }
       }
-      if (row.body_html !== null && row.body_html_key === null && bodyHtmlKey !== null) {
+
+      if (
+        allWritesSucceeded &&
+        row.body_html !== null &&
+        row.body_html_key === null &&
+        bodyHtmlKey !== null
+      ) {
         await r2Bucket.put(bodyHtmlKey, row.body_html, {
           httpMetadata: { contentType: 'text/html; charset=utf-8' },
         });
@@ -361,9 +369,11 @@ export async function migrateEmailBodiesToR2(
           const errorMsg = `R2 write verification failed for email ${row.id}, key: ${bodyHtmlKey}. Skipping email; D1 body columns remain unchanged.`;
           console.error(errorMsg);
           captureR2ReadError(new Error(errorMsg), { operation: 'r2.head.verify', key: bodyHtmlKey });
-          continue;
+          allWritesSucceeded = false;
         }
       }
+
+      if (!allWritesSucceeded) continue;
 
       const clearBodyText = bodyTextKey !== null && row.body_text !== null;
       const clearBodyHtml = bodyHtmlKey !== null && row.body_html !== null;
