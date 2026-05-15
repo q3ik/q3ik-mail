@@ -1,54 +1,73 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const captureCloudflareException = vi.fn();
-const captureNextException = vi.fn();
-
-vi.mock('@sentry/cloudflare', () => ({
-  captureException: captureCloudflareException,
-}));
+const captureExceptionMock = vi.fn();
+const captureMessageMock = vi.fn();
+const withScopeMock = vi.fn((cb: (scope: unknown) => void) => {
+  cb({
+    setLevel: vi.fn(),
+    setTags: vi.fn(),
+    setExtras: vi.fn(),
+  });
+});
 
 vi.mock('@sentry/nextjs', () => ({
-  captureException: captureNextException,
+  captureException: captureExceptionMock,
+  captureMessage: captureMessageMock,
+  withScope: withScopeMock,
 }));
 
 describe('captureException', () => {
   afterEach(() => {
-    captureCloudflareException.mockReset();
-    captureNextException.mockReset();
-    delete (globalThis as typeof globalThis & { window?: Window }).window;
+    captureExceptionMock.mockReset();
   });
 
-  it('uses @sentry/cloudflare on the server', async () => {
+  it('delegates to @sentry/nextjs', async () => {
     const { captureException } = await import('../sentry');
-    const error = new Error('server');
+    const error = new Error('test');
 
-    await captureException(error);
+    captureException(error);
 
-    expect(captureCloudflareException).toHaveBeenCalledWith(error);
-    expect(captureNextException).not.toHaveBeenCalled();
-  });
-
-  it('uses @sentry/nextjs in the browser', async () => {
-    const { captureException } = await import('../sentry');
-    const error = new Error('client');
-
-    (globalThis as typeof globalThis & { window?: Window }).window = {} as Window;
-
-    await captureException(error);
-
-    expect(captureNextException).toHaveBeenCalledWith(error);
-    expect(captureCloudflareException).not.toHaveBeenCalled();
+    expect(captureExceptionMock).toHaveBeenCalledWith(error);
   });
 
   it('does not throw when the underlying SDK call fails', async () => {
-    captureCloudflareException.mockImplementation(() => {
+    captureExceptionMock.mockImplementation(() => {
       throw new Error('SDK failure');
     });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { captureException } = await import('../sentry');
 
-    await expect(captureException(new Error('original'))).resolves.toBeUndefined();
+    // Should not throw
+    expect(() => captureException(new Error('original'))).not.toThrow();
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+});
+
+describe('captureMessage', () => {
+  afterEach(() => {
+    captureMessageMock.mockReset();
+    withScopeMock.mockClear();
+  });
+
+  it('sends a plain message', async () => {
+    const { captureMessage } = await import('../sentry');
+
+    captureMessage('hello');
+
+    expect(captureMessageMock).toHaveBeenCalledWith('hello');
+  });
+
+  it('uses withScope when context is provided', async () => {
+    const { captureMessage } = await import('../sentry');
+
+    captureMessage('tagged', {
+      level: 'warning',
+      tags: { foo: 'bar' },
+      extra: { detail: 42 },
+    });
+
+    expect(withScopeMock).toHaveBeenCalled();
+    expect(captureMessageMock).toHaveBeenCalledWith('tagged');
   });
 });
