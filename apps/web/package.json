@@ -11,7 +11,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv env.d.ts",
-    "build:cf": "npx @cloudflare/next-on-pages"
+    "build:cf": "npx @cloudflare/next-on-pages --disableChunksDedup"
   },
   "dependencies": {
     "@cloudflare/next-on-pages": "^1.13.10",
