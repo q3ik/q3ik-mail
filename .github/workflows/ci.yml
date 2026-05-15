@@ -344,26 +344,9 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter web exec playwright install chromium --with-deps
 
-      # Issue 6 fix: start the app via wrangler pages dev (same as the
-      # existing e2e job) and wait for it to be ready before running the
-      # spec. Without this step every request.get('/api/...') in the
-      # mail-delivery spec would fail with ERR_CONNECTION_REFUSED.
-      - name: Start app (wrangler pages dev)
-        run: >
-          npx wrangler pages dev .vercel/output/static
-          --port 3000
-          --persist-to $GITHUB_WORKSPACE/.wrangler/state
-          > $GITHUB_WORKSPACE/wrangler.log 2>&1
-          &
-        working-directory: apps/web
-
-      - name: Wait for app to be ready
-        run: npx wait-on http://localhost:3000 --timeout 60000
-
-      - name: Dump wrangler log on failure
-        if: failure()
-        run: cat $GITHUB_WORKSPACE/wrangler.log || echo 'No wrangler log found'
-
+      # Playwright's webServer block (playwright.config.ts) starts wrangler
+      # pages dev and waits for HTTP 200 before running any test — same as
+      # the regular e2e job.  No manual server start or wait-on needed.
       - name: Run agentmail.to E2E
         run: pnpm --filter web exec playwright test e2e/mail-delivery.spec.ts
         env:
