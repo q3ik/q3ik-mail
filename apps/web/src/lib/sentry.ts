@@ -8,11 +8,12 @@
  *
  * The SDK is already initialised by the time these helpers are called:
  *   - Server/edge: via `src/instrumentation.ts` → `@sentry/cloudflare` init
- *   - Client: via `sentry.client.config.ts` → `@sentry/nextjs` init
+ *   - Client: via `instrumentation-client.ts` → `@sentry/nextjs` init
+ *
+ * NOTE: The `import()` calls use string literals (not variables) so that
+ * Webpack can statically analyse and tree-shake the unused SDK from each
+ * bundle (client vs server/edge).
  */
-
-const SERVER_SDK = '@sentry/cloudflare';
-const CLIENT_SDK = '@sentry/nextjs';
 
 function isServer(): boolean {
   return (
@@ -24,7 +25,9 @@ function isServer(): boolean {
 
 export async function captureException(err: unknown): Promise<void> {
   try {
-    const sdk = await import(isServer() ? SERVER_SDK : CLIENT_SDK);
+    const sdk = isServer()
+      ? await import('@sentry/cloudflare')
+      : await import('@sentry/nextjs');
     sdk.captureException(err);
   } catch (captureError) {
     // Absorb any SDK-level failures so callers are never interrupted by a
@@ -42,10 +45,13 @@ export async function captureMessage(
   },
 ): Promise<void> {
   try {
-    const sdk = await import(isServer() ? SERVER_SDK : CLIENT_SDK);
+    const sdk = isServer()
+      ? await import('@sentry/cloudflare')
+      : await import('@sentry/nextjs');
 
     if (context) {
-      sdk.withScope((scope: { setLevel: (l: string) => void; setTags: (t: Record<string, string>) => void; setExtras: (e: Record<string, unknown>) => void }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      sdk.withScope((scope: any) => {
         if (context.level) scope.setLevel(context.level);
         if (context.tags) scope.setTags(context.tags);
         if (context.extra) scope.setExtras(context.extra);

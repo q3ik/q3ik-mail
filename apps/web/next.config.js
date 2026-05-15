@@ -6,10 +6,9 @@ const isDev = process.env.NODE_ENV === 'development';
 /**
  * Sentry ingest domain for the CSP connect-src directive.
  *
- * Client-side events are routed through the `/monitoring` tunnel (same origin),
- * but the ingest domain is still allowed as a fallback — e.g. when the tunnel
- * response is blocked by an upstream proxy, or for Session Replay which may
- * open a direct connection.
+ * Client-side events are sent directly to the ingest endpoint (no tunnel) to
+ * stay compatible with @cloudflare/next-on-pages which does not support the
+ * Sentry tunnel rewrite.
  */
 const sentryIngestDomain = 'https://*.ingest.us.sentry.io';
 
@@ -78,8 +77,8 @@ module.exports = withSentryConfig(nextConfig, {
   // Upload a wider set of source maps for better stack traces.
   widenClientFileUpload: true,
 
-  // Route client-side Sentry events through a same-origin tunnel to avoid
-  // ad-blockers and simplify CSP. Events sent to /monitoring are proxied to
-  // Sentry's ingest endpoint.
-  tunnelRoute: '/monitoring',
+  // NOTE: tunnelRoute is intentionally omitted — @cloudflare/next-on-pages
+  // does not support Sentry's rewrite-based tunnel and it causes a
+  // "duplicated identifier" build error. Client-side events are sent
+  // directly to Sentry's ingest endpoint (allowed by the CSP above).
 });
