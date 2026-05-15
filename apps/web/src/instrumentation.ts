@@ -1,9 +1,10 @@
 /**
  * Next.js instrumentation hook.
  *
- * On Cloudflare Pages the server-side runtime is workerd (V8 isolate), not
- * Node.js, so we initialise `@sentry/cloudflare` here instead of the default
- * `@sentry/nextjs` server SDK.
+ * `@sentry/nextjs` handles both Node.js and edge (workerd) runtimes,
+ * so we use it directly here instead of `@sentry/cloudflare` (which
+ * is designed for raw Cloudflare Workers/Pages and does not export an
+ * `init()` function compatible with Next.js instrumentation hooks).
  *
  * Client-side Sentry is initialised separately via `instrumentation-client.ts`
  * (the Next.js 15+ convention for client-side instrumentation).
@@ -15,9 +16,7 @@ export async function register() {
     process.env.NEXT_RUNTIME === 'edge' ||
     process.env.NEXT_RUNTIME === 'nodejs'
   ) {
-    const SentryCF = await import('@sentry/cloudflare');
-
-    SentryCF.init({
+    Sentry.init({
       dsn: process.env.SENTRY_DSN,
       tracesSampleRate: process.env.SENTRY_TRACES_SAMPLE_RATE
         ? (Number.parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE) || 0)

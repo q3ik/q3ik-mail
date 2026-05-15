@@ -6,10 +6,8 @@
  * `@sentry/cloudflare`, which depends on `node:async_hooks` and would cause
  * a webpack error when bundled for the browser.
  *
- * Server-side SDK *initialisation* uses `@sentry/cloudflare` (in
- * `src/instrumentation.ts`), but the capture helpers here go through
- * `@sentry/nextjs` which delegates to the correct underlying transport at
- * runtime.
+ * Server-side SDK *initialisation* also uses `@sentry/nextjs` (in
+ * `src/instrumentation.ts`), which handles both Node.js and edge runtimes.
  */
 import * as Sentry from '@sentry/nextjs';
 
