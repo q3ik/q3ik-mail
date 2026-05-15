@@ -25,7 +25,7 @@ describe('captureException', () => {
     const { captureException } = await import('../sentry');
     const error = new Error('test');
 
-    captureException(error);
+    await captureException(error);
 
     expect(captureExceptionMock).toHaveBeenCalledWith(error);
   });
@@ -38,7 +38,7 @@ describe('captureException', () => {
     const { captureException } = await import('../sentry');
 
     // Should not throw
-    expect(() => captureException(new Error('original'))).not.toThrow();
+    await expect(captureException(new Error('original'))).resolves.not.toThrow();
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
   });
@@ -53,7 +53,7 @@ describe('captureMessage', () => {
   it('sends a plain message', async () => {
     const { captureMessage } = await import('../sentry');
 
-    captureMessage('hello');
+    await captureMessage('hello');
 
     expect(captureMessageMock).toHaveBeenCalledWith('hello');
   });
@@ -61,7 +61,7 @@ describe('captureMessage', () => {
   it('uses withScope when context is provided', async () => {
     const { captureMessage } = await import('../sentry');
 
-    captureMessage('tagged', {
+    await captureMessage('tagged', {
       level: 'warning',
       tags: { foo: 'bar' },
       extra: { detail: 42 },

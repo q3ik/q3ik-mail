@@ -1,21 +1,20 @@
 /**
- * Next.js instrumentation hook.
+ * Next.js instrumentation hook — server-side Sentry initialisation.
  *
- * `@sentry/nextjs` handles both Node.js and edge (workerd) runtimes,
- * so we use it directly here instead of `@sentry/cloudflare` (which
- * is designed for raw Cloudflare Workers/Pages and does not export an
- * `init()` function compatible with Next.js instrumentation hooks).
+ * Uses a dynamic import of `@sentry/nextjs` to avoid a static module
+ * reference that would be duplicated across every edge function when
+ * @cloudflare/next-on-pages bundles the Vercel output.
  *
  * Client-side Sentry is initialised separately via `instrumentation-client.ts`
  * (the Next.js 15+ convention for client-side instrumentation).
  */
-import * as Sentry from '@sentry/nextjs';
 
 export async function register() {
   if (
     process.env.NEXT_RUNTIME === 'edge' ||
     process.env.NEXT_RUNTIME === 'nodejs'
   ) {
+    const Sentry = await import('@sentry/nextjs');
     Sentry.init({
       dsn: process.env.SENTRY_DSN,
       tracesSampleRate: process.env.SENTRY_TRACES_SAMPLE_RATE
@@ -31,4 +30,9 @@ export async function register() {
  * request-level errors.  Required by `@sentry/nextjs` — see:
  * https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/#errors-from-nested-react-server-components
  */
-export const onRequestError = Sentry.captureRequestError;
+export async function onRequestError(
+  ...args: Parameters<typeof import('@sentry/nextjs').captureRequestError>
+) {
+  const Sentry = await import('@sentry/nextjs');
+  return Sentry.captureRequestError(...args);
+}
