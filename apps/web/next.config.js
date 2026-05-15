@@ -1,5 +1,4 @@
 // @ts-check
-const { withSentryConfig } = require('@sentry/nextjs');
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -65,20 +64,20 @@ if (isDev) {
   })();
 }
 
-module.exports = withSentryConfig(nextConfig, {
-  // Sentry org & project for source-map uploads.
-  // Requires SENTRY_AUTH_TOKEN in the build environment.
-  org: 'q3ik',
-  project: 'q3ik-mail-web',
-
-  // Only print upload logs in CI.
-  silent: !process.env.CI,
-
-  // Upload a wider set of source maps for better stack traces.
-  widenClientFileUpload: true,
-
-  // NOTE: tunnelRoute is intentionally omitted — @cloudflare/next-on-pages
-  // does not support Sentry's rewrite-based tunnel and it causes a
-  // "duplicated identifier" build error. Client-side events are sent
-  // directly to Sentry's ingest endpoint (allowed by the CSP above).
-});
+/**
+ * `withSentryConfig` is intentionally NOT used here.
+ *
+ * The Sentry webpack plugin wraps every route handler and page, which causes
+ * @cloudflare/next-on-pages to emit a "duplicated identifier" error during
+ * its post-build bundling step.
+ *
+ * Sentry still works without it:
+ *   - Server-side: `src/instrumentation.ts` calls `Sentry.init()`
+ *   - Client-side: `instrumentation-client.ts` calls `Sentry.init()`
+ *   - Error helpers: `src/lib/sentry.ts` uses `@sentry/nextjs` directly
+ *   - CSP above allows `connect-src` to Sentry's ingest domain
+ *
+ * Source-map uploads can be added later via `sentry-cli` in CI once
+ * SENTRY_AUTH_TOKEN is configured.
+ */
+module.exports = nextConfig;
