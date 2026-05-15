@@ -823,7 +823,7 @@ const handler: ExportedHandler<Env> = {
         }
       }
 
-      if (inserted) {
+      if (inserted || resumeExistingId !== null) {
         // Issue 2 fix: R2 attachment writes occur here, inside the inserted gate,
         // so duplicate deliveries never trigger redundant R2 puts.
         const persistedAttachments: Array<{
