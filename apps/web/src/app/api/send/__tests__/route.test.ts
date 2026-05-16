@@ -545,7 +545,7 @@ describe('POST /api/send', () => {
     expect(callArgs.headers?.['References']).toBe(expectedIds.join(' '));
   });
 
-  it('still returns 200 when D1 persistence fails after send succeeds', async () => {
+  it('returns 500 with resend id when D1 persistence fails after send succeeds', async () => {
     routeMocks.insertRun.mockRejectedValueOnce(new Error('db unavailable'));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -557,9 +557,15 @@ describe('POST /api/send', () => {
       });
 
       const res = await POST(req as unknown as NextRequest);
+      const MockedResend = Resend as MockedClass<typeof Resend>;
+      const sendSpy = MockedResend.mock.results[0]?.value.emails.send as ReturnType<typeof vi.fn>;
 
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ id: 'sent-id' });
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({
+        error: 'Email sent but failed to save — please refresh.',
+        id: 'sent-id',
+      });
+      expect(sendSpy).toHaveBeenCalledTimes(1);
       expect(errorSpy).toHaveBeenCalledWith(
         '[api/send] Failed to persist sent email to D1:',
         expect.any(Error)
