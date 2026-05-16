@@ -11,11 +11,10 @@ compatibility_flags = ["nodejs_compat"]
 crons = ["*/5 * * * *"]
 
 # The D1 database binding
-# Run `npx wrangler d1 create q3ik-mail-db` and replace the placeholder below
 [[d1_databases]]
 binding = "DB"
 database_name = "q3ik-mail-db"
-database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+database_id = "6c52332d-12dc-41ec-9ff2-0e377c697188"
 migrations_dir = "../../packages/database/migrations"
 # ^ Path is relative to this wrangler.toml (apps/worker/).
 #   Always run `wrangler d1 migrations apply` from the apps/worker/ directory.
