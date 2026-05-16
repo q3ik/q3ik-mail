@@ -11,9 +11,9 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv",
-    "build:cf": "opennextjs-cloudflare",
-    "preview": "opennextjs-cloudflare && wrangler dev",
-    "deploy": "opennextjs-cloudflare && wrangler deploy"
+    "build:cf": "opennextjs-cloudflare build",
+    "preview": "opennextjs-cloudflare build && wrangler dev",
+    "deploy": "opennextjs-cloudflare build && wrangler deploy"
   },
   "dependencies": {
     "@q3ik-mail/database": "workspace:*",
