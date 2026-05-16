@@ -77,21 +77,24 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   const encoder = new TextEncoder();
   const aBytes = encoder.encode(a);
   const bBytes = encoder.encode(b);
-  // Always hash both strings to a fixed 32-byte length so that the comparison
-  // time is independent of the input lengths, mitigating length-based timing attacks.
+
+  // Always hash both strings to a fixed length to mitigate length-based timing attacks.
+  // The time to hash still depends on input length, but since the expected secret's
+  // length is constant for a given deployment, its length is not leaked.
   const [aHash, bHash] = await Promise.all([
     crypto.subtle.digest('SHA-256', aBytes),
     crypto.subtle.digest('SHA-256', bBytes),
   ]);
+
   const aArr = new Uint8Array(aHash);
   const bArr = new Uint8Array(bHash);
   let diff = 0;
   for (let i = 0; i < aArr.length; i++) {
     diff |= aArr[i] ^ bArr[i];
   }
-  // Hash comparison is sufficient: SHA-256 always emits 32 bytes regardless of
-  // input length, so diff captures any difference in value or length.
-  return diff === 0;
+
+  // Check both hash equality and original length equality to prevent theoretical collisions.
+  return diff === 0 && a.length === b.length;
 }
 
 export async function POST(req: Request) {
