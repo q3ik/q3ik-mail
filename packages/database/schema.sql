@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS emails (
 CREATE INDEX IF NOT EXISTS idx_emails_thread_id  ON emails(thread_id);
 CREATE INDEX IF NOT EXISTS idx_emails_created_at ON emails(created_at);
 CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
+CREATE INDEX IF NOT EXISTS idx_emails_thread_list
+  ON emails(thread_id, created_at DESC, resend_id ASC);
 
 -- Optional: Table for simple contact management
 CREATE TABLE IF NOT EXISTS contacts (
