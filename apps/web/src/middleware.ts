@@ -19,7 +19,49 @@ import { NextRequest, NextResponse } from 'next/server';
  *    exposing it on a public domain.
  */
 
-const PUBLIC_PATHS = ['/api/webhook'] as const;
+/**
+ * Public path exclusion strategy:
+ *
+ * Two layers work together, and both must be kept in sync:
+ *
+ * 1. `config.matcher` (compile-time, Next.js edge config):
+ *    Excludes static assets and favicon from the middleware invocation
+ *    entirely — the middleware function is never called for these paths.
+ *    This avoids unnecessary JS execution for purely static responses.
+ *
+ * 2. `PUBLIC_PATH_SET` / `isPublicPath` (runtime, inside the middleware fn):
+ *    Handles API routes that must remain reachable without CF Access JWT
+ *    (e.g. inbound webhook receivers). These paths ARE reached by the matcher
+ *    and the middleware IS invoked, but the function returns NextResponse.next()
+ *    immediately without performing JWT verification.
+ *
+ * Why not exclude API public paths from the matcher regex too?
+ *   The matcher regex is a static string embedded in the Next.js edge
+ *   config — it cannot reference the PUBLIC_PATHS constant. Duplicating
+ *   path strings in two places (regex + constant) creates drift risk.
+ *   Keeping public API paths in PUBLIC_PATH_SET only is the canonical
+ *   source of truth; the matcher stays limited to purely static exclusions.
+ *
+ * When adding a new public API route:
+ *   - Add to PUBLIC_PATHS below with an explanatory comment.
+ *   - Do NOT add to the matcher regex.
+ */
+const PUBLIC_PATHS = [
+  /**
+   * Resend inbound webhook — receives raw inbound email payloads.
+   * Auth is performed via svix signature verification inside the worker;
+   * Cloudflare Access must not gate this path or Resend deliveries will fail.
+   */
+  '/api/webhook',
+  /**
+   * Cron-triggered inbound processing endpoint — invoked by Cloudflare
+   * Workers Cron or an equivalent scheduled trigger, not by end-user browsers.
+   * Auth is enforced via a shared secret header checked inside the route
+   * handler; Cloudflare Access JWT is not appropriate for machine-to-machine
+   * cron invocations.
+   */
+  '/api/trigger-inbound',
+] as const;
 const PUBLIC_PREFIXES = ['/_next/static/', '/_next/image/'] as const;
 const PUBLIC_PATH_SET = new Set<string>(PUBLIC_PATHS);
 const TEAM_DOMAIN_PATTERN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.cloudflareaccess\.com$/;
@@ -63,8 +105,11 @@ const SECURITY_HEADERS: Record<string, string> = {
 };
 
 function isPublicPath(pathname: string): boolean {
+  // Normalize pathname by removing trailing slashes for exact matching.
+  // This ensures /api/webhook/ also matches /api/webhook in PUBLIC_PATH_SET.
+  const normalized = pathname.replace(/\/+$/, '') || '/';
   return (
-    PUBLIC_PATH_SET.has(pathname) ||
+    PUBLIC_PATH_SET.has(normalized) ||
     PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   );
 }
@@ -173,5 +218,11 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api/webhook|_next/static|_next/image|favicon.ico).*)'],
+  /**
+   * Excludes purely static assets from middleware invocation (compile-time).
+   * Public API paths (webhook, trigger-inbound) are NOT excluded here —
+   * they are handled at runtime via PUBLIC_PATH_SET inside the middleware fn.
+   * See the PUBLIC_PATHS comment block above for full rationale.
+   */
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };

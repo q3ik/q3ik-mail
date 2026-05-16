@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const getEmailById = vi.fn();
 const captureException = vi.fn();
-const captureMessage = vi.fn();
 
 vi.mock('@cloudflare/next-on-pages', () => ({
   getRequestContext: () => ({
@@ -16,7 +15,6 @@ vi.mock('@q3ik-mail/database', () => ({
 
 vi.mock('@/lib/sentry', () => ({
   captureException,
-  captureMessage,
 }));
 
 describe('GET /api/emails/[id]/body', () => {
@@ -24,44 +22,34 @@ describe('GET /api/emails/[id]/body', () => {
     vi.resetAllMocks();
   });
 
-  const validJwt = 'header.payload.signature';
+  it('returns 400 when id is not a valid UUID', async () => {
+    const { GET } = await import('../route');
+    const req = new Request('http://localhost/api/emails/not-a-uuid/body');
+    const res = await GET(req, {
+      params: Promise.resolve({ id: 'not-a-uuid' }),
+    });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Invalid email ID format' });
+  });
 
-  it('returns body payload when email exists and JWT is valid', async () => {
+  it('returns body payload when email exists', async () => {
     getEmailById.mockResolvedValue({
-      id: 'email-1',
+      id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       body_html: '<p>Hello</p>',
       body_text: 'Hello',
     });
 
     const { GET } = await import('../route');
-    const req = new Request('http://localhost/api/emails/email-1/body', {
-      headers: { 'cf-access-jwt-assertion': validJwt },
-    });
+    const req = new Request('http://localhost/api/emails/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/body');
     const res = await GET(req, {
-      params: Promise.resolve({ id: 'email-1' }),
+      params: Promise.resolve({ id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }),
     });
 
     expect(res.status).toBe(200);
-    expect(getEmailById).toHaveBeenCalledWith({}, 'email-1', null);
+    expect(getEmailById).toHaveBeenCalledWith({}, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', null);
     await expect(res.json()).resolves.toEqual({
       body_html: '<p>Hello</p>',
       body_text: 'Hello',
-    });
-  });
-
-  it('returns 401 when JWT is missing', async () => {
-    const { GET } = await import('../route');
-    const req = new Request('http://localhost/api/emails/email-1/body');
-    const res = await GET(req, {
-      params: Promise.resolve({ id: 'email-1' }),
-    });
-
-    expect(res.status).toBe(401);
-    await expect(res.json()).resolves.toEqual({ error: 'Unauthorized' });
-    expect(captureMessage).toHaveBeenCalledWith('[api/email-body] missing or malformed Cloudflare Access JWT', {
-      level: 'warning',
-      tags: { category: 'security-auth', surface: 'api.email-body', auth_provider: 'cloudflare-access' },
-      extra: { path: '/api/emails/email-1/body' },
     });
   });
 
@@ -69,11 +57,9 @@ describe('GET /api/emails/[id]/body', () => {
     getEmailById.mockResolvedValue(null);
 
     const { GET } = await import('../route');
-    const req = new Request('http://localhost/api/emails/missing/body', {
-      headers: { 'cf-access-jwt-assertion': validJwt },
-    });
+    const req = new Request('http://localhost/api/emails/ffffffff-ffff-ffff-ffff-ffffffffffff/body');
     const res = await GET(req, {
-      params: Promise.resolve({ id: 'missing' }),
+      params: Promise.resolve({ id: 'ffffffff-ffff-ffff-ffff-ffffffffffff' }),
     });
 
     expect(res.status).toBe(404);
@@ -86,11 +72,9 @@ describe('GET /api/emails/[id]/body', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const { GET } = await import('../route');
-    const req = new Request('http://localhost/api/emails/email-1/body', {
-      headers: { 'cf-access-jwt-assertion': validJwt },
-    });
+    const req = new Request('http://localhost/api/emails/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/body');
     const res = await GET(req, {
-      params: Promise.resolve({ id: 'email-1' }),
+      params: Promise.resolve({ id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }),
     });
 
     expect(res.status).toBe(500);

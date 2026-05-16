@@ -290,6 +290,8 @@ describe('POST /api/send', () => {
         'Hi',
         'Hello',
         null,
+        null,           // body_text_key (null — no R2 in test env)
+        null,           // body_html_key
         '<message-uuid@q3ik.com>',
         null,
         null,
@@ -390,6 +392,8 @@ describe('POST /api/send', () => {
         'Re: Hi',
         'Hi back',
         null,
+        null,           // body_text_key (null — no R2 in test env)
+        null,           // body_html_key
         '<reply-message-uuid@q3ik.com>',
         '<msg-1@example.com>',
         '<root@example.com> <msg-1@example.com>',

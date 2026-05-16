@@ -28,6 +28,8 @@ interface ResendReceivedAttachment {
   content_type?: string;
   contentType?: string;
   url?: string;
+  size?: number;
+  content_length?: number;
 }
 
 /**
@@ -124,6 +126,12 @@ function parseResendReceivedEmail(
       }
       if (a.url !== undefined && typeof a.url !== 'string') {
         return { ok: false, field: 'attachments[*].url' };
+      }
+      if (a.size !== undefined && typeof a.size !== 'number') {
+        return { ok: false, field: 'attachments[*].size' };
+      }
+      if (a.content_length !== undefined && typeof a.content_length !== 'number') {
+        return { ok: false, field: 'attachments[*].content_length' };
       }
     }
   }
@@ -256,7 +264,7 @@ async function loadAttachmentContent(
   attachment: ResendReceivedAttachment,
   resendEmailId: string,
   resendApiKey: string
-): Promise<ArrayBuffer | Uint8Array | string | null> {
+): Promise<ArrayBuffer | Uint8Array | string | ReadableStream<Uint8Array> | null> {
   if (attachment.content) {
     try {
       return decodeBase64ToUint8Array(attachment.content);
@@ -278,7 +286,7 @@ async function loadAttachmentContent(
     if (!response.ok) {
       return null;
     }
-    return response.arrayBuffer();
+    return response.body ?? null;
   }
 
   if (attachment.id) {
@@ -293,10 +301,29 @@ async function loadAttachmentContent(
     if (!response.ok) {
       return null;
     }
-    return response.arrayBuffer();
+    return response.body ?? null;
   }
 
   return null;
+}
+
+function parseAttachmentLimit(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+}
+
+function estimateAttachmentBytes(attachment: ResendReceivedAttachment): number {
+  if (typeof attachment.content_length === 'number' && attachment.content_length >= 0) {
+    return attachment.content_length;
+  }
+  if (typeof attachment.size === 'number' && attachment.size >= 0) {
+    return attachment.size;
+  }
+  if (typeof attachment.content === 'string') {
+    return Math.floor((attachment.content.length * 3) / 4);
+  }
+  return 0;
 }
 
 // Env interface -- matches wrangler.toml bindings and secrets
@@ -318,6 +345,8 @@ export interface Env {
   SENTRY_DSN?: string;           // optional -- worker runs without Sentry if unset
   ENVIRONMENT: string;           // set in wrangler.toml [vars]
   CLOUDFLARE_D1_DATABASE_ID: string; // set in wrangler.toml [dev]
+  MAX_TOTAL_ATTACHMENT_BYTES?: string;
+  MAX_SINGLE_ATTACHMENT_BYTES?: string;
 }
 
 /**
@@ -634,17 +663,41 @@ const handler: ExportedHandler<Env> = {
       safeFilename: string;
       contentType: string;
       attachmentKey: string;
-      data: ArrayBuffer | Uint8Array | string;
+      data: ArrayBuffer | Uint8Array | string | ReadableStream<Uint8Array>;
+      estimatedSizeBytes: number;
     }> = [];
 
     if (r2Bucket) {
+      const maxTotalAttachmentBytes = parseAttachmentLimit(env.MAX_TOTAL_ATTACHMENT_BYTES, 25 * 1024 * 1024);
+      const maxSingleAttachmentBytes = parseAttachmentLimit(env.MAX_SINGLE_ATTACHMENT_BYTES, 20 * 1024 * 1024);
+      let cumulativeAttachmentBytes = 0;
       const attachments = receivedEmail.attachments ?? [];
       for (const [index, attachment] of attachments.entries()) {
+        const estimatedSizeBytes = estimateAttachmentBytes(attachment);
+        if (estimatedSizeBytes > maxSingleAttachmentBytes) {
+          console.warn('[worker] skipping attachment; single-file size limit exceeded', {
+            emailId,
+            filename: attachment.filename ?? `attachment-${index + 1}`,
+            estimatedSizeBytes,
+            maxSingleAttachmentBytes,
+          });
+          continue;
+        }
+
+        cumulativeAttachmentBytes += estimatedSizeBytes;
+        if (cumulativeAttachmentBytes > maxTotalAttachmentBytes) {
+          console.warn('[worker] skipping remaining attachments; cumulative size limit exceeded', {
+            emailId,
+            cumulativeAttachmentBytes,
+            maxTotalAttachmentBytes,
+          });
+          break;
+        }
         const safeFilename = sanitizeAttachmentFilename(
           attachment.filename ?? `attachment-${index + 1}`,
           index
         );
-        let attachmentData: ArrayBuffer | Uint8Array | string | null = null;
+        let attachmentData: ArrayBuffer | Uint8Array | string | ReadableStream<Uint8Array> | null = null;
         try {
           attachmentData = await loadAttachmentContent(
             attachment,
@@ -673,7 +726,7 @@ const handler: ExportedHandler<Env> = {
           'application/octet-stream';
         const attachmentKey = `emails/${internalEmailId}/attachments/${safeFilename}`;
 
-        attachmentsToIngest.push({ safeFilename, contentType, attachmentKey, data: attachmentData });
+        attachmentsToIngest.push({ safeFilename, contentType, attachmentKey, data: attachmentData, estimatedSizeBytes });
       }
     }
 
@@ -727,7 +780,7 @@ const handler: ExportedHandler<Env> = {
           createdAt: number;
         }> = [];
 
-        for (const { safeFilename, contentType, attachmentKey, data } of attachmentsToIngest) {
+        for (const { safeFilename, contentType, attachmentKey, data, estimatedSizeBytes } of attachmentsToIngest) {
           try {
             await r2Bucket!.put(attachmentKey, data, {
               httpMetadata: { contentType },
@@ -737,9 +790,12 @@ const handler: ExportedHandler<Env> = {
               filename: safeFilename,
               contentType,
               // Issue 1 fix: use module-level textEncoder instead of per-invocation allocation.
-              sizeBytes: typeof data === 'string'
-                ? textEncoder.encode(data).byteLength
-                : data.byteLength,
+              // For ReadableStream data, byteLength is unavailable so fall back to estimatedSizeBytes.
+              sizeBytes: data instanceof ReadableStream
+                ? estimatedSizeBytes
+                : typeof data === 'string'
+                  ? textEncoder.encode(data).byteLength
+                  : data.byteLength,
               createdAt: Date.now(),
             });
           } catch (err) {
