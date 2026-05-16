@@ -249,9 +249,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
 
-      # Build for Cloudflare Pages — outputs to .vercel/output/static
+      # Build for Cloudflare Workers via OpenNext — outputs to .open-next/
       - name: Build web app
         run: pnpm --filter web run build:cf
 
@@ -329,7 +329,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
 
       - name: Build web app
         run: pnpm --filter web run build:cf
@@ -348,9 +348,9 @@ jobs:
       # existing e2e job) and wait for it to be ready before running the
       # spec. Without this step every request.get('/api/...') in the
       # mail-delivery spec would fail with ERR_CONNECTION_REFUSED.
-      - name: Start app (wrangler pages dev)
+      - name: Start app (wrangler dev)
         run: >
-          npx wrangler pages dev .vercel/output/static
+          npx wrangler dev
           --port 3000
           --persist-to $GITHUB_WORKSPACE/.wrangler/state
           > $GITHUB_WORKSPACE/wrangler.log 2>&1
