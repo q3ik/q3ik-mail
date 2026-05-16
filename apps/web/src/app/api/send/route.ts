@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { captureException } from '@/lib/sentry';
 import { z } from 'zod';
-import { buildReferencesHeader } from '@/lib/references';
+import { MAX_REFERENCES_BYTES, buildReferencesHeader } from '@/lib/references';
 
 /**
  * All 400 responses share this shape so clients have one code path:
@@ -31,7 +31,7 @@ const SendSchema = z.object({
   // nullish() accepts both null and undefined from JSON clients;
   // the transform normalises both to undefined for downstream functions.
   replyToId: z.string().trim().min(1).nullish().transform((v) => v ?? undefined),
-  references: z.string().trim().min(1).nullish().transform((v) => v ?? undefined),
+  references: z.string().trim().min(1).max(MAX_REFERENCES_BYTES).nullish().transform((v) => v ?? undefined),
 });
 
 
