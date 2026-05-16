@@ -907,8 +907,8 @@ const handler: ExportedHandler<Env> = {
   },
 } satisfies ExportedHandler<Env>;
 
-export default withSentry(
-  (env) => (env as Env).SENTRY_DSN
+export default withSentry<Env>(
+  (env) => env.SENTRY_DSN
     ? {
         dsn: env.SENTRY_DSN,
         tracesSampleRate: 0.2,
