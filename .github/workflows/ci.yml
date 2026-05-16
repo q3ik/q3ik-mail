@@ -364,6 +364,9 @@ jobs:
         if: failure()
         run: cat $GITHUB_WORKSPACE/wrangler.log || echo 'No wrangler log found'
 
+      # Playwright's webServer block (playwright.config.ts) starts wrangler
+      # pages dev and waits for HTTP 200 before running any test — same as
+      # the regular e2e job.  No manual server start or wait-on needed.
       - name: Run agentmail.to E2E
         run: pnpm --filter web exec playwright test e2e/mail-delivery.spec.ts
         env:

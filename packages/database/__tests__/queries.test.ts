@@ -448,6 +448,50 @@ describe('migrateEmailBodiesToR2', () => {
       errorSpy.mockRestore();
     }
   });
+
+  it('does not attempt body_html write when body_text verification fails', async () => {
+    const selectRows = [
+      {
+        id: 'email-1',
+        body_text: 'Plain body',
+        body_html: '<p>HTML body</p>',
+        body_text_key: null,
+        body_html_key: null,
+      },
+    ];
+
+    const updateRunSpy = vi.fn(async () => ({ success: true }));
+    const db = {
+      prepare: (sql: string) => ({
+        bind: (..._args: unknown[]) => ({
+          all: async () => {
+            if (sql.includes('SELECT id, body_text, body_html, body_text_key, body_html_key')) {
+              return { results: selectRows };
+            }
+            throw new Error(`Unexpected SQL in all(): ${sql}`);
+          },
+          run: async () => {
+            if (sql.includes('UPDATE emails')) return updateRunSpy();
+            throw new Error(`Unexpected SQL in run(): ${sql}`);
+          },
+        }),
+      }),
+    } as unknown as D1Database;
+
+    const putSpy = vi.fn(async () => undefined);
+    const headSpy = vi.fn(async (key: string) => (key.endsWith('body.txt') ? null : ({ key } as unknown)));
+    const bucket = { put: putSpy, head: headSpy } as unknown as R2Bucket;
+
+    const migrated = await migrateEmailBodiesToR2(db, bucket, 10);
+
+    expect(migrated).toBe(0);
+    expect(putSpy).toHaveBeenCalledTimes(1);
+    expect(putSpy).toHaveBeenCalledWith('emails/email-1/body.txt', 'Plain body', {
+      httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+    });
+    expect(headSpy).toHaveBeenCalledTimes(1);
+    expect(updateRunSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe('getThreadListPage', () => {
