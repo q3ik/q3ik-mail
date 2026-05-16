@@ -65,13 +65,44 @@ async function ingestInboundEmail(
     .run();
 }
 
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ * Returns true only when both strings are non-empty and identical.
+ * Both strings are always hashed to a fixed length before comparison to
+ * eliminate length-based timing leaks.
+ */
+async function timingSafeEqual(a: string, b: string): Promise<boolean> {
+  if (!a || !b) return false;
+  const encoder = new TextEncoder();
+  const aBytes = encoder.encode(a);
+  const bBytes = encoder.encode(b);
+
+  // Always hash both strings to a fixed length to mitigate length-based timing attacks.
+  // The time to hash still depends on input length, but since the expected secret's
+  // length is constant for a given deployment, its length is not leaked.
+  const [aHash, bHash] = await Promise.all([
+    crypto.subtle.digest('SHA-256', aBytes),
+    crypto.subtle.digest('SHA-256', bBytes),
+  ]);
+
+  const aArr = new Uint8Array(aHash);
+  const bArr = new Uint8Array(bHash);
+  let diff = 0;
+  for (let i = 0; i < aArr.length; i++) {
+    diff |= aArr[i] ^ bArr[i];
+  }
+
+  // Check both hash equality and original length equality to prevent theoretical collisions.
+  return diff === 0 && a.length === b.length;
+}
+
 export async function POST(req: Request) {
   // Auth check runs first — the deployment guard runs second.
   // Checking env vars before auth would leak the existence of this endpoint to
   // unauthenticated callers via the distinct 401 vs 403 response codes.
   const expectedSecret = process.env.E2E_TEST_SECRET;
   const providedSecret = req.headers.get('x-e2e-test-secret');
-  if (!expectedSecret || !providedSecret || providedSecret !== expectedSecret) {
+  if (!expectedSecret || !providedSecret || !(await timingSafeEqual(providedSecret, expectedSecret))) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

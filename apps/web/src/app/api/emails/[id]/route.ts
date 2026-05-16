@@ -1,6 +1,7 @@
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { getEmailById, markAsRead } from '@q3ik-mail/database';
 import { captureException } from '@/lib/sentry';
+import { UUID_RE } from '@/lib/validation';
 
 
 export async function GET(
@@ -9,7 +10,12 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const { env } = getCloudflareContext();
+
+    if (!UUID_RE.test(id)) {
+      return Response.json({ error: 'Invalid email ID format' }, { status: 400 });
+    }
+
+    const { env } = getRequestContext();
     const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
     const email = await getEmailById(env.DB, id, r2Bucket);
     if (!email) return Response.json({ error: 'Not found' }, { status: 404 });

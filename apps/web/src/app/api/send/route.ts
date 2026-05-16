@@ -138,16 +138,36 @@ export async function POST(req: NextRequest) {
 
     try {
       const sentEmailRowId = crypto.randomUUID();
+
+      // Persist sent email body to R2 (same pattern as inbound) to avoid
+      // D1 row-size limits on large email content.
+      let bodyTextKey: string | null = null;
+      const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
+      if (r2Bucket && content) {
+        bodyTextKey = `emails/${sentEmailRowId}/body.txt`;
+        try {
+          await r2Bucket.put(bodyTextKey, content, {
+            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+          });
+        } catch (err) {
+          console.warn('[api/send] Failed to persist sent body to R2; falling back to inline D1', { err });
+          bodyTextKey = null;
+        }
+      }
+
       // Keep the INSERT column list aligned with the bound values below:
       // `is_read` and `is_sent` are intentional literals because sent mail
       // should always be persisted as read + outbound.
       // This write is best-effort because the email has already been accepted
       // by Resend; surfacing a 500 here would risk duplicate sends on retry.
+      //
+      // When R2 write succeeds: body_text=null, body_text_key=key (offloaded)
+      // When R2 write fails:    body_text=content, body_text_key=null (inline fallback)
       await env.DB.prepare(`
         INSERT OR IGNORE INTO emails
-          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
+          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
       `)
         .bind(
           sentEmailRowId,
@@ -157,8 +177,10 @@ export async function POST(req: NextRequest) {
           APP_FROM_NAME,
           to,
           subject,
-          content,
-          null,
+          bodyTextKey ? null : content,   // inline only if R2 failed
+          null,                           // body_html (sent emails are text-only)
+          bodyTextKey,                    // body_text_key
+          null,                           // body_html_key
           sentMessageId,
           replyToId ?? null,
           persistedReferences,
