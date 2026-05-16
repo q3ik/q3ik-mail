@@ -130,7 +130,7 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Invalid from address' }, { status: 400 });
   }
 
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
   try {
     await ingestInboundEmail(env.DB, parsed.data);
     return Response.json({ ok: true }, { status: 200 });

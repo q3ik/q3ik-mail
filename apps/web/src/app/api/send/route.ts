@@ -78,7 +78,7 @@ async function resolveThreadingMetadata(
 }
 
 export async function POST(req: NextRequest) {
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
 
   let rawBody: unknown;
 

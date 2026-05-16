@@ -17,7 +17,7 @@ export async function GET(req: Request) {
       : DEFAULT_LIMIT;
 
   const cursor = searchParams.get('cursor') ?? undefined;
-  const { env } = getCloudflareContext();
+  const { env } = await getCloudflareContext({ async: true });
 
   try {
     return Response.json(await getThreadListPage(env.DB, { limit, cursor }));

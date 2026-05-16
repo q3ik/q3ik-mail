@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const { env } = getCloudflareContext();
+    const { env } = await getCloudflareContext({ async: true });
     if (!env?.DB) {
       throw new Error('Database binding (DB) is missing');
     }

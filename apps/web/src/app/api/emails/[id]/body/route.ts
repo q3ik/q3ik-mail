@@ -17,7 +17,7 @@ export async function GET(
     }
 
     //const { env } = getRequestContext();
-    const { env } = getCloudflareContext();
+    const { env } = await getCloudflareContext({ async: true });
 
     const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
     const email = await getEmailById(env.DB, id, r2Bucket);
