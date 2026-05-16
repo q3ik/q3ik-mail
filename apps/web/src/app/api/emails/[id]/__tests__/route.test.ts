@@ -25,9 +25,18 @@ describe('GET /api/emails/[id]', () => {
     vi.resetAllMocks();
   });
 
+  it('returns 400 when id is not a valid UUID', async () => {
+    const { GET } = await import('../route');
+    const res = await GET(new Request('http://localhost/api/emails/not-a-uuid') as unknown as NextRequest, {
+      params: Promise.resolve({ id: 'not-a-uuid' }),
+    });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Invalid email ID format' });
+  });
+
   it('returns email payload when email exists', async () => {
     getEmailById.mockResolvedValue({
-      id: 'email-1',
+      id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       thread_id: 'thread-1',
       resend_id: 'resend-1',
       from_address: 'sender@example.com',
@@ -45,14 +54,14 @@ describe('GET /api/emails/[id]', () => {
     });
 
     const { GET } = await import('../route');
-    const res = await GET(new Request('http://localhost/api/emails/email-1') as unknown as NextRequest, {
-      params: Promise.resolve({ id: 'email-1' }),
+    const res = await GET(new Request('http://localhost/api/emails/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') as unknown as NextRequest, {
+      params: Promise.resolve({ id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }),
     });
 
     expect(res.status).toBe(200);
-    expect(getEmailById).toHaveBeenCalledWith({}, 'email-1', null);
+    expect(getEmailById).toHaveBeenCalledWith({}, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', null);
     await expect(res.json()).resolves.toEqual({
-      id: 'email-1',
+      id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       thread_id: 'thread-1',
       resend_id: 'resend-1',
       from_address: 'sender@example.com',
@@ -72,24 +81,24 @@ describe('GET /api/emails/[id]', () => {
 
   it('marks unread email as read as a best-effort side-effect', async () => {
     getEmailById.mockResolvedValue({
-      id: 'email-1',
+      id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       subject: 'Hello',
       is_read: false,
     });
     markAsRead.mockResolvedValue(undefined);
 
     const { GET } = await import('../route');
-    const res = await GET(new Request('http://localhost/api/emails/email-1') as unknown as NextRequest, {
-      params: Promise.resolve({ id: 'email-1' }),
+    const res = await GET(new Request('http://localhost/api/emails/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') as unknown as NextRequest, {
+      params: Promise.resolve({ id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }),
     });
 
     expect(res.status).toBe(200);
-    expect(markAsRead).toHaveBeenCalledWith({}, 'email-1');
+    expect(markAsRead).toHaveBeenCalledWith({}, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
   });
 
   it('handles markAsRead failure gracefully', async () => {
     getEmailById.mockResolvedValue({
-      id: 'email-1',
+      id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       subject: 'Hello',
       is_read: false,
     });
@@ -97,8 +106,8 @@ describe('GET /api/emails/[id]', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const { GET } = await import('../route');
-    const res = await GET(new Request('http://localhost/api/emails/email-1') as unknown as NextRequest, {
-      params: Promise.resolve({ id: 'email-1' }),
+    const res = await GET(new Request('http://localhost/api/emails/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') as unknown as NextRequest, {
+      params: Promise.resolve({ id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }),
     });
 
     expect(res.status).toBe(200); // Should still return 200
@@ -110,8 +119,8 @@ describe('GET /api/emails/[id]', () => {
     getEmailById.mockResolvedValue(null);
 
     const { GET } = await import('../route');
-    const res = await GET(new Request('http://localhost/api/emails/missing') as unknown as NextRequest, {
-      params: Promise.resolve({ id: 'missing' }),
+    const res = await GET(new Request('http://localhost/api/emails/ffffffff-ffff-ffff-ffff-ffffffffffff') as unknown as NextRequest, {
+      params: Promise.resolve({ id: 'ffffffff-ffff-ffff-ffff-ffffffffffff' }),
     });
 
     expect(res.status).toBe(404);
@@ -124,8 +133,8 @@ describe('GET /api/emails/[id]', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const { GET } = await import('../route');
-    const res = await GET(new Request('http://localhost/api/emails/email-1') as unknown as NextRequest, {
-      params: Promise.resolve({ id: 'email-1' }),
+    const res = await GET(new Request('http://localhost/api/emails/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') as unknown as NextRequest, {
+      params: Promise.resolve({ id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }),
     });
 
     expect(res.status).toBe(500);
