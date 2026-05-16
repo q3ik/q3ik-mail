@@ -562,7 +562,7 @@ describe('POST /api/send', () => {
 
       expect(res.status).toBe(500);
       expect(await res.json()).toEqual({
-        error: 'Email sent but failed to save — please refresh.',
+        error: { message: 'Email sent but failed to save — please refresh.' },
         id: 'sent-id',
       });
       expect(sendSpy).toHaveBeenCalledTimes(1);
