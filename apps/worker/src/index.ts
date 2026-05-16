@@ -359,7 +359,7 @@ function captureR2PutError(
   ctx: { emailId: string; operation: string; objectKey: string | null },
 ): void {
   console.warn(
-    `[worker] failed to persist ${ctx.operation} to R2; proceeding with null key`,
+    `[worker] failed to persist ${ctx.operation} to R2`,
     { emailId: ctx.emailId, err },
   );
   if (env.SENTRY_DSN) {
@@ -500,11 +500,21 @@ const handler: ExportedHandler<Env> = {
     // pass this SELECT will both attempt the INSERT — the DB constraint ensures
     // exactly one succeeds and the other is silently discarded.
     const existing = await env.DB.prepare(
-      'SELECT id FROM emails WHERE resend_id = ? LIMIT 1'
-    ).bind(emailId).first();
+      'SELECT id, body_text_key, body_html_key FROM emails WHERE resend_id = ? LIMIT 1'
+    ).bind(emailId).first<{ id: string; body_text_key: string | null; body_html_key: string | null }>();
 
+    let resumeExistingId: string | null = null;
     if (existing) {
-      return new Response('Already ingested', { status: 200 });
+      // Fully ingested: either R2 is not bound (bodies never go to R2), or at least one
+      // body key was already written. Return 200 to suppress any further Resend retries.
+      const bodyAlreadyWritten = existing.body_text_key != null || existing.body_html_key != null;
+      if (!env.EMAIL_BODIES || bodyAlreadyWritten) {
+        return new Response('Already ingested', { status: 200 });
+      }
+      // Partial ingestion detected: the D1 row exists but the body R2 write failed on a
+      // prior attempt (worker returned 503). Fall through to complete the R2 write and
+      // UPDATE using the existing record's ID, so the retry finishes the ingestion.
+      resumeExistingId = existing.id;
     }
 
     const resend = new Resend(env.RESEND_API_KEY);
@@ -614,43 +624,51 @@ const handler: ExportedHandler<Env> = {
       ? toRaw.join(', ')
       : (typeof toRaw === 'string' ? toRaw : '');
 
-    const internalEmailId = crypto.randomUUID();
-    const r2Bucket = env.EMAIL_BODIES;
+    const internalEmailId = resumeExistingId ?? crypto.randomUUID();
 
-    // --- Step 6: Store body content in R2 and persist key columns in D1 ---
-    // R2 write failures are NON-FATAL: we log+warn and proceed with null keys
-    // so the D1 INSERT always completes. This prevents the Resend retry
-    // contract from creating orphaned R2 objects: if a 500 were returned here,
-    // Resend would retry, INSERT OR IGNORE would skip the duplicate resend_id,
-    // and any already-written R2 objects would be permanently orphaned.
-    let bodyTextKey: string | null = null;
-    let bodyHtmlKey: string | null = null;
+    // --- Step 6: Collect body content for deferred R2 write ---
+    // Issue H2 fix: Body R2 writes are deferred until after D1 INSERT succeeds.
+    // This prevents orphaned R2 objects when D1 INSERT fails or gets dedup'd
+    // by a concurrent delivery. Body content is kept in memory until Step 8
+    // confirms the D1 row was inserted.
+    //
+    // Issue H1 fix (GitHub #126): Also store body content in D1 columns for FTS5 searchability.
+    const pendingBodyContent: Array<{ type: 'text' | 'html'; key: string; content: string; contentType: string }> = [];
+    let pendingBodyTextForD1: string | null = null;
+    let pendingBodyHtmlForD1: string | null = null;
+
+    const r2Bucket = env.EMAIL_BODIES;
     if (r2Bucket) {
       if (receivedEmail.text !== null && receivedEmail.text !== undefined) {
-        bodyTextKey = getBodyTextKey(internalEmailId);
-        try {
-          await r2Bucket.put(bodyTextKey, receivedEmail.text, {
-            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-          });
-        } catch (err) {
-          captureR2PutError(err, env, { emailId, operation: 'body_text', objectKey: bodyTextKey });
-          bodyTextKey = null;
-        }
+        pendingBodyContent.push({
+          type: 'text',
+          key: getBodyTextKey(internalEmailId),
+          content: receivedEmail.text,
+          contentType: 'text/plain; charset=utf-8',
+        });
+        // Issue H1 fix: Store in D1 for FTS5 searchability
+        pendingBodyTextForD1 = receivedEmail.text;
       }
 
       if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
-        bodyHtmlKey = getBodyHtmlKey(internalEmailId);
-        try {
-          await r2Bucket.put(bodyHtmlKey, receivedEmail.html, {
-            httpMetadata: { contentType: 'text/html; charset=utf-8' },
-          });
-        } catch (err) {
-          captureR2PutError(err, env, { emailId, operation: 'body_html', objectKey: bodyHtmlKey });
-          bodyHtmlKey = null;
-        }
+        pendingBodyContent.push({
+          type: 'html',
+          key: getBodyHtmlKey(internalEmailId),
+          content: receivedEmail.html,
+          contentType: 'text/html; charset=utf-8',
+        });
+        // Issue H1 fix: Store in D1 for FTS5 searchability
+        pendingBodyHtmlForD1 = receivedEmail.html;
       }
     } else {
       console.warn('[worker] EMAIL_BODIES R2 bucket not bound; bodies will not be stored in R2', { emailId });
+      // Fallback: still write to D1 when R2 is not available
+      if (receivedEmail.text !== null && receivedEmail.text !== undefined) {
+        pendingBodyTextForD1 = receivedEmail.text;
+      }
+      if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
+        pendingBodyHtmlForD1 = receivedEmail.html;
+      }
     }
 
     // --- Step 7: Build attachment descriptor list (download content from Resend) ---
@@ -739,36 +757,73 @@ const handler: ExportedHandler<Env> = {
     //
     // Column order in the INSERT and .bind() are kept in sync.
     try {
-      const insertResult = await env.DB.prepare(`
-        INSERT OR IGNORE INTO emails
-          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
-        VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
-      `)
-        .bind(
-          internalEmailId,            // id
-          emailId,                    // resend_id
-          threadId,                   // thread_id (looked up or new)
-          fromAddress,                // from_address
-          fromName,                   // from_name (nullable)
-          toAddress,                  // to_address
-          receivedEmail.subject ?? null,
-          null,                       // DEPRECATED: body_text now stored in R2
-          null,                       // DEPRECATED: body_html now stored in R2
-          bodyTextKey,                // body_text_key
-          bodyHtmlKey,                // body_html_key
-          messageId,                  // message_id (nullable)
-          inReplyTo,                  // in_reply_to (nullable)
-          referencesHeader,           // references (nullable)
-          needsRethreading,           // needs_rethreading (0 or 1)
-        )
-        .run();
+      // Skip INSERT when resuming a partial ingestion — the D1 row already exists.
+      let inserted = false;
+      if (resumeExistingId === null) {
+        const insertResult = await env.DB.prepare(`
+          INSERT OR IGNORE INTO emails
+            (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
+          VALUES
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+        `)
+          .bind(
+            internalEmailId,            // id
+            emailId,                    // resend_id
+            threadId,                   // thread_id (looked up or new)
+            fromAddress,                // from_address
+            fromName,                   // from_name (nullable)
+            toAddress,                  // to_address
+            receivedEmail.subject ?? null,
+            pendingBodyTextForD1,       // Issue H1 fix: body_text in D1 for FTS5 searchability
+            pendingBodyHtmlForD1,       // Issue H1 fix: body_html in D1 for FTS5 searchability
+            null,                       // body_text_key (set after R2 write in inserted block)
+            null,                       // body_html_key (set after R2 write in inserted block)
+            messageId,                  // message_id (nullable)
+            inReplyTo,                  // in_reply_to (nullable)
+            referencesHeader,           // references (nullable)
+            needsRethreading,           // needs_rethreading (0 or 1)
+          )
+          .run();
 
-      // Issue 3 fix: D1Result.meta is typed as always-present; remove the
-      // optional chain (?.) that was masking a potential stub misconfiguration
-      // where absent meta would silently be treated as a non-duplicate.
-      const inserted = (insertResult.meta.changes ?? 0) > 0;
-      if (inserted) {
+        // Issue 3 fix: D1Result.meta is typed as always-present; remove the
+        // optional chain (?.) that was masking a potential stub misconfiguration
+        // where absent meta would silently be treated as a non-duplicate.
+        inserted = (insertResult.meta.changes ?? 0) > 0;
+      }
+
+      // Run body R2 writes for both fresh inserts and resume mode.
+      // Resume mode: a prior attempt inserted the D1 row but the R2 write failed (503).
+      // Fresh insert: normal first-time ingestion path.
+      // Issue H2 fix: body writes occur after the D1 row exists, preventing orphaned R2 objects.
+      // Issue H3 fix: R2 write failures are FATAL — return 503 so Resend retries.
+      if (inserted || resumeExistingId !== null) {
+        const writtenBodyKeys: Array<{ type: 'text' | 'html'; r2Key: string }> = [];
+        for (const { type, key, content, contentType } of pendingBodyContent) {
+          try {
+            await r2Bucket!.put(key, content, {
+              httpMetadata: { contentType },
+            });
+            writtenBodyKeys.push({ type, r2Key: key });
+          } catch (err) {
+            captureR2PutError(err, env, { emailId, operation: 'body_write', objectKey: key });
+            // Issue H3 fix: Return 503 to trigger Resend retry instead of silently losing content
+            return new Response('Body storage failed', { status: 503 });
+          }
+        }
+
+        // If body keys were written, UPDATE the row with the R2 keys
+        if (writtenBodyKeys.length > 0) {
+          const bodyTextKeyUpdate = writtenBodyKeys.find((k) => k.type === 'text')?.r2Key ?? null;
+          const bodyHtmlKeyUpdate = writtenBodyKeys.find((k) => k.type === 'html')?.r2Key ?? null;
+          await env.DB.prepare(`
+            UPDATE emails SET body_text_key = ?, body_html_key = ? WHERE id = ?
+          `)
+            .bind(bodyTextKeyUpdate, bodyHtmlKeyUpdate, internalEmailId)
+            .run();
+        }
+      }
+
+      if (inserted || resumeExistingId !== null) {
         // Issue 2 fix: R2 attachment writes occur here, inside the inserted gate,
         // so duplicate deliveries never trigger redundant R2 puts.
         const persistedAttachments: Array<{
