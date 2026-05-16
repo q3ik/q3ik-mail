@@ -3,8 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const getEmailById = vi.fn();
 const captureException = vi.fn();
 
-vi.mock('@cloudflare/next-on-pages', () => ({
-  getRequestContext: () => ({
+vi.mock('@opennextjs/cloudflare', () => ({
+  getCloudflareContext: () => ({
     env: { DB: {} },
   }),
 }));

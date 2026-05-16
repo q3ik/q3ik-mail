@@ -10,18 +10,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv env.d.ts",
-    "build:cf": "npx @cloudflare/next-on-pages"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv",
+    "build:cf": "opennextjs-cloudflare build",
+    "preview": "opennextjs-cloudflare build && wrangler dev",
+    "deploy": "opennextjs-cloudflare build && wrangler deploy"
   },
   "dependencies": {
-    "@cloudflare/next-on-pages": "^1.13.10",
     "@q3ik-mail/database": "workspace:*",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
-    "@sentry/cloudflare": "^9.14.0",
     "@sentry/nextjs": "^9.14.0",
     "@tailwindcss/typography": "^0.5.16",
     "class-variance-authority": "^0.7.1",
@@ -36,7 +36,8 @@
     "react-resizable-panels": "^4.11.0",
     "resend": "^4.5.1",
     "tailwind-merge": "^3.5.0",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "@opennextjs/cloudflare": "^1.1.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250508.0",

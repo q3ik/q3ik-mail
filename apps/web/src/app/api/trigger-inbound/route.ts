@@ -1,7 +1,6 @@
-import { getRequestContext } from '@cloudflare/next-on-pages';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { z } from 'zod';
 
-export const runtime = 'edge';
 
 const TriggerInboundSchema = z.object({
   from: z.string().trim().min(1),
@@ -131,7 +130,7 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Invalid from address' }, { status: 400 });
   }
 
-  const { env } = getRequestContext();
+  const { env } = await getCloudflareContext({ async: true });
   try {
     await ingestInboundEmail(env.DB, parsed.data);
     return Response.json({ ok: true }, { status: 200 });

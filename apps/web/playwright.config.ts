@@ -25,10 +25,10 @@ export default defineConfig({
   webServer: {
     // Playwright starts this command, waits for a real HTTP 200 on the
     // url below, and tears it down after all tests finish.
+    // Uses `wrangler dev` which reads from wrangler.toml (OpenNext worker).
     command: [
-      'pnpm exec wrangler pages dev .vercel/output/static',
+      'pnpm exec wrangler dev',
       '--port 3000',
-      '--compatibility-flags nodejs_compat',
       `--persist-to ${persistTo}`,
     ].join(' '),
     url: 'http://localhost:3000',

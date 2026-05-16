@@ -30,9 +30,9 @@ const routeMocks = vi.hoisted(() => {
   };
 });
 
-// Mock @cloudflare/next-on-pages before importing the route
-vi.mock('@cloudflare/next-on-pages', () => ({
-  getRequestContext: () => ({
+// Mock @opennextjs/cloudflare before importing the route
+vi.mock('@opennextjs/cloudflare', () => ({
+  getCloudflareContext: () => ({
     env: routeMocks.env,
   }),
 }));

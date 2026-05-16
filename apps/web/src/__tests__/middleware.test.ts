@@ -15,9 +15,12 @@ vi.mock('jose/jwt/verify', () => ({
   jwtVerify: joseMocks.jwtVerify,
 }));
 
-vi.mock('@sentry/cloudflare', () => ({
+vi.mock('@sentry/nextjs', () => ({
   captureException: vi.fn(),
   captureMessage: vi.fn(),
+  withScope: vi.fn((cb: (scope: unknown) => void) => {
+    cb({ setLevel: vi.fn(), setTags: vi.fn(), setExtras: vi.fn() });
+  }),
 }));
 
 describe('Cloudflare Access middleware', () => {

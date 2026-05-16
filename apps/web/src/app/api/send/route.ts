@@ -1,6 +1,6 @@
 import { Resend } from 'resend';
 import { NextRequest } from 'next/server';
-import { getRequestContext } from '@cloudflare/next-on-pages';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { captureException } from '@/lib/sentry';
 import { z } from 'zod';
 import { buildReferencesHeader } from '@/lib/references';
@@ -34,7 +34,6 @@ const SendSchema = z.object({
   references: z.string().trim().min(1).nullish().transform((v) => v ?? undefined),
 });
 
-export const runtime = 'edge';
 
 const APP_FROM_ADDRESS = 'mail@q3ik.com';
 const APP_FROM_NAME = 'q3ik Mail';
@@ -79,7 +78,7 @@ async function resolveThreadingMetadata(
 }
 
 export async function POST(req: NextRequest) {
-  const { env } = getRequestContext();
+  const { env } = await getCloudflareContext({ async: true });
 
   let rawBody: unknown;
 
