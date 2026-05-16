@@ -195,6 +195,10 @@ export async function POST(req: NextRequest) {
       } catch (captureError) {
         console.error('[api/send] Failed to capture sent-email persistence error:', captureError);
       }
+      return Response.json(
+        { error: { message: 'Email sent but failed to save — please refresh.' }, id: resendId },
+        { status: 500 }
+      );
     }
 
     return Response.json({ id: resendId }, { status: 200 });
