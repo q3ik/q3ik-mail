@@ -72,7 +72,7 @@ export function resolveOrphanThreadId(
   if (parent) return parent;
 
   if (references) {
-    const refs = references.trim().split(/\s+/).reverse();
+    const refs = references.trim().split(/\s+/).filter(Boolean).reverse();
     for (const ref of refs) {
       const ancestor = lookup.get(ref);
       if (ancestor) return ancestor;
