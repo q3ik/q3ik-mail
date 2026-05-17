@@ -221,6 +221,24 @@ describe('POST /api/send', () => {
     expectFieldError(await res.json(), 'replyToId');
   });
 
+  it('returns 400 when references exceeds the max length cap', async () => {
+    const { POST } = await import('../route');
+    const req = new Request('http://localhost/api/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        to: 'a@b.com',
+        subject: 'Hi',
+        content: 'Hello',
+        replyToId: '<msg-2@example.com>',
+        references: 'x'.repeat(2001),
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req as unknown as NextRequest);
+    expect(res.status).toBe(400);
+    expectFieldError(await res.json(), 'references');
+  });
+
   // ── Boundary cases for invalid email formats ──────────────────────────────
 
   it.each([
