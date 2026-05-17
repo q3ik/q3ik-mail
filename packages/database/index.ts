@@ -592,7 +592,7 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     if (parentMap.has(orphan.in_reply_to) || !orphan.references) continue;
 
     for (const ref of orphan.references.trim().split(/\s+/)) {
-      if (ref) allReferenceIds.add(ref);
+      if (ref && !parentMap.has(ref)) allReferenceIds.add(ref);
     }
   }
 
