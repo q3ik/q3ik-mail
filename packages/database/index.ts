@@ -638,7 +638,7 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     if (!parent && orphan.references) {
       const refs = orphan.references.trim().split(/\s+/).reverse();
       for (const ref of refs) {
-        const ancestor = referenceMap.get(ref);
+        const ancestor = referenceMap.get(ref) ?? parentMap.get(ref);
         if (ancestor) {
           parent = ancestor;
           break;
