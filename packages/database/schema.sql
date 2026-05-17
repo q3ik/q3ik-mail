@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS emails (
 );
 
 -- Indexes for fast inbox loading and threading lookups
-CREATE INDEX IF NOT EXISTS idx_emails_thread_id  ON emails(thread_id);
 CREATE INDEX IF NOT EXISTS idx_emails_created_at ON emails(created_at);
 CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
 CREATE INDEX IF NOT EXISTS idx_emails_thread_list

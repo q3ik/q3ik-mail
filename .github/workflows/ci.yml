@@ -173,6 +173,7 @@ jobs:
             --json > /tmp/attachments_schema.json
           jq -e '.[0].results | any(.name == "body_text_key") and any(.name == "body_html_key")' /tmp/emails_schema.json >/dev/null
           jq -e '.[0].results | any(.name == "idx_emails_thread_list")' /tmp/emails_indexes.json >/dev/null
+          jq -e '.[0].results | all(.name != "idx_emails_thread_id")' /tmp/emails_indexes.json >/dev/null
           jq -e '.[0].results | any(.name == "email_id") and any(.name == "r2_key")' /tmp/attachments_schema.json >/dev/null
         working-directory: apps/worker
 
@@ -205,6 +206,7 @@ jobs:
             --json > /tmp/attachments_preseeded_schema.json
           jq -e '.[0].results | any(.name == "body_text_key") and any(.name == "body_html_key")' /tmp/emails_preseeded_schema.json >/dev/null
           jq -e '.[0].results | any(.name == "idx_emails_thread_list")' /tmp/emails_preseeded_indexes.json >/dev/null
+          jq -e '.[0].results | all(.name != "idx_emails_thread_id")' /tmp/emails_preseeded_indexes.json >/dev/null
           jq -e '.[0].results | any(.name == "email_id") and any(.name == "r2_key")' /tmp/attachments_preseeded_schema.json >/dev/null
         working-directory: apps/worker
 
