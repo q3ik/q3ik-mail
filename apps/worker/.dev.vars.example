@@ -1,0 +1,14 @@
+# apps/worker/.dev.vars
+
+RESEND_API_KEY=re_xxxxxxxxx
+RESEND_WEBHOOK_SECRET=whsec_xxxxxxxxx
+
+CLOUDFLARE_ACCESS_AUD=your-access-app-audience-tag
+CLOUDFLARE_TEAM_DOMAIN=your-team.cloudflareaccess.com
+
+# Optional
+SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
+
+# Optional overrides
+MAX_TOTAL_ATTACHMENT_BYTES=26214400
+MAX_SINGLE_ATTACHMENT_BYTES=20971520

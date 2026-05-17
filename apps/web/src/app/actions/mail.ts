@@ -2,7 +2,6 @@
 
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import {
-  getLatestEmails,
   getEmailsByThread,
   getThreadList,
   getThreadListPage,
@@ -26,11 +25,6 @@ export async function fetchThreadListPage(limit = 50, cursor?: string) {
     cursor,
     cursorSecret: env.THREAD_LIST_CURSOR_SECRET,
   });
-}
-
-export async function fetchLatestEmails(limit = 50) {
-  const { env } = await getCloudflareContext({ async: true });
-  return getLatestEmails(env.DB, limit);
 }
 
 export async function fetchThread(threadId: string) {
