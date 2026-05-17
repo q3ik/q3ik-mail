@@ -1,4 +1,5 @@
 import type { Email, EmailSummary } from './types';
+import { resolveOrphanThreadId } from '@q3ik-mail/core';
 
 export type { Email, EmailSummary, NewEmail } from './types';
 
@@ -801,13 +802,7 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     }
   }
 
-  const referenceMap = new Map<
-    string,
-    {
-      id: string;
-      thread_id: string;
-    }
-  >();
+  const referenceMap = new Map<string, { thread_id: string }>();
 
   if (allReferenceIds.size > 0) {
     const referenceIds = [...allReferenceIds];
@@ -830,26 +825,23 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     }
   }
 
+  // Merge parentMap and referenceMap into a single lookup for the pure
+  // resolveOrphanThreadId function. referenceMap entries take precedence
+  // (last writer wins in Map constructor spread), but the two maps are
+  // disjoint in practice: allReferenceIds excludes IDs already in parentMap.
+  const combinedLookup = new Map<string, { thread_id: string }>([
+    ...parentMap.entries(),
+    ...referenceMap.entries(),
+  ]);
+
   const updates: D1PreparedStatement[] = [];
 
   for (const orphan of orphans) {
-    let parent:
-      | {
-          id: string;
-          thread_id: string;
-        }
-      | null = parentMap.get(orphan.in_reply_to) ?? null;
-
-    if (!parent && orphan.references) {
-      const refs = orphan.references.trim().split(/\s+/).reverse();
-      for (const ref of refs) {
-        const ancestor = referenceMap.get(ref) ?? parentMap.get(ref);
-        if (ancestor) {
-          parent = ancestor;
-          break;
-        }
-      }
-    }
+    const parent = resolveOrphanThreadId(
+      orphan.in_reply_to,
+      orphan.references,
+      combinedLookup,
+    );
 
     if (!parent) continue; // Parent still hasn't arrived
 
