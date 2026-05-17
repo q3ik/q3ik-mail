@@ -251,6 +251,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
 
+      # Inject the real D1 database_id from the repo secret into both
+      # wrangler.toml files so local D1 paths are consistent across apps.
+      - name: Inject D1 database_id
+        env:
+          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+        run: |
+          if [ -z "$D1_DATABASE_ID" ]; then
+            echo "::error::CLOUDFLARE_D1_DATABASE_ID secret is empty or not set."
+            exit 1
+          fi
+          sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/worker/wrangler.toml apps/web/wrangler.toml
+          echo "✓ database_id injected into apps/worker and apps/web wrangler.toml"
+          
       # Build for Cloudflare Workers via OpenNext — outputs to .open-next/
       - name: Build web app
         run: pnpm --filter web run build:cf
@@ -331,6 +344,19 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
 
+      # Inject the real D1 database_id from the repo secret into both
+      # wrangler.toml files so local D1 paths are consistent across apps.
+      - name: Inject D1 database_id
+        env:
+          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+        run: |
+          if [ -z "$D1_DATABASE_ID" ]; then
+            echo "::error::CLOUDFLARE_D1_DATABASE_ID secret is empty or not set."
+            exit 1
+          fi
+          sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/worker/wrangler.toml apps/web/wrangler.toml
+          echo "✓ database_id injected into apps/worker and apps/web wrangler.toml"
+      
       - name: Build web app
         run: pnpm --filter web run build:cf
 
