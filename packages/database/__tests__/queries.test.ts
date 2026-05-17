@@ -1026,7 +1026,7 @@ describe('resolveOrphanedThreads', () => {
   });
 
   it('falls back to references chain when direct in_reply_to parent is missing', async () => {
-    const { db, rows } = createThreadDb([
+    const { db, rows, preparedSqls } = createThreadDb([
       {
         id: 'root-1',
         thread_id: 'thread-root',
@@ -1057,6 +1057,54 @@ describe('resolveOrphanedThreads', () => {
 
     expect(rows.find((row) => row.id === 'orphan-1')).toMatchObject({
       thread_id: 'thread-root',
+      needs_rethreading: 0,
+    });
+    expect(preparedSqls.some((sql) => sql.includes('WHERE message_id = ? LIMIT 1'))).toBe(false);
+  });
+
+  it('chunks references ancestor lookup queries to stay under D1 bind limits', async () => {
+    const referenceIds = Array.from({ length: 120 }, (_, index) => `<ref-${index}@example.com>`);
+
+    const { db, rows, bindCalls } = createThreadDb([
+      ...referenceIds.map((messageId, index) => ({
+        id: `ref-parent-${index}`,
+        thread_id: index === 0 ? 'thread-root' : `thread-${index}`,
+        message_id: messageId,
+        in_reply_to: null,
+        needs_rethreading: 0,
+        created_at: `2026-05-09T09:${String(index).padStart(2, '0')}:00Z`,
+      })),
+      {
+        id: 'orphan-1',
+        thread_id: '<missing-parent@example.com>',
+        message_id: '<reply@example.com>',
+        in_reply_to: '<missing-parent@example.com>',
+        references: referenceIds.join(' '),
+        needs_rethreading: 1,
+        created_at: '2026-05-09T10:00:00Z',
+      },
+    ]);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      await expect(resolveOrphanedThreads(db)).resolves.toBe(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const referenceLookupBindSizes = bindCalls
+      .filter(
+        ({ sql, args }) =>
+          sql.includes('WHERE message_id IN (') &&
+          args.length > 1
+      )
+      .map(({ args }) => args.length)
+      .sort((a, b) => a - b);
+
+    expect(referenceLookupBindSizes).toEqual([30, 90]);
+    expect(rows.find((row) => row.id === 'orphan-1')).toMatchObject({
+      thread_id: 'thread-119',
       needs_rethreading: 0,
     });
   });

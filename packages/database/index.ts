@@ -754,6 +754,8 @@ export async function getThreadListPage(
  * @returns number of emails successfully re-threaded
  */
 export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
+  const D1_SAFE_IN_BIND_LIMIT = 90;
+
   // Fetch a single bounded batch of orphaned emails and only resolve them via
   // RFC 2822 Message-ID lookup. If the parent still does not exist, leave the
   // orphan on its current thread_id so it is not silently merged by subject.
@@ -789,6 +791,45 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
   const parentMap = new Map(
     parentCandidates.map((parent) => [parent.message_id, parent] as const
   ));
+  const allReferenceIds = new Set<string>();
+
+  for (const orphan of orphans) {
+    if (parentMap.has(orphan.in_reply_to) || !orphan.references) continue;
+
+    for (const ref of orphan.references.trim().split(/\s+/)) {
+      if (ref && !parentMap.has(ref)) allReferenceIds.add(ref);
+    }
+  }
+
+  const referenceMap = new Map<
+    string,
+    {
+      id: string;
+      thread_id: string;
+    }
+  >();
+
+  if (allReferenceIds.size > 0) {
+    const referenceIds = [...allReferenceIds];
+
+    for (let start = 0; start < referenceIds.length; start += D1_SAFE_IN_BIND_LIMIT) {
+      const chunk = referenceIds.slice(start, start + D1_SAFE_IN_BIND_LIMIT);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const { results: referenceCandidates } = await db
+        .prepare(
+          `SELECT id, message_id, thread_id
+           FROM emails
+           WHERE message_id IN (${placeholders})`
+        )
+        .bind(...chunk)
+        .all<{ id: string; message_id: string; thread_id: string }>();
+
+      for (const referenceCandidate of referenceCandidates) {
+        referenceMap.set(referenceCandidate.message_id, referenceCandidate);
+      }
+    }
+  }
+
   const updates: D1PreparedStatement[] = [];
 
   for (const orphan of orphans) {
@@ -802,10 +843,7 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     if (!parent && orphan.references) {
       const refs = orphan.references.trim().split(/\s+/).reverse();
       for (const ref of refs) {
-        const ancestor = await db
-          .prepare('SELECT id, thread_id FROM emails WHERE message_id = ? LIMIT 1')
-          .bind(ref)
-          .first<{ id: string; thread_id: string }>();
+        const ancestor = referenceMap.get(ref) ?? parentMap.get(ref);
         if (ancestor) {
           parent = ancestor;
           break;

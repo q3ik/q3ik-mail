@@ -1,4 +1,5 @@
-import * as Sentry from '@sentry/cloudflare';
+import { withSentry } from '@sentry/cloudflare';
+import { captureException, captureMessage, addBreadcrumb } from './lib/sentry';
 import { Webhook } from 'svix';
 import { Resend } from 'resend';
 import { ingestInboundEmail, resolveOrphanedThreads } from '@q3ik-mail/database';
@@ -355,24 +356,21 @@ export interface Env {
  */
 function captureR2PutError(
   err: unknown,
-  env: Env,
   ctx: { emailId: string; operation: string; objectKey: string | null },
 ): void {
   console.warn(
     `[worker] failed to persist ${ctx.operation} to R2`,
     { emailId: ctx.emailId, err },
   );
-  if (env.SENTRY_DSN) {
-    Sentry.captureException(err, {
-      tags: {
-        layer: 'worker',
-        operation: `r2.put.${ctx.operation}`,
-        storage_provider: 'r2',
-        ...(ctx.objectKey ? { r2_object_key: ctx.objectKey } : {}),
-      },
-      extra: { emailId: ctx.emailId },
-    });
-  }
+  captureException(err, {
+    tags: {
+      layer: 'worker',
+      operation: `r2.put.${ctx.operation}`,
+      storage_provider: 'r2',
+      ...(ctx.objectKey ? { r2_object_key: ctx.objectKey } : {}),
+    },
+    extra: { emailId: ctx.emailId },
+  });
 }
 
 // Issue 1 fix: TextEncoder is stateless; hoist to module scope to avoid
@@ -389,22 +387,18 @@ const handler: ExportedHandler<Env> = {
     ctx.waitUntil(
       resolveOrphanedThreads(env.DB)
         .then((resolved) => {
-          if (env.SENTRY_DSN) {
-            Sentry.addBreadcrumb({
-              category: 'cron.rethread',
-              level: 'info',
-              message: '[cron/rethread] resolveOrphanedThreads completed',
-              data: { resolvedCount: resolved },
-            });
-          }
+          addBreadcrumb({
+            category: 'cron.rethread',
+            level: 'info',
+            message: '[cron/rethread] resolveOrphanedThreads completed',
+            data: { resolvedCount: resolved },
+          });
         })
         .catch((err) => {
           console.error('[cron/rethread] resolveOrphanedThreads failed:', err);
-          if (env.SENTRY_DSN) {
-            Sentry.captureException(err, {
-              tags: { layer: 'worker', operation: 'cron.rethread' },
-            });
-          }
+          captureException(err, {
+            tags: { layer: 'worker', operation: 'cron.rethread' },
+          });
         })
     );
   },
@@ -425,6 +419,11 @@ const handler: ExportedHandler<Env> = {
     const accessResult = await validateCfAccessJwt(request, env);
     if (!accessResult.ok) {
       console.error('[worker] Cloudflare Access validation failed: ' + accessResult.error);
+      captureMessage('Cloudflare Access validation failed', {
+        level: 'warning',
+        tags: { layer: 'worker', operation: 'cf_access.validate' },
+        extra: { error: accessResult.error },
+      });
       return new Response('Unauthorized', { status: 401 });
     }
 
@@ -532,12 +531,10 @@ const handler: ExportedHandler<Env> = {
         }
       ).receiving.get(emailId);
     } catch (err) {
-      if (env.SENTRY_DSN) {
-        Sentry.captureException(err, {
-          tags: { layer: 'worker', operation: 'resend.receiving.get' },
-          extra: { emailId },
-        });
-      }
+      captureException(err, {
+        tags: { layer: 'worker', operation: 'resend.receiving.get' },
+        extra: { emailId },
+      });
       return new Response('Failed to fetch email payload', { status: 502 });
     }
 
@@ -551,6 +548,11 @@ const handler: ExportedHandler<Env> = {
         `[worker] Resend receiving API returned unexpected payload shape: field="${parseResult.field}"`,
         { emailId },
       );
+      captureMessage('Resend receiving API returned unexpected payload shape', {
+        level: 'error',
+        tags: { layer: 'worker', operation: 'resend.receiving.parse' },
+        extra: { emailId, field: parseResult.field },
+      });
       return new Response('Invalid email payload from upstream', { status: 502 });
     }
     const receivedEmail = parseResult.email;
@@ -614,6 +616,11 @@ const handler: ExportedHandler<Env> = {
     // string into the NOT NULL from_address column -- reject the webhook instead.
     if (!fromAddress) {
       console.warn('[worker] Received email with missing or unparseable from address; rejecting.', { emailId });
+      captureMessage('Received email with missing or unparseable from address', {
+        level: 'warning',
+        tags: { layer: 'worker', operation: 'inbound.parse_from' },
+        extra: { emailId, rawFrom: receivedEmail.from },
+      });
       return new Response('Missing from address', { status: 400 });
     }
 
@@ -801,7 +808,7 @@ const handler: ExportedHandler<Env> = {
             });
             writtenBodyKeys.push({ type, r2Key: key });
           } catch (err) {
-            captureR2PutError(err, env, { emailId, operation: 'body_write', objectKey: key });
+            captureR2PutError(err, { emailId, operation: 'body_write', objectKey: key });
             // Issue H3 fix: Return 503 to trigger Resend retry instead of silently losing content
             return new Response('Body storage failed', { status: 503 });
           }
@@ -885,12 +892,10 @@ const handler: ExportedHandler<Env> = {
         }));
       }
     } catch (err) {
-      if (env.SENTRY_DSN) {
-        Sentry.captureException(err, {
-          tags: { layer: 'worker', operation: 'db.insert' },
-          extra: { emailId },
-        });
-      }
+      captureException(err, {
+        tags: { layer: 'worker', operation: 'db.insert' },
+        extra: { emailId },
+      });
       return new Response('Database error', { status: 500 });
     }
 
@@ -898,8 +903,8 @@ const handler: ExportedHandler<Env> = {
   },
 } satisfies ExportedHandler<Env>;
 
-export default Sentry.withSentry(
-  (env: Env) => env.SENTRY_DSN
+export default withSentry<Env>(
+  (env) => env.SENTRY_DSN
     ? {
         dsn: env.SENTRY_DSN,
         tracesSampleRate: 0.2,
