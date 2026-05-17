@@ -177,11 +177,7 @@ export async function ingestInboundEmail(
     .run();
 
   return {
-    inserted: (
-      typeof (result as { meta?: { changes?: number } }).meta?.changes === 'number'
-        ? (result as { meta?: { changes?: number } }).meta!.changes!
-        : 1
-    ) > 0,
+    inserted: (result.meta?.changes ?? 0) > 0,
     bodyTextKey,
     bodyHtmlKey,
   };
@@ -207,6 +203,13 @@ function base64ToBytes(value: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+function base64ToArrayBuffer(value: string): ArrayBuffer {
+  const bytes = base64ToBytes(value);
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
 }
 
 async function importHmacKey(secret: string): Promise<CryptoKey> {
@@ -313,16 +316,16 @@ async function decodeThreadListCursor(
   }
 
   const key = await importHmacKey(secret);
-  let signatureBytes: Uint8Array;
+  let signature: ArrayBuffer;
   try {
-    signatureBytes = base64ToBytes(envelope.sig);
+    signature = base64ToArrayBuffer(envelope.sig);
   } catch {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
   const verified = await crypto.subtle.verify(
     'HMAC',
     key,
-    signatureBytes,
+    signature,
     new TextEncoder().encode(envelope.payload)
   );
   if (!verified) {

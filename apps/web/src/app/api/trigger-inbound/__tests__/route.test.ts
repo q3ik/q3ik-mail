@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const routeMocks = vi.hoisted(() => {
-  const run = vi.fn().mockResolvedValue({ success: true });
+  const run = vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } });
   const bind = vi.fn().mockReturnValue({ run });
   const prepare = vi.fn().mockReturnValue({ bind });
 
