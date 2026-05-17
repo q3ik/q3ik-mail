@@ -495,16 +495,34 @@ describe('migrateEmailBodiesToR2', () => {
 });
 
 describe('getThreadListPage', () => {
+  const CURSOR_SECRET = 'test-cursor-secret';
+
+  async function signCursor(payload: Record<string, unknown>): Promise<string> {
+    const payloadJson = JSON.stringify(payload);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(CURSOR_SECRET),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const signature = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      new TextEncoder().encode(payloadJson)
+    );
+    const sig = btoa(String.fromCharCode(...new Uint8Array(signature)));
+    return btoa(JSON.stringify({ payload: payloadJson, sig }));
+  }
+
   it('supports cursor-based pagination and returns a next cursor when more rows exist', async () => {
     let preparedSql = '';
     let boundArgs: unknown[] = [];
-    const cursor = btoa(
-      JSON.stringify({
-        v: 2,
-        createdAt: '2026-05-11T12:00:00Z',
-        resendId: 'resend-2',
-      })
-    );
+    const cursor = await signCursor({
+      v: 2,
+      createdAt: '2026-05-11T12:00:00Z',
+      resendId: 'resend-2',
+    });
 
     const rows = [
       {
@@ -556,6 +574,7 @@ describe('getThreadListPage', () => {
     const result = await getThreadListPage(db, {
       limit: 2,
       cursor,
+      cursorSecret: CURSOR_SECRET,
     });
 
     expect(preparedSql).toContain('created_at < ?');
@@ -567,15 +586,12 @@ describe('getThreadListPage', () => {
     ]);
     expect(result.threads).toHaveLength(2);
     expect(result.threads.map((thread) => thread.id)).toEqual(['3', '4']);
-    expect(result.nextCursor).toBe(
-      btoa(
-        JSON.stringify({
-          v: 2,
-          createdAt: '2026-05-11T10:00:00Z',
-          resendId: 'resend-4',
-        })
-      )
-    );
+    const expectedNextCursor = await signCursor({
+      v: 2,
+      createdAt: '2026-05-11T10:00:00Z',
+      resendId: 'resend-4',
+    });
+    expect(result.nextCursor).toBe(expectedNextCursor);
   });
 
   it('does not skip or duplicate rows when two threads share the same created_at timestamp', async () => {
@@ -601,7 +617,7 @@ describe('getThreadListPage', () => {
     let capturedSql = '';
     const page1 = await getThreadListPage(
       createMockDb(allRows, { onPrepare: (sql) => { capturedSql = sql; } }),
-      { limit: 2 }
+      { limit: 2, cursorSecret: CURSOR_SECRET }
     );
     expect(page1.threads.map((t) => t.id)).toEqual(['a', 'b']);
     expect(page1.nextCursor).not.toBeNull();
@@ -617,7 +633,7 @@ describe('getThreadListPage', () => {
         onPrepare: (sql) => { page2Sql = sql; },
         onBind: (args) => { page2Args = args; },
       }),
-      { limit: 2, cursor: page1.nextCursor! }
+      { limit: 2, cursor: page1.nextCursor!, cursorSecret: CURSOR_SECRET }
     );
     expect(page2.threads.map((t) => t.id)).toEqual(['c', 'd']);
     expect(page2.nextCursor).not.toBeNull();
@@ -635,6 +651,7 @@ describe('getThreadListPage', () => {
     const page3 = await getThreadListPage(createMockDb(allRows), {
       limit: 2,
       cursor: page2.nextCursor!,
+      cursorSecret: CURSOR_SECRET,
     });
     expect(page3.threads.map((t) => t.id)).toEqual(['e']);
     expect(page3.nextCursor).toBeNull();
@@ -653,7 +670,7 @@ describe('getThreadListPage', () => {
       { id: '1', thread_id: 'thread-1', subject: 'Hello', created_at: '2026-05-11T12:00:00Z' },
     ]);
 
-    const result = await getThreadListPage(db, { limit: 50, cursor: 'not-valid-base64!!!{' });
+    const result = await getThreadListPage(db, { limit: 50, cursor: 'not-valid-base64!!!{', cursorSecret: CURSOR_SECRET });
 
     expect(result.threads).toEqual([]);
     expect(result.nextCursor).toBeNull();
@@ -665,7 +682,7 @@ describe('getThreadListPage', () => {
     ]);
     const malformedCursor = btoa(JSON.stringify({ foo: 'bar' }));
 
-    const result = await getThreadListPage(db, { limit: 50, cursor: malformedCursor });
+    const result = await getThreadListPage(db, { limit: 50, cursor: malformedCursor, cursorSecret: CURSOR_SECRET });
 
     expect(result.threads).toEqual([]);
     expect(result.nextCursor).toBeNull();
@@ -682,11 +699,28 @@ describe('getThreadListPage', () => {
     const db = createMockDb(rows);
     const staleV1Cursor = btoa(JSON.stringify({ createdAt: '2026-05-11T13:00:00Z', id: 'some-uuid' }));
 
-    const result = await getThreadListPage(db, { limit: 50, cursor: staleV1Cursor });
+    const result = await getThreadListPage(db, { limit: 50, cursor: staleV1Cursor, cursorSecret: CURSOR_SECRET });
 
     // Should return the first page, not an empty page.
     expect(result.threads).toHaveLength(2);
     expect(result.threads[0].id).toBe('1');
+  });
+
+  it('returns an empty page when a cursor signature is invalid', async () => {
+    const db = createMockDb([
+      { id: '1', resend_id: 'resend-1', thread_id: 'thread-1', subject: 'Hello', created_at: '2026-05-11T12:00:00Z' },
+    ]);
+    const cursor = await signCursor({
+      v: 2,
+      createdAt: '2026-05-11T12:00:00Z',
+      resendId: 'resend-1',
+    });
+    const tamperedCursor = cursor.replace(/.$/, cursor.endsWith('A') ? 'B' : 'A');
+
+    const result = await getThreadListPage(db, { limit: 50, cursor: tamperedCursor, cursorSecret: CURSOR_SECRET });
+
+    expect(result.threads).toEqual([]);
+    expect(result.nextCursor).toBeNull();
   });
 });
 
@@ -728,6 +762,18 @@ describe('searchEmails', () => {
     await searchEmails(db, 'a'.repeat(500));
 
     expect(boundArgs).toEqual([`"${'a'.repeat(500)}"`]);
+  });
+
+  it('accepts a long pre-trim query when the canonical trimmed value is within 500 chars', async () => {
+    let boundArgs: unknown[] = [];
+    const db = createMockDb(
+      [{ id: '1', thread_id: 'thread-1', subject: 'Hello', references: null }],
+      { onBind: (args) => { boundArgs = args; } }
+    );
+
+    await searchEmails(db, `${' '.repeat(900)}hello${' '.repeat(900)}`);
+
+    expect(boundArgs).toEqual(['"hello"']);
   });
 
   it('queries FTS5 with AND semantics (space-separated phrases) for multi-word queries', async () => {
@@ -809,6 +855,7 @@ describe('searchEmails', () => {
 
     await searchEmails(db, 'hello');
     expect(preparedSql).toContain('LIMIT 50');
+    expect(preparedSql).toContain('ORDER BY rank ASC, created_at DESC, resend_id ASC');
   });
 
   it('matches against from_name field', async () => {
