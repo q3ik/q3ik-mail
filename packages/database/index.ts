@@ -279,7 +279,10 @@ async function decodeThreadListCursor(
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  const envelope = p as SignedThreadListCursorEnvelope;
+  const envelope: SignedThreadListCursorEnvelope = {
+    payload: p.payload,
+    sig: p.sig,
+  };
 
   let payload: unknown;
   try {

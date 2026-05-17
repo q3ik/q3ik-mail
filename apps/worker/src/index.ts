@@ -585,7 +585,7 @@ const handler: ExportedHandler<Env> = {
     //      and flag for re-threading once the parent arrives
     //   4. New messages (no inReplyTo) start a new thread keyed on messageId ?? emailId
     let threadId: string;
-    let needsRethreading = 0;
+    let needsRethreading: 0 | 1 = 0;
     if (inReplyTo) {
       const parentRow = await env.DB
         .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
