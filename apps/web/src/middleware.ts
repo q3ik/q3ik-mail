@@ -183,14 +183,22 @@ export async function middleware(req: NextRequest) {
   const accessConfig = getAccessConfig();
 
   if (!accessConfig) {
-    if (process.env.NODE_ENV === 'production') {
-      console.error(
-        '[middleware] Missing or invalid CLOUDFLARE_TEAM_DOMAIN or CLOUDFLARE_ACCESS_AUD',
-      );
-      return new NextResponse('Internal Server Error', { status: 500 });
+    // Distinguish "not configured" from "misconfigured":
+    // If neither env var carries a meaningful value, Access simply isn't
+    // set up (local dev / CI) — pass through with security headers.
+    // If at least one is present the operator *intended* to enable Access
+    // but something is wrong — fail closed so the problem is visible.
+    const hasTeamDomain = !!process.env.CLOUDFLARE_TEAM_DOMAIN?.trim();
+    const hasAccessAud = !!process.env.CLOUDFLARE_ACCESS_AUD?.trim();
+
+    if (!hasTeamDomain && !hasAccessAud) {
+      return nextWithSecurityHeaders();
     }
-    // Cloudflare Access is not configured (local dev / CI) — skip auth.
-    return nextWithSecurityHeaders();
+
+    console.error(
+      '[middleware] Missing or invalid CLOUDFLARE_TEAM_DOMAIN or CLOUDFLARE_ACCESS_AUD',
+    );
+    return new NextResponse('Internal Server Error', { status: 500 });
   }
 
   const token = resolveAccessToken(req);
