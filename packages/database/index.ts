@@ -826,11 +826,11 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
   }
 
   // Merge parentMap and referenceMap into a single lookup for the pure
-  // resolveOrphanThreadId function. referenceMap entries take precedence
-  // (last writer wins in Map constructor spread), but the two maps are
-  // disjoint in practice: allReferenceIds excludes IDs already in parentMap.
-  const combinedLookup = new Map<string, { thread_id: string }>(parentMap);
-  for (const [key, value] of referenceMap) {
+  // resolveOrphanThreadId function. parentMap (from in_reply_to) takes
+  // precedence over referenceMap because it represents the direct reply
+  // relationship and is more authoritative for immediate threading.
+  const combinedLookup = new Map<string, { thread_id: string }>(referenceMap);
+  for (const [key, value] of parentMap) {
     combinedLookup.set(key, value);
   }
 

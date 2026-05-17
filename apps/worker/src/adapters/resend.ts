@@ -216,8 +216,11 @@ export function normalizeResendWebhook(
     toAddress: toAddress.trim(),
     bodyText: email.text ?? null,
     bodyHtml: email.html ?? null,
-    receivedAt: svixTimestamp && !Number.isNaN(Number(svixTimestamp))
-      ? new Date(Number(svixTimestamp) * 1000).toISOString()
-      : new Date().toISOString(),
+    receivedAt: (() => {
+      const epochSeconds = svixTimestamp ? Number(svixTimestamp) : NaN;
+      return epochSeconds > 0
+        ? new Date(epochSeconds * 1000).toISOString()
+        : new Date().toISOString();
+    })(),
   };
 }
