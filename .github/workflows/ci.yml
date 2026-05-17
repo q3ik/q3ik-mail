@@ -206,7 +206,6 @@ jobs:
     permissions:
       contents: read
       checks: write
-
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -250,21 +249,17 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
-      
-      # Inject the real D1 database_id from the repo secret into both
-      # wrangler.toml files so local D1 paths are consistent across apps.
-      - name: Inject D1 database_id
-        env:
-          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
-          
-      # Build for Cloudflare Workers via OpenNext — outputs to .open-next/
+        
+      - name: Inject D1 database_id
+        env:
+          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+        run: |
+          sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/worker/wrangler.toml
+          sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/web/wrangler.toml
+
       - name: Build web app
         run: pnpm --filter web run build:cf
 
-      # Apply all numbered migrations against the local D1 instance.
-      # Uses the canonical migration workflow (000_init.sql, 001_*, …) rather
-      # than the legacy schema.sql one-shot, so CI matches the production
-      # deployment path exactly.
       - name: Apply D1 migrations (local)
         run: >
           npx wrangler d1 migrations apply q3ik-mail-db
@@ -280,20 +275,14 @@ jobs:
           --file=../../packages/database/fixtures.sql
         working-directory: apps/web
 
-      # Install only Chromium (faster than full Playwright install)
       - name: Install Playwright Chromium
         run: pnpm --filter web exec playwright install chromium --with-deps
 
-      # Playwright's webServer block (playwright.config.ts) starts wrangler
-      # pages dev and waits for a real HTTP 200 before running any test.
-      # No manual background server or wait-on needed here.
       - name: Run Playwright E2E
         run: pnpm --filter web e2e
         env:
           BASE_URL: http://localhost:3000
           CI: true
-          # Tell playwright.config.ts where the seeded miniflare state lives
-          # so the --persist-to path resolves correctly from apps/web/.
           GITHUB_WORKSPACE: ${{ github.workspace }}
 
       - name: Upload Playwright report
@@ -337,12 +326,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
 
-      # Inject the real D1 database_id from the repo secret into both
-      # wrangler.toml files so local D1 paths are consistent across apps.
-      - name: Inject D1 database_id
-        env:
-          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
-          
+      - name: Inject D1 database_id
+        env:
+          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+        run: |
+          sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/worker/wrangler.toml
+          sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/web/wrangler.toml
+            
       - name: Build web app
         run: pnpm --filter web run build:cf
 
@@ -356,36 +346,11 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter web exec playwright install chromium --with-deps
 
-      # Issue 6 fix: start the app via wrangler pages dev (same as the
-      # existing e2e job) and wait for it to be ready before running the
-      # spec. Without this step every request.get('/api/...') in the
-      # mail-delivery spec would fail with ERR_CONNECTION_REFUSED.
-      - name: Start app (wrangler dev)
-        run: >
-          npx wrangler dev
-          --port 3000
-          --persist-to $GITHUB_WORKSPACE/.wrangler/state
-          > $GITHUB_WORKSPACE/wrangler.log 2>&1
-          &
-        working-directory: apps/web
-
-      - name: Wait for app to be ready
-        run: npx wait-on http://localhost:3000 --timeout 60000
-
-      - name: Dump wrangler log on failure
-        if: failure()
-        run: cat $GITHUB_WORKSPACE/wrangler.log || echo 'No wrangler log found'
-
-      # Playwright's webServer block (playwright.config.ts) starts wrangler
-      # pages dev and waits for HTTP 200 before running any test — same as
-      # the regular e2e job.  No manual server start or wait-on needed.
       - name: Run agentmail.to E2E
         run: pnpm --filter web exec playwright test e2e/mail-delivery.spec.ts
         env:
           AGENTMAIL_API_KEY: ${{ secrets.AGENTMAIL_API_KEY }}
           E2E_TEST_SECRET: ${{ secrets.E2E_TEST_SECRET }}
-          # RESEND_API_KEY is intentionally omitted — Scenario A now routes
-          # through /api/trigger-inbound; the key never touches PW traces.
           E2E_INBOUND_FROM: ${{ secrets.E2E_INBOUND_FROM }}
           E2E_INBOUND_ADDRESS: ${{ secrets.E2E_INBOUND_ADDRESS }}
           BASE_URL: http://localhost:3000
@@ -400,16 +365,6 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 14
 
-  # ─── Deploy ────────────────────────────────────────────────────────────
-  # Deploys the Cloudflare Worker after all tests pass.
-  # Only runs on pushes to trunk (i.e. merged PRs) and full manual triggers.
-  #
-  # Required repo secrets (Settings → Secrets and variables → Actions):
-  #   CLOUDFLARE_API_TOKEN    – API Token with Workers Scripts:Edit and D1:Edit
-  #                              permissions (or use separate tokens for deploy
-  #                              and remote D1 migrations)
-  #   CLOUDFLARE_ACCOUNT_ID   – Cloudflare account ID
-  #   CLOUDFLARE_D1_DATABASE_ID – D1 database UUID (already configured)
   deploy-worker:
     name: Deploy Worker
     if: >-
@@ -438,7 +393,6 @@ jobs:
             exit 1
           fi
           sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/worker/wrangler.toml
-          # Verify replacement succeeded
           if grep -q "REPLACE_WITH_YOUR_DATABASE_ID" apps/worker/wrangler.toml; then
             echo "::error::Failed to replace database_id placeholder"
             exit 1
