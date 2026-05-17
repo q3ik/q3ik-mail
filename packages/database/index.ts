@@ -86,14 +86,155 @@ export interface ThreadListPage {
   nextCursor: string | null;
 }
 
+export interface IngestInboundEmailOptions {
+  db: D1Database;
+  id: string;
+  resendId: string;
+  threadId: string;
+  fromAddress: string;
+  fromName?: string | null;
+  toAddress: string;
+  subject?: string | null;
+  bodyText?: string | null;
+  bodyHtml?: string | null;
+  messageId?: string | null;
+  inReplyTo?: string | null;
+  references?: string | null;
+  isRead?: 0 | 1;
+  isSent?: 0 | 1;
+  needsRethreading?: 0 | 1;
+  r2Bucket?: R2Bucket | null;
+}
+
+export interface IngestInboundEmailResult {
+  inserted: boolean;
+  bodyTextKey: string | null;
+  bodyHtmlKey: string | null;
+}
+
+export async function ingestInboundEmail(
+  opts: IngestInboundEmailOptions
+): Promise<IngestInboundEmailResult> {
+  const bodyText = opts.bodyText ?? null;
+  const bodyHtml = opts.bodyHtml ?? null;
+  const isRead = opts.isRead ?? 0;
+  const isSent = opts.isSent ?? 0;
+  const needsRethreading = opts.needsRethreading ?? 0;
+  let bodyTextKey: string | null = null;
+  let bodyHtmlKey: string | null = null;
+
+  if (opts.r2Bucket) {
+    if (bodyText !== null) {
+      const key = `emails/${opts.id}/body.txt`;
+      try {
+        await opts.r2Bucket.put(key, bodyText, {
+          httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+        });
+        bodyTextKey = key;
+      } catch (err) {
+        console.warn('[database] Failed to persist inbound body_text to R2; falling back to inline D1 body', { err });
+      }
+    }
+
+    if (bodyHtml !== null) {
+      const key = `emails/${opts.id}/body.html`;
+      try {
+        await opts.r2Bucket.put(key, bodyHtml, {
+          httpMetadata: { contentType: 'text/html; charset=utf-8' },
+        });
+        bodyHtmlKey = key;
+      } catch (err) {
+        console.warn('[database] Failed to persist inbound body_html to R2; falling back to inline D1 body', { err });
+      }
+    }
+  }
+
+  const result = await opts.db.prepare(`
+    INSERT OR IGNORE INTO emails
+      (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
+    VALUES
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+    .bind(
+      opts.id,
+      opts.resendId,
+      opts.threadId,
+      opts.fromAddress,
+      opts.fromName ?? null,
+      opts.toAddress,
+      opts.subject ?? null,
+      bodyText,
+      bodyHtml,
+      bodyTextKey,
+      bodyHtmlKey,
+      opts.messageId ?? null,
+      opts.inReplyTo ?? null,
+      opts.references ?? null,
+      isRead,
+      isSent,
+      needsRethreading
+    )
+    .run();
+
+  return {
+    inserted: (
+      typeof (result as { meta?: { changes?: number } }).meta?.changes === 'number'
+        ? (result as { meta?: { changes?: number } }).meta!.changes!
+        : 1
+    ) > 0,
+    bodyTextKey,
+    bodyHtmlKey,
+  };
+}
+
 interface ThreadListCursorPayload {
   v: 2;
   createdAt: string;
   resendId: string;
 }
 
-function encodeThreadListCursor(cursor: ThreadListCursorPayload): string {
-  return btoa(JSON.stringify(cursor));
+interface SignedThreadListCursorEnvelope {
+  payload: string;
+  sig: string;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function importHmacKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+}
+
+async function encodeThreadListCursor(
+  cursor: ThreadListCursorPayload,
+  secret: string
+): Promise<string> {
+  const payloadJson = JSON.stringify(cursor);
+  const key = await importHmacKey(secret);
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(payloadJson)
+  );
+  const envelope: SignedThreadListCursorEnvelope = {
+    payload: payloadJson,
+    sig: bytesToBase64(new Uint8Array(signature)),
+  };
+  return btoa(JSON.stringify(envelope));
 }
 
 class InvalidCursorError extends Error {
@@ -114,10 +255,35 @@ class StaleVersionError extends Error {
   }
 }
 
-function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
+async function decodeThreadListCursor(
+  cursor: string,
+  secret: string
+): Promise<ThreadListCursorPayload> {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(atob(cursor));
+  } catch {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  if (!decoded || typeof decoded !== 'object') {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  const p = decoded as Record<string, unknown>;
+  if (typeof p.createdAt === 'string' && typeof p.id === 'string' && !('resendId' in p)) {
+    throw new StaleVersionError();
+  }
+
+  if (typeof p.payload !== 'string' || typeof p.sig !== 'string') {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  const envelope = p as SignedThreadListCursorEnvelope;
+
   let payload: unknown;
   try {
-    payload = JSON.parse(atob(cursor));
+    payload = JSON.parse(envelope.payload);
   } catch {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
@@ -126,19 +292,45 @@ function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  const p = payload as Record<string, unknown>;
-
-  // Detect v1 shape: { createdAt, id } with no version field.
-  // These are in-flight cursors from before the resend_id tiebreaker migration.
-  if (typeof p.createdAt === 'string' && typeof p.id === 'string' && !('resendId' in p)) {
+  const payloadRecord = payload as Record<string, unknown>;
+  if (
+    typeof payloadRecord.createdAt === 'string' &&
+    typeof payloadRecord.id === 'string' &&
+    !('resendId' in payloadRecord)
+  ) {
     throw new StaleVersionError();
   }
 
-  if (p.v !== 2 || typeof p.createdAt !== 'string' || typeof p.resendId !== 'string') {
+  if (
+    payloadRecord.v !== 2 ||
+    typeof payloadRecord.createdAt !== 'string' ||
+    typeof payloadRecord.resendId !== 'string'
+  ) {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  return { v: 2, createdAt: p.createdAt, resendId: p.resendId };
+  const key = await importHmacKey(secret);
+  let signatureBytes: Uint8Array;
+  try {
+    signatureBytes = base64ToBytes(envelope.sig);
+  } catch {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+  const verified = await crypto.subtle.verify(
+    'HMAC',
+    key,
+    signatureBytes,
+    new TextEncoder().encode(envelope.payload)
+  );
+  if (!verified) {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  return {
+    v: 2,
+    createdAt: payloadRecord.createdAt,
+    resendId: payloadRecord.resendId,
+  };
 }
 
 /**
@@ -434,7 +626,7 @@ export async function searchEmails(
   query: string
 ): Promise<EmailSummary[]> {
   const trimmedQuery = query.trim();
-  if (query.length > 1000 || !trimmedQuery || trimmedQuery.length > 500) return [];
+  if (!trimmedQuery || trimmedQuery.length > 500) return [];
 
   const terms = trimmedQuery
     .split(/\s+/)
@@ -452,6 +644,8 @@ export async function searchEmails(
   // produces over-broad, low-quality results.
   const matchQuery = terms.map((term) => `"${term}"`).join(' ');
 
+  // bm25() in SQLite FTS5 returns negative values for more-relevant matches.
+  // Ordering ASC therefore yields most-relevant rows first.
   const { results } = await db
     .prepare(
       `SELECT
@@ -463,18 +657,18 @@ export async function searchEmails(
            emails.id, emails.resend_id, emails.thread_id, emails.from_address, emails.from_name,
            emails.to_address, emails.subject, emails.message_id, emails.in_reply_to, emails."references",
            emails.is_read, emails.is_sent, emails.needs_rethreading, emails.created_at,
-           ROW_NUMBER() OVER (
-             PARTITION BY emails.thread_id
-             ORDER BY bm25(emails_fts), emails.created_at DESC, emails.id ASC
-           ) AS thread_rank,
-           bm25(emails_fts) AS rank
-         FROM emails
+            ROW_NUMBER() OVER (
+              PARTITION BY emails.thread_id
+              ORDER BY bm25(emails_fts), emails.created_at DESC, emails.resend_id ASC
+            ) AS thread_rank,
+            bm25(emails_fts) AS rank
+          FROM emails
          JOIN emails_fts ON emails.rowid = emails_fts.rowid
          WHERE emails_fts MATCH ?
-       ) ranked_results
-       WHERE thread_rank = 1
-       ORDER BY rank ASC, created_at DESC, id ASC
-       LIMIT 50`
+        ) ranked_results
+        WHERE thread_rank = 1
+        ORDER BY rank ASC, created_at DESC, resend_id ASC
+        LIMIT 50`
     )
     .bind(matchQuery)
     .all<EmailSummary>();
@@ -487,17 +681,22 @@ export async function getThreadListPage(
   {
     limit = 50,
     cursor,
+    cursorSecret,
   }: {
     limit?: number;
     cursor?: string;
+    cursorSecret?: string;
   } = {}
 ): Promise<ThreadListPage> {
+  if (!cursorSecret) {
+    throw new Error('THREAD_LIST_CURSOR_SECRET is required');
+  }
   const pageSize = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
   const fetchLimit = pageSize + 1;
   let decodedCursor: ThreadListCursorPayload | null = null;
   if (cursor) {
     try {
-      decodedCursor = decodeThreadListCursor(cursor);
+      decodedCursor = await decodeThreadListCursor(cursor, cursorSecret);
     } catch (err) {
       if (err instanceof InvalidCursorError) {
         return { threads: [], nextCursor: null };
@@ -524,11 +723,11 @@ export async function getThreadListPage(
   const lastThread = threads.at(-1);
   const nextCursor =
     results.length > pageSize && lastThread
-      ? encodeThreadListCursor({
+      ? await encodeThreadListCursor({
           v: 2,
           createdAt: lastThread.created_at,
           resendId: lastThread.resend_id,
-        })
+        }, cursorSecret)
       : null;
 
   return {

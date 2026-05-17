@@ -23,3 +23,4 @@ bucket_name = "q3ik-mail-bodies"
 
 [vars]
 # RESEND_API_KEY is set via: wrangler secret put RESEND_API_KEY
+# THREAD_LIST_CURSOR_SECRET is set via: wrangler secret put THREAD_LIST_CURSOR_SECRET

@@ -166,10 +166,10 @@ describe('POST /api/trigger-inbound', () => {
     await POST(req);
 
     // bind() is called with positional args: (id, resend_id, thread_id, from_address, ...)
-    // thread_id is index 2, message_id is index 9. They must differ.
+    // thread_id is index 2, message_id is index 11. They must differ.
     const bindArgs: string[] = routeMocks.bind.mock.calls[0] as string[];
     const threadId = bindArgs[2];
-    const messageId = bindArgs[9];
+    const messageId = bindArgs[11];
     expect(threadId).not.toBe(messageId);
     // thread_id must be a plain UUID, not an RFC 5322 message-ID (<...> format)
     expect(threadId).toMatch(/^[0-9a-f-]{36}$/);
