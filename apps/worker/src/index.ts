@@ -299,12 +299,15 @@ const handler: ExportedHandler<Env> = {
     const rawBody = await request.text();
 
     // --- Step 1: Verify webhook signature via svix directly ---
+    // Capture the svix-timestamp header before verification so we can pass it
+    // to normalizeResendWebhook as the authoritative receivedAt value.
+    const svixTimestamp = request.headers.get('svix-timestamp') ?? '';
     let event: { type: string; data: { email_id: string } };
     try {
       const wh = new Webhook(env.RESEND_WEBHOOK_SECRET);
       event = wh.verify(rawBody, {
         'svix-id': request.headers.get('svix-id') ?? '',
-        'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
+        'svix-timestamp': svixTimestamp,
         'svix-signature': request.headers.get('svix-signature') ?? '',
       }) as { type: string; data: { email_id: string } };
     } catch {
@@ -403,7 +406,7 @@ const handler: ExportedHandler<Env> = {
 
     // --- Step 4: Normalize the Resend payload into a provider-agnostic envelope
     // and resolve the thread_id via a pure function. ---
-    const envelope = normalizeResendWebhook(receivedEmail);
+    const envelope = normalizeResendWebhook(receivedEmail, svixTimestamp);
 
     // Guard: a missing or unparseable from field must not silently write an empty
     // string into the NOT NULL from_address column -- reject the webhook instead.

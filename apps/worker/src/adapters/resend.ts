@@ -166,10 +166,22 @@ export function parseResendReceivedEmail(
  * `InboundMailEnvelope`. This is the single place where Resend-specific field
  * names are mapped to the normalized domain type.
  *
+ * @param email - Validated Resend receiving-API payload.
+ * @param svixTimestamp - The `svix-timestamp` header value from the webhook
+ *   request (Unix epoch seconds as a string). Used as the authoritative
+ *   `receivedAt` timestamp so the value is stable across retries and reflects
+ *   when Svix accepted the event rather than when the worker happened to
+ *   process it. Falls back to `new Date()` if the value is missing or
+ *   unparseable (should never happen after signature verification, but
+ *   defensive coding is cheap).
+ *
  * Call this immediately after `parseResendReceivedEmail` succeeds, then work
  * exclusively with `InboundMailEnvelope` for threading and persistence logic.
  */
-export function normalizeResendWebhook(email: ResendReceivedEmail): InboundMailEnvelope {
+export function normalizeResendWebhook(
+  email: ResendReceivedEmail,
+  svixTimestamp?: string,
+): InboundMailEnvelope {
   const headers = email.headers ?? [];
 
   const messageId = headers.find(
@@ -204,6 +216,8 @@ export function normalizeResendWebhook(email: ResendReceivedEmail): InboundMailE
     toAddress: toAddress.trim(),
     bodyText: email.text ?? null,
     bodyHtml: email.html ?? null,
-    receivedAt: new Date().toISOString(),
+    receivedAt: svixTimestamp && !Number.isNaN(Number(svixTimestamp))
+      ? new Date(Number(svixTimestamp) * 1000).toISOString()
+      : new Date().toISOString(),
   };
 }
