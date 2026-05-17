@@ -36,7 +36,8 @@ const SANITIZE_OPTIONS = {
   USE_PROFILES: { html: true },
   ALLOW_DATA_ATTR: false,
   FORCE_BODY: true,
-} as const;
+  FORBID_TAGS: ['script', 'object', 'embed', 'form'],
+};
 
 /**
  * Matches any CSS url(...) value in a style attribute.
