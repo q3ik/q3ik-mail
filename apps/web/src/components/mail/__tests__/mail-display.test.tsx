@@ -110,6 +110,38 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
     const [, options] = mockSanitize.mock.calls[0] as [string, Record<string, unknown>];
     const forbidAttr = options['FORBID_ATTR'] as string[] | undefined;
     expect(forbidAttr ?? []).not.toContain('style');
+    expect(forbidAttr ?? []).toEqual(expect.arrayContaining(['onerror', 'onload', 'onclick']));
+  });
+
+  it('strips onclick while preserving safe style rules with the configured sanitize options', async () => {
+    const html = '<table><tr><td style="color:red;padding:8px" onclick="alert(1)">Hi</td></tr></table>';
+    render(<MailDisplay thread={[makeEmail({ body_html: html })]} />);
+
+    await waitFor(() => expect(mockSanitize).toHaveBeenCalled());
+    const [, options] = mockSanitize.mock.calls[0] as [string, Record<string, unknown>];
+    const { default: realDOMPurify } =
+      await vi.importActual<typeof import('isomorphic-dompurify')>('isomorphic-dompurify');
+    const sanitized = realDOMPurify.sanitize(html, options);
+
+    expect(sanitized).toContain('style="color:red;padding:8px"');
+    expect(sanitized).not.toContain('onclick');
+  });
+
+  it('strips script tags with the configured sanitize options', async () => {
+    const html = '<p>Hello</p><script>alert(1)</script>';
+    render(<MailDisplay thread={[makeEmail({ body_html: html })]} />);
+
+    await waitFor(() => expect(mockSanitize).toHaveBeenCalled());
+    const [, options] = mockSanitize.mock.calls[0] as [string, Record<string, unknown>];
+    const forbidTags = options['FORBID_TAGS'] as string[] | undefined;
+    expect(forbidTags ?? []).toEqual(expect.arrayContaining(['script', 'object', 'embed', 'form']));
+
+    const { default: realDOMPurify } =
+      await vi.importActual<typeof import('isomorphic-dompurify')>('isomorphic-dompurify');
+    const sanitized = realDOMPurify.sanitize(html, options);
+
+    expect(sanitized).toContain('<p>Hello</p>');
+    expect(sanitized).not.toContain('<script');
   });
 
   it('registers the afterSanitizeAttributes hook exactly once across multiple email renders', async () => {
