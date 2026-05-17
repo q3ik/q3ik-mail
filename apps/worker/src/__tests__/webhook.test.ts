@@ -535,7 +535,7 @@ describe('webhook handler', () => {
 
   it('persists attachment metadata rows in D1 after storing attachments in R2', async () => {
     const { Resend } = await import('resend');
-    const { env, bindSpy } = makeThreadEnv();
+    const { env, bindSpy, prepareSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -587,6 +587,11 @@ describe('webhook handler', () => {
     expect(attachmentContentType).toBe('application/pdf');
     expect(attachmentSizeBytes).toBe(5);
     expect(typeof attachmentCreatedAt).toBe('number');
+    expect(
+      prepareSpy.mock.calls.some(
+        (call) => typeof call[0] === 'string' && call[0].includes('INSERT OR IGNORE INTO attachments')
+      )
+    ).toBe(true);
   });
 
   it('decodes standard, URL-safe, and unpadded base64 attachment content', async () => {
@@ -1229,6 +1234,29 @@ describe('threading', () => {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
     // Guard fires before DB — mockEnv is sufficient, no spy needed
+    const res = await worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when to address is missing', async () => {
+    const { Resend } = await import('resend');
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            subject: 'No recipient',
+            text: 'Hi',
+            html: '<p>Hi</p>',
+            headers: [],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
     const res = await worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
     expect(res.status).toBe(400);
   });

@@ -21,7 +21,11 @@ export async function fetchThreadList(limit = 50) {
 
 export async function fetchThreadListPage(limit = 50, cursor?: string) {
   const { env } = await getCloudflareContext({ async: true });
-  return getThreadListPage(env.DB, { limit, cursor });
+  return getThreadListPage(env.DB, {
+    limit,
+    cursor,
+    cursorSecret: env.THREAD_LIST_CURSOR_SECRET,
+  });
 }
 
 export async function fetchLatestEmails(limit = 50) {

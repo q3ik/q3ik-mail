@@ -2,7 +2,7 @@ import { withSentry } from '@sentry/cloudflare';
 import { captureException, captureMessage, addBreadcrumb } from './lib/sentry';
 import { Webhook } from 'svix';
 import { Resend } from 'resend';
-import { resolveOrphanedThreads } from '@q3ik-mail/database';
+import { ingestInboundEmail, resolveOrphanedThreads } from '@q3ik-mail/database';
 import { parseFrom } from './utils/parseFrom';
 import { validateCfAccessJwt } from './middleware/cfAccess';
 
@@ -587,7 +587,7 @@ const handler: ExportedHandler<Env> = {
     //      and flag for re-threading once the parent arrives
     //   4. New messages (no inReplyTo) start a new thread keyed on messageId ?? emailId
     let threadId: string;
-    let needsRethreading = 0;
+    let needsRethreading: 0 | 1 = 0;
     if (inReplyTo) {
       const parentRow = await env.DB
         .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
@@ -630,6 +630,11 @@ const handler: ExportedHandler<Env> = {
     const toAddress = Array.isArray(toRaw)
       ? toRaw.join(', ')
       : (typeof toRaw === 'string' ? toRaw : '');
+    const normalizedToAddress = toAddress.trim();
+    if (!normalizedToAddress) {
+      console.warn('[worker] Missing or empty to_address; rejecting.', { emailId });
+      return new Response('Missing to address', { status: 400 });
+    }
 
     const internalEmailId = resumeExistingId ?? crypto.randomUUID();
 
@@ -767,35 +772,26 @@ const handler: ExportedHandler<Env> = {
       // Skip INSERT when resuming a partial ingestion — the D1 row already exists.
       let inserted = false;
       if (resumeExistingId === null) {
-        const insertResult = await env.DB.prepare(`
-          INSERT OR IGNORE INTO emails
-            (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
-          VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
-        `)
-          .bind(
-            internalEmailId,            // id
-            emailId,                    // resend_id
-            threadId,                   // thread_id (looked up or new)
-            fromAddress,                // from_address
-            fromName,                   // from_name (nullable)
-            toAddress,                  // to_address
-            receivedEmail.subject ?? null,
-            pendingBodyTextForD1,       // Issue H1 fix: body_text in D1 for FTS5 searchability
-            pendingBodyHtmlForD1,       // Issue H1 fix: body_html in D1 for FTS5 searchability
-            null,                       // body_text_key (set after R2 write in inserted block)
-            null,                       // body_html_key (set after R2 write in inserted block)
-            messageId,                  // message_id (nullable)
-            inReplyTo,                  // in_reply_to (nullable)
-            referencesHeader,           // references (nullable)
-            needsRethreading,           // needs_rethreading (0 or 1)
-          )
-          .run();
-
-        // Issue 3 fix: D1Result.meta is typed as always-present; remove the
-        // optional chain (?.) that was masking a potential stub misconfiguration
-        // where absent meta would silently be treated as a non-duplicate.
-        inserted = (insertResult.meta.changes ?? 0) > 0;
+        const insertResult = await ingestInboundEmail({
+          db: env.DB,
+          id: internalEmailId,
+          resendId: emailId,
+          threadId,
+          fromAddress,
+          fromName,
+          toAddress: normalizedToAddress,
+          subject: receivedEmail.subject ?? null,
+          bodyText: pendingBodyTextForD1,
+          bodyHtml: pendingBodyHtmlForD1,
+          messageId,
+          inReplyTo,
+          references: referencesHeader,
+          isRead: 0,
+          isSent: 0,
+          needsRethreading,
+          r2Bucket: null,
+        });
+        inserted = insertResult.inserted;
       }
 
       // Run body R2 writes for both fresh inserts and resume mode.
@@ -871,7 +867,7 @@ const handler: ExportedHandler<Env> = {
         await Promise.all(persistedAttachments.map(async (attachment) => {
           try {
             await env.DB.prepare(`
-              INSERT INTO attachments
+              INSERT OR IGNORE INTO attachments
                 (id, email_id, r2_key, filename, content_type, size_bytes, created_at)
               VALUES
                 (?, ?, ?, ?, ?, ?, ?)
