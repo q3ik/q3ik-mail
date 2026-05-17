@@ -398,8 +398,8 @@ jobs:
         working-directory: apps/web
 
       - name: Wait for app to be ready
-        run: npx wait-on http://localhost:3000 --timeout 60000
-
+        run: timeout 60 bash -c 'until curl -sf http://localhost:3000 > /dev/null 2>&1; do sleep 1; done'
+     
       - name: Dump wrangler log on failure
         if: failure()
         run: cat $GITHUB_WORKSPACE/wrangler.log || echo 'No wrangler log found'
