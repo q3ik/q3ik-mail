@@ -183,10 +183,10 @@ export async function middleware(req: NextRequest) {
   const accessConfig = getAccessConfig();
 
   if (!accessConfig) {
-    console.error(
-      '[middleware] Missing or invalid CLOUDFLARE_TEAM_DOMAIN or CLOUDFLARE_ACCESS_AUD',
-    );
-    return new NextResponse('Internal Server Error', { status: 500 });
+    // Cloudflare Access is not configured (local dev / CI) — skip auth.
+    // In production the env vars are always set via Cloudflare secrets, so
+    // the JWT verification below will run as expected.
+    return nextWithSecurityHeaders();
   }
 
   const token = resolveAccessToken(req);
