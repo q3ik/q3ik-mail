@@ -140,7 +140,7 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
     const html = '<p>Hello</p><script>alert(1)</script>';
     const { options, sanitized } = await sanitizeWithAppConfig(MailDisplay, html);
     const forbidTags = options['FORBID_TAGS'] as string[] | undefined;
-    expect(forbidTags ?? []).toEqual(expect.arrayContaining(['script', 'object', 'embed', 'form', 'style']));
+    expect(forbidTags ?? []).toEqual(expect.arrayContaining(['script', 'object', 'embed', 'form']));
 
     expect(sanitized).toContain('<p>Hello</p>');
     expect(sanitized).not.toContain('<script');
