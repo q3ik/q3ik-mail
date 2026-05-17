@@ -250,7 +250,13 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
-
+      
+      # Inject the real D1 database_id from the repo secret into both
+      # wrangler.toml files so local D1 paths are consistent across apps.
+      - name: Inject D1 database_id
+        env:
+          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          
       # Build for Cloudflare Workers via OpenNext — outputs to .open-next/
       - name: Build web app
         run: pnpm --filter web run build:cf
@@ -331,6 +337,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile=${{ github.event_name == 'push' }}
 
+      # Inject the real D1 database_id from the repo secret into both
+      # wrangler.toml files so local D1 paths are consistent across apps.
+      - name: Inject D1 database_id
+        env:
+          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          
       - name: Build web app
         run: pnpm --filter web run build:cf
 
