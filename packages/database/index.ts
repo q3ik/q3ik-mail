@@ -829,10 +829,10 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
   // resolveOrphanThreadId function. referenceMap entries take precedence
   // (last writer wins in Map constructor spread), but the two maps are
   // disjoint in practice: allReferenceIds excludes IDs already in parentMap.
-  const combinedLookup = new Map<string, { thread_id: string }>([
-    ...parentMap.entries(),
-    ...referenceMap.entries(),
-  ]);
+  const combinedLookup = new Map<string, { thread_id: string }>(parentMap);
+  for (const [key, value] of referenceMap) {
+    combinedLookup.set(key, value);
+  }
 
   const updates: D1PreparedStatement[] = [];
 
