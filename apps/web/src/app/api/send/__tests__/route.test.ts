@@ -365,7 +365,7 @@ describe('POST /api/send', () => {
     const res = await POST(req as unknown as NextRequest);
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toBe('Failed to send email');
+    expect(body.error.message).toBe('Failed to send email');
 
     // Verify the row was marked as send_failed
     const updates = getUpdateCalls();
@@ -395,7 +395,7 @@ describe('POST /api/send', () => {
       const res = await POST(req as unknown as NextRequest);
 
       expect(res.status).toBe(500);
-      expect(await res.json()).toEqual({ error: 'Failed to send email' });
+      expect(await res.json()).toEqual({ error: { message: 'Failed to send email' } });
       expect(sendSpy).not.toHaveBeenCalled();
       expect(routeMocks.insertBind).not.toHaveBeenCalled();
       expect(errorSpy).toHaveBeenCalledWith('Failed to send email:', expect.any(Error));
