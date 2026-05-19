@@ -406,32 +406,6 @@ function buildThreadListQuery(opts: {
 const ORPHAN_RETHREAD_BATCH_SIZE = 100;
 
 /**
- * Fetch the N most recent emails ordered by created_at DESC.
- * Returns EmailSummary (no body fields) for efficient list rendering.
- *
- * @param db    - D1Database binding injected from the Cloudflare runtime env
- * @param limit - Max number of emails to return (default: 50)
- */
-export async function getLatestEmails(
-  db: D1Database,
-  limit: number = 50
-): Promise<EmailSummary[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT
-         id, resend_id, thread_id, from_address, from_name,
-         to_address, subject, message_id, in_reply_to, "references",
-         is_read, is_sent, needs_rethreading, created_at
-       FROM emails
-       ORDER BY created_at DESC, resend_id ASC
-       LIMIT ?`
-    )
-    .bind(limit)
-    .all<EmailSummary>();
-  return results;
-}
-
-/**
  * Fetch all emails in a thread, ordered chronologically (oldest first).
  * Returns full Email objects including body_html and body_text.
  * Caller is responsible for sanitizing body_html before rendering.

@@ -29,7 +29,7 @@ export interface Email {
 /**
  * Lightweight projection for inbox list views.
  * Omits body_html and body_text to reduce payload size.
- * Used by getLatestEmails() and list rendering in apps/web.
+ * Used by thread list query results in apps/web.
  */
 export type EmailSummary = Omit<Email, 'body_html' | 'body_text' | 'body_html_key' | 'body_text_key'>;
 

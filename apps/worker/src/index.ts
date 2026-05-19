@@ -220,6 +220,14 @@ function captureR2PutError(
 // Issue 1 fix: TextEncoder is stateless; hoist to module scope to avoid
 // re-allocating it on every webhook invocation that processes attachments.
 const textEncoder = new TextEncoder();
+let hasWarnedMissingSentry = false;
+
+function warnIfSentryUnavailable(): void {
+  const sentryState = globalThis as typeof globalThis & { __sentryInitialized?: boolean };
+  if (sentryState.__sentryInitialized || hasWarnedMissingSentry) return;
+  hasWarnedMissingSentry = true;
+  console.warn('[worker] Sentry is not initialised — exceptions will not be captured');
+}
 
 const handler: ExportedHandler<Env> = {
   // --------------------------------------------------------------------------
@@ -228,6 +236,7 @@ const handler: ExportedHandler<Env> = {
   // Runs every 5 minutes; resolves emails flagged with needs_rethreading=1.
   // --------------------------------------------------------------------------
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    warnIfSentryUnavailable();
     ctx.waitUntil(
       resolveOrphanedThreads(env.DB)
         .then((resolved) => {
@@ -251,6 +260,7 @@ const handler: ExportedHandler<Env> = {
   // Fetch handler: inbound email webhook from Resend
   // --------------------------------------------------------------------------
   async fetch(request: Request, env: Env): Promise<Response> {
+    warnIfSentryUnavailable();
     // Only accept POST requests
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getLatestEmails, 
-        getEmailsByThread, 
+import { getEmailsByThread, 
         markAsRead, 
         getEmailById, 
         migrateEmailBodiesToR2,
@@ -218,43 +217,6 @@ function createThreadDb(seedRows: ThreadRow[]) {
 
   return { db, rows, preparedSqls, bindCalls, batchCalls };
 }
-
-describe('getLatestEmails', () => {
-  it('returns emails ordered by received_at DESC', async () => {
-    const rows = [
-      { id: '1', created_at: '2026-05-09T12:00:00Z', subject: 'B' },
-      { id: '2', created_at: '2026-05-09T11:00:00Z', subject: 'A' },
-    ];
-    const db = createMockDb(rows);
-    const result = await getLatestEmails(db, 50);
-    expect(result[0].subject).toBe('B');
-  });
-
-  it('respects the limit parameter', async () => {
-    const rows = Array.from({ length: 3 }, (_, i) => ({ id: String(i) }));
-    const db = createMockDb(rows.slice(0, 3));
-    const result = await getLatestEmails(db, 3);
-    expect(result).toHaveLength(3);
-  });
-
-  it('surfaces the references field when present', async () => {
-    const rows = [{
-      id: '1',
-      references: '<root-001@example.com>',
-      subject: 'Re: Hello',
-    }];
-    const db = createMockDb(rows);
-    const result = await getLatestEmails(db, 1);
-    expect(result[0].references).toBe('<root-001@example.com>');
-  });
-
-  it('surfaces null references when absent', async () => {
-    const rows = [{ id: '1', references: null, subject: 'Hello' }];
-    const db = createMockDb(rows);
-    const result = await getLatestEmails(db, 1);
-    expect(result[0].references).toBeNull();
-  });
-});
 
 describe('getEmailsByThread', () => {
   it('returns all emails in a thread', async () => {

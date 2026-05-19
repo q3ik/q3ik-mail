@@ -218,6 +218,24 @@ function getInsertArgs(
 // ---------------------------------------------------------------------------
 
 describe('webhook handler', () => {
+  it('warns when Sentry is not initialized in the worker runtime', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const sentryState = globalThis as typeof globalThis & { __sentryInitialized?: boolean };
+    const originalSentryInitialized = sentryState.__sentryInitialized;
+    delete sentryState.__sentryInitialized;
+    try {
+      const req = new Request('https://worker.example.com/', { method: 'GET' });
+      const res = await fetchWorker(req);
+      expect(res.status).toBe(405);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[worker] Sentry is not initialised — exceptions will not be captured',
+      );
+    } finally {
+      sentryState.__sentryInitialized = originalSentryInitialized;
+      warnSpy.mockRestore();
+    }
+  });
+
   it('returns 405 for non-POST requests', async () => {
     const req = new Request('https://worker.example.com/', { method: 'GET' });
     const res = await fetchWorker(req);
