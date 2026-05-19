@@ -30,12 +30,12 @@ enabled = true
 
 [observability.traces]
 enabled = true
-destinations = ["sentry-traces"]
+destinations = ["sentry-traces-web"]
 
 [observability.logs]
 enabled = true
 invocation_logs = true
-destinations = ["sentry-logs"]
+destinations = ["sentry-logs-web"]
 
 [vars]
 # Runtime secrets are set via `wrangler secret put <NAME>`:
