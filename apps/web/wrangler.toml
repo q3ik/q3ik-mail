@@ -21,5 +21,11 @@ binding = "EMAIL_BODIES"
 bucket_name = "q3ik-mail-bodies"
 
 [vars]
-# RESEND_API_KEY is set via: wrangler secret put RESEND_API_KEY
-# THREAD_LIST_CURSOR_SECRET is set via: wrangler secret put THREAD_LIST_CURSOR_SECRET
+# Runtime secrets are set via `wrangler secret put <NAME>`:
+#   RESEND_API_KEY
+#   THREAD_LIST_CURSOR_SECRET
+#   CLOUDFLARE_ACCESS_AUD
+#   CLOUDFLARE_TEAM_DOMAIN
+#   SENTRY_DSN
+#
+# For local dev, copy .dev.vars.example to .dev.vars and fill in values.

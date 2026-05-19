@@ -29,6 +29,12 @@ type = "ratelimit"
 namespace_id = "1"
 simple = { limit = 60, period = 60 }
 
+[observability]
+enabled = true
+
+[observability.logs]
+invocation_logs = true
+
 [vars]
 ENVIRONMENT = "production"
 # The following secrets must be set via `wrangler secret put <NAME>`:
