@@ -91,10 +91,14 @@ jobs:
           echo "✓ database_id injected into apps/web/wrangler.toml"
           
           if [ -z "$KV_NAMESPACE_ID" ]; then
-          echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
-          exit 1
+            echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
+            exit 1
           fi
           sed -i "s|REPLACE_WITH_KV_NAMESPACE_ID|${KV_NAMESPACE_ID}|" apps/web/wrangler.toml
+          if grep -q "REPLACE_WITH_KV_NAMESPACE_ID" apps/web/wrangler.toml; then
+            echo "::error::Failed to replace KV namespace_id placeholder"
+            exit 1
+          fi
           echo "✓ KV namespace_id injected into apps/web/wrangler.toml"
 
   typecheck:
@@ -289,8 +293,8 @@ jobs:
           echo "✓ database_id injected into apps/worker and apps/web wrangler.toml"
 
           if [ -z "$KV_NAMESPACE_ID" ]; then
-          echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
-          exit 1
+            echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
+            exit 1
           fi
           sed -i "s|REPLACE_WITH_KV_NAMESPACE_ID|${KV_NAMESPACE_ID}|" apps/web/wrangler.toml
           echo "✓ KV namespace_id injected into apps/web/wrangler.toml"
@@ -397,8 +401,8 @@ jobs:
           echo "✓ database_id injected into apps/worker and apps/web wrangler.toml"
 
           if [ -z "$KV_NAMESPACE_ID" ]; then
-          echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
-          exit 1
+            echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
+            exit 1
           fi
           sed -i "s|REPLACE_WITH_KV_NAMESPACE_ID|${KV_NAMESPACE_ID}|" apps/web/wrangler.toml
           echo "✓ KV namespace_id injected into apps/web/wrangler.toml"
@@ -539,8 +543,8 @@ jobs:
           echo "✓ database_id injected into apps/web/wrangler.toml"
           
           if [ -z "$KV_NAMESPACE_ID" ]; then
-          echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
-          exit 1
+            echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
+            exit 1
           fi
           sed -i "s|REPLACE_WITH_KV_NAMESPACE_ID|${KV_NAMESPACE_ID}|" apps/web/wrangler.toml
           echo "✓ KV namespace_id injected into apps/web/wrangler.toml"
