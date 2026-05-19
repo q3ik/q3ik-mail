@@ -77,6 +77,18 @@ async function resolveThreadingMetadata(
   return { threadId: replyToId, needsRethreading: 1 };
 }
 
+/**
+ * Outbox pattern: persist intent → send → update status.
+ *
+ * 1. INSERT a 'pending_send' row with a placeholder resend_id.
+ *    If this fails, no email is sent — safe for the user to retry.
+ * 2. Call Resend to deliver the email.
+ * 3. On success: UPDATE status='sent' and set the real resend_id.
+ *    On failure: UPDATE status='send_failed'.
+ *
+ * This eliminates the silent-data-loss window from the old fire-and-forget
+ * approach: every send attempt is recorded, and failures are visible.
+ */
 export async function POST(req: NextRequest) {
   const { env } = await getCloudflareContext({ async: true });
 
@@ -104,74 +116,44 @@ export async function POST(req: NextRequest) {
   const { to, subject, content, replyToId, references } = parsed.data;
 
   try {
+    const sentEmailRowId = crypto.randomUUID();
     const sentMessageId = `<${crypto.randomUUID()}@q3ik.com>`;
+    // Placeholder resend_id satisfies NOT NULL + UNIQUE until Resend returns the real one.
+    const placeholderResendId = `pending:${sentEmailRowId}`;
     const persistedReferences = buildReferencesHeader(replyToId, references);
     const { threadId, needsRethreading } = await resolveThreadingMetadata(
       env.DB,
       replyToId,
       sentMessageId
     );
-    const result = await resend.emails.send({
-      from: `${APP_FROM_NAME} <${APP_FROM_ADDRESS}>`,
-      to: [to],
-      subject,
-      text: content,
-      headers: buildEmailHeaders(sentMessageId, replyToId, references),
-    });
 
-    if (result.error) {
-      // Log only non-sensitive error metadata — never log .message which may
-      // echo back user input or contain PII-adjacent rate-limit/account details.
-      const statusCode =
-        'statusCode' in result.error && typeof result.error.statusCode === 'number'
-          ? result.error.statusCode
-          : undefined;
-      console.error('[api/send] Resend error:', result.error.name, statusCode);
-      return Response.json({ error: 'Failed to send email' }, { status: 500 });
-    }
-
-    const resendId = result.data?.id;
-    if (!resendId) {
-      console.warn('[api/send] Resend returned success without an id; skipping sent-email persistence');
-      return Response.json({ id: null }, { status: 200 });
-    }
-
-    try {
-      const sentEmailRowId = crypto.randomUUID();
-
-      // Persist sent email body to R2 (same pattern as inbound) to avoid
-      // D1 row-size limits on large email content.
-      let bodyTextKey: string | null = null;
-      const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
-      if (r2Bucket && content) {
-        bodyTextKey = `emails/${sentEmailRowId}/body.txt`;
-        try {
-          await r2Bucket.put(bodyTextKey, content, {
-            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-          });
-        } catch (err) {
-          console.warn('[api/send] Failed to persist sent body to R2; falling back to inline D1', { err });
-          bodyTextKey = null;
-        }
+    // ── Step 1: R2 body offload ───────────────────────────────────────────
+    let bodyTextKey: string | null = null;
+    const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
+    if (r2Bucket && content) {
+      bodyTextKey = `emails/${sentEmailRowId}/body.txt`;
+      try {
+        await r2Bucket.put(bodyTextKey, content, {
+          httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+        });
+      } catch (err) {
+        console.warn('[api/send] Failed to persist sent body to R2; falling back to inline D1', { err });
+        bodyTextKey = null;
       }
+    }
 
-      // Keep the INSERT column list aligned with the bound values below:
-      // `is_read` and `is_sent` are intentional literals because sent mail
-      // should always be persisted as read + outbound.
-      // This write is best-effort because the email has already been accepted
-      // by Resend; surfacing a 500 here would risk duplicate sends on retry.
-      //
-      // When R2 write succeeds: body_text=null, body_text_key=key (offloaded)
-      // When R2 write fails:    body_text=content, body_text_key=null (inline fallback)
+    // ── Step 2: Persist intent record (pending_send) ──────────────────────
+    // If this INSERT fails, no email is sent — the user can safely retry.
+    try {
       await env.DB.prepare(`
-        INSERT OR IGNORE INTO emails
-          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
+        INSERT INTO emails
+          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading, status)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 'pending_send')
       `)
         .bind(
           sentEmailRowId,
-          resendId,
+          placeholderResendId,
           threadId,
           APP_FROM_ADDRESS,
           APP_FROM_NAME,
@@ -188,19 +170,74 @@ export async function POST(req: NextRequest) {
         )
         .run();
     } catch (error) {
-      console.error('[api/send] Failed to persist sent email to D1:', error);
+      console.error('[api/send] Failed to persist send intent to D1:', error);
+      try { await captureException(error); } catch { /* best-effort */ }
+      // No email was sent — safe for user to retry.
+      return Response.json(
+        { error: { message: 'Failed to queue email for sending — please retry.' } },
+        { status: 500 }
+      );
+    }
+
+    // ── Step 3: Send via Resend ───────────────────────────────────────────
+    const result = await resend.emails.send({
+      from: `${APP_FROM_NAME} <${APP_FROM_ADDRESS}>`,
+      to: [to],
+      subject,
+      text: content,
+      headers: buildEmailHeaders(sentMessageId, replyToId, references),
+    });
+
+    if (result.error) {
+      // Log only non-sensitive error metadata — never log .message which may
+      // echo back user input or contain PII-adjacent rate-limit/account details.
+      const statusCode =
+        'statusCode' in result.error && typeof result.error.statusCode === 'number'
+          ? result.error.statusCode
+          : undefined;
+      console.error('[api/send] Resend error:', result.error.name, statusCode);
+
+      // Mark as failed so the row is visible but not confused with a sent email.
       try {
-        await captureException(error);
-      } catch (captureError) {
-        console.error('[api/send] Failed to capture sent-email persistence error:', captureError);
+        await env.DB.prepare(`UPDATE emails SET status = 'send_failed' WHERE id = ?`)
+          .bind(sentEmailRowId)
+          .run();
+      } catch (updateErr) {
+        console.error('[api/send] Failed to mark email as send_failed:', updateErr);
+        try { await captureException(updateErr); } catch { /* best-effort */ }
       }
+
+      return Response.json({ error: 'Failed to send email' }, { status: 500 });
+    }
+
+    // ── Step 4: Finalise — update status to 'sent' + real resend_id ──────
+    const resendId = result.data?.id;
+
+    try {
+      if (resendId) {
+        await env.DB.prepare(`UPDATE emails SET status = 'sent', resend_id = ? WHERE id = ?`)
+          .bind(resendId, sentEmailRowId)
+          .run();
+      } else {
+        // Resend returned success without an id — unusual but not fatal.
+        // Keep placeholder resend_id; mark as sent so the row is visible.
+        console.warn('[api/send] Resend returned success without an id; keeping placeholder resend_id');
+        await env.DB.prepare(`UPDATE emails SET status = 'sent' WHERE id = ?`)
+          .bind(sentEmailRowId)
+          .run();
+      }
+    } catch (error) {
+      // Email was sent but we couldn't update the DB record.
+      // The row exists as 'pending_send' — detectable and recoverable.
+      console.error('[api/send] Failed to finalise sent email in D1:', error);
+      try { await captureException(error); } catch { /* best-effort */ }
       return Response.json(
         { error: { message: 'Email sent but failed to save — please refresh.' }, id: resendId },
         { status: 500 }
       );
     }
 
-    return Response.json({ id: resendId }, { status: 200 });
+    return Response.json({ id: resendId ?? null }, { status: 200 });
   } catch (error) {
     console.error('Failed to send email:', error);
     return Response.json({ error: 'Failed to send email' }, { status: 500 });

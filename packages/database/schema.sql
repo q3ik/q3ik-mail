@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS emails (
   is_read           INTEGER NOT NULL DEFAULT 0,           -- Boolean (0 = unread, 1 = read)
   is_sent           INTEGER NOT NULL DEFAULT 0,           -- 0 = inbound, 1 = outbound
   needs_rethreading INTEGER NOT NULL DEFAULT 0,           -- 1 if thread_id couldn't be resolved at ingest
+  status            TEXT NOT NULL DEFAULT 'received',     -- 'received' | 'pending_send' | 'sent' | 'send_failed'
   created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

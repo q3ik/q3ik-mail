@@ -152,9 +152,9 @@ export async function ingestInboundEmail(
 
   const result = await opts.db.prepare(`
     INSERT OR IGNORE INTO emails
-      (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
+      (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading, status)
     VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
     .bind(
       opts.id,
@@ -173,7 +173,8 @@ export async function ingestInboundEmail(
       opts.references ?? null,
       isRead,
       isSent,
-      needsRethreading
+      needsRethreading,
+      'received'
     )
     .run();
 
@@ -368,14 +369,15 @@ function buildThreadListQuery(opts: {
   const rankedSubquery = `SELECT
            id, resend_id, thread_id, from_address, from_name,
            to_address, subject, message_id, in_reply_to, "references",
-           is_read, is_sent, needs_rethreading, created_at,
+           is_read, is_sent, needs_rethreading, status, created_at,
            ROW_NUMBER() OVER (
              PARTITION BY thread_id
              -- resend_id breaks ties within a thread to pick the representative row;
              -- the outer ORDER BY also uses resend_id as the cursor tiebreaker.
              ORDER BY created_at DESC, resend_id ASC
            ) AS thread_rank
-         FROM emails`;
+         FROM emails
+         WHERE status != 'send_failed'`;
 
   const whereClause = opts.cursor
     ? `WHERE thread_rank = 1
@@ -388,7 +390,7 @@ function buildThreadListQuery(opts: {
   const sql = `SELECT
          id, resend_id, thread_id, from_address, from_name,
          to_address, subject, message_id, in_reply_to, "references",
-         is_read, is_sent, needs_rethreading, created_at
+         is_read, is_sent, needs_rethreading, status, created_at
        FROM (
          ${rankedSubquery}
        ) ranked_emails
@@ -632,12 +634,12 @@ export async function searchEmails(
       `SELECT
          id, resend_id, thread_id, from_address, from_name,
          to_address, subject, message_id, in_reply_to, "references",
-         is_read, is_sent, needs_rethreading, created_at
+         is_read, is_sent, needs_rethreading, status, created_at
        FROM (
          SELECT
            emails.id, emails.resend_id, emails.thread_id, emails.from_address, emails.from_name,
            emails.to_address, emails.subject, emails.message_id, emails.in_reply_to, emails."references",
-           emails.is_read, emails.is_sent, emails.needs_rethreading, emails.created_at,
+           emails.is_read, emails.is_sent, emails.needs_rethreading, emails.status, emails.created_at,
             ROW_NUMBER() OVER (
               PARTITION BY emails.thread_id
               ORDER BY bm25(emails_fts), emails.created_at DESC, emails.resend_id ASC

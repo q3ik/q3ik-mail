@@ -23,6 +23,7 @@ export interface Email {
   is_read: 0 | 1;         // SQLite boolean
   is_sent: 0 | 1;         // 0 = inbound, 1 = outbound
   needs_rethreading: 0 | 1; // 1 if thread_id couldn't be resolved at ingest
+  status: 'received' | 'pending_send' | 'sent' | 'send_failed';
   created_at: string;     // ISO 8601 datetime string
 }
 

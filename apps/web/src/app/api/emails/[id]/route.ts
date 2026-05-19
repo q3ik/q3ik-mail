@@ -48,6 +48,7 @@ export async function GET(
       references: email.references,
       is_read: email.is_read,
       is_sent: email.is_sent,
+      status: email.status,
       created_at: email.created_at,
     });
   } catch (error) {

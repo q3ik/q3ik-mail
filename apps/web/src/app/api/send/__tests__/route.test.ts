@@ -7,11 +7,17 @@ const routeMocks = vi.hoisted(() => {
   const captureException = vi.fn().mockResolvedValue(undefined);
   const insertRun = vi.fn().mockResolvedValue({ success: true });
   const insertBind = vi.fn().mockReturnValue({ run: insertRun });
+  const updateRun = vi.fn().mockResolvedValue({ success: true });
+  const updateBind = vi.fn().mockReturnValue({ run: updateRun });
   const selectFirst = vi.fn().mockResolvedValue(null);
   const selectBind = vi.fn().mockReturnValue({ first: selectFirst });
   const prepare = vi.fn().mockImplementation((sql: string) => {
-    if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
+    const trimmed = sql.trimStart().toUpperCase();
+    if (trimmed.startsWith('SELECT')) {
       return { bind: selectBind };
+    }
+    if (trimmed.startsWith('UPDATE')) {
+      return { bind: updateBind };
     }
     return { bind: insertBind };
   });
@@ -20,6 +26,8 @@ const routeMocks = vi.hoisted(() => {
     captureException,
     insertRun,
     insertBind,
+    updateRun,
+    updateBind,
     selectFirst,
     selectBind,
     prepare,
@@ -51,17 +59,26 @@ vi.mock('@/lib/sentry', () => ({
 
 function getInsertCall(): { sql: string; boundValues: unknown[] } {
   const insertIdx = (routeMocks.prepare.mock.calls as unknown[][]).findIndex(
-    (args) => (args[0] as string).includes('INSERT OR IGNORE INTO emails')
+    (args) => (args[0] as string).includes('INSERT INTO emails')
   );
   expect(insertIdx).toBeGreaterThanOrEqual(0);
 
-  // SELECTs use selectBind, so insertBind only records INSERT parameter lists.
+  // SELECTs use selectBind, UPDATEs use updateBind, so insertBind only records INSERT parameter lists.
   const firstInsertBindCall = routeMocks.insertBind.mock.calls[0];
   expect(firstInsertBindCall).toBeDefined();
   return {
     sql: routeMocks.prepare.mock.calls[insertIdx][0] as string,
     boundValues: firstInsertBindCall as unknown[],
   };
+}
+
+function getUpdateCalls(): { sql: string; boundValues: unknown[] }[] {
+  return (routeMocks.prepare.mock.calls as unknown[][])
+    .filter((args) => (args[0] as string).trimStart().toUpperCase().startsWith('UPDATE'))
+    .map((args, i) => ({
+      sql: args[0] as string,
+      boundValues: routeMocks.updateBind.mock.calls[i] as unknown[],
+    }));
 }
 
 // ─── Unified error shape helpers ───────────────────────────────────────────
@@ -92,6 +109,7 @@ describe('POST /api/send', () => {
     vi.clearAllMocks();
     routeMocks.captureException.mockResolvedValue(undefined);
     routeMocks.insertRun.mockResolvedValue({ success: true });
+    routeMocks.updateRun.mockResolvedValue({ success: true });
     routeMocks.selectFirst.mockResolvedValue(null);
   });
 
@@ -185,8 +203,8 @@ describe('POST /api/send', () => {
 
   it('accepts null replyToId and null references (nullish normalised to undefined)', async () => {
     const randomUuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID')
-      .mockReturnValueOnce('msg-uuid')
-      .mockReturnValueOnce('row-uuid');
+      .mockReturnValueOnce('row-uuid')
+      .mockReturnValueOnce('msg-uuid');
     try {
       const { POST } = await import('../route');
       const req = new Request('http://localhost/api/send', {
@@ -272,12 +290,12 @@ describe('POST /api/send', () => {
     expect(res.status).toBe(200);
   });
 
-  // ── Happy path & persistence ───────────────────────────────────────────────
+  // ── Happy path & outbox pattern ────────────────────────────────────────────
 
-  it('returns 200 with email id on success and persists the sent email', async () => {
+  it('persists pending_send row before calling Resend, then updates to sent', async () => {
     const randomUuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID')
-      .mockReturnValueOnce('message-uuid')
-      .mockReturnValueOnce('row-uuid');
+      .mockReturnValueOnce('row-uuid')
+      .mockReturnValueOnce('message-uuid');
     try {
       const { POST } = await import('../route');
       const req = new Request('http://localhost/api/send', {
@@ -290,18 +308,20 @@ describe('POST /api/send', () => {
       const body = await res.json();
       expect(body.id).toBe('sent-id');
 
+      // Verify Resend was called with correct Message-ID
       const MockedResend = Resend as MockedClass<typeof Resend>;
       const sendSpy = MockedResend.mock.results[0]?.value.emails.send as ReturnType<typeof vi.fn>;
       const callArgs = sendSpy.mock.calls[0][0] as CreateEmailOptions;
       expect(callArgs.headers?.['Message-ID']).toBe('<message-uuid@q3ik.com>');
 
+      // Step 2: Verify INSERT was called with pending_send and placeholder resend_id
       expect(routeMocks.insertBind).toHaveBeenCalledTimes(1);
       const { sql, boundValues } = getInsertCall();
-      expect(sql).toContain('1, 1, ?');
+      expect(sql).toContain("'pending_send'");
       expect(boundValues).toEqual([
         'row-uuid',
-        'sent-id',
-        '<message-uuid@q3ik.com>',
+        'pending:row-uuid',             // placeholder resend_id
+        '<message-uuid@q3ik.com>',      // threadId (new thread = messageId)
         'mail@q3ik.com',
         'q3ik Mail',
         'a@b.com',
@@ -315,13 +335,23 @@ describe('POST /api/send', () => {
         null,
         0,
       ]);
+
+      // Step 4: Verify UPDATE was called to finalise status + real resend_id
+      expect(routeMocks.updateBind).toHaveBeenCalledTimes(1);
+      const updates = getUpdateCalls();
+      expect(updates).toHaveLength(1);
+      expect(updates[0].sql).toContain("status = 'sent'");
+      expect(updates[0].sql).toContain('resend_id = ?');
+      expect(updates[0].boundValues).toEqual(['sent-id', 'row-uuid']);
+
+      // No thread lookup for new thread (no replyToId)
       expect(routeMocks.selectBind).toHaveBeenCalledTimes(0);
     } finally {
       randomUuidSpy.mockRestore();
     }
   });
 
-  it('returns generic error message when Resend API returns an error', async () => {
+  it('returns generic error message when Resend API returns an error and marks row as send_failed', async () => {
     const MockedResend = Resend as MockedClass<typeof Resend>;
     const resendError = { message: 'Rate limit exceeded', name: 'rate_limit_exceeded', statusCode: 429 };
     const sendSpy = vi.fn().mockResolvedValue({ data: null, error: resendError });
@@ -336,6 +366,11 @@ describe('POST /api/send', () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe('Failed to send email');
+
+    // Verify the row was marked as send_failed
+    const updates = getUpdateCalls();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].sql).toContain("'send_failed'");
   });
 
   it('returns 500 and skips send when thread lookup fails', async () => {
@@ -369,11 +404,65 @@ describe('POST /api/send', () => {
     }
   });
 
+  it('returns 500 when D1 INSERT for pending_send fails — no email sent', async () => {
+    routeMocks.insertRun.mockRejectedValueOnce(new Error('db unavailable'));
+    const MockedResend = Resend as MockedClass<typeof Resend>;
+    const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'sent-id' }, error: null });
+    MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { POST } = await import('../route');
+      const req = new Request('http://localhost/api/send', {
+        method: 'POST',
+        body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const res = await POST(req as unknown as NextRequest);
+
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error.message).toBe('Failed to queue email for sending — please retry.');
+      // Crucially: Resend was NOT called because the intent record failed
+      expect(sendSpy).not.toHaveBeenCalled();
+      expect(routeMocks.captureException).toHaveBeenCalledWith(expect.any(Error));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('returns 500 with resend id when final UPDATE fails after send succeeds', async () => {
+    routeMocks.updateRun.mockRejectedValueOnce(new Error('db unavailable'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { POST } = await import('../route');
+      const req = new Request('http://localhost/api/send', {
+        method: 'POST',
+        body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const res = await POST(req as unknown as NextRequest);
+      const MockedResend = Resend as MockedClass<typeof Resend>;
+      const sendSpy = MockedResend.mock.results[0]?.value.emails.send as ReturnType<typeof vi.fn>;
+
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({
+        error: { message: 'Email sent but failed to save — please refresh.' },
+        id: 'sent-id',
+      });
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(routeMocks.captureException).toHaveBeenCalledWith(expect.any(Error));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('sets In-Reply-To and References headers when replyToId is provided', async () => {
     const MockedResend = Resend as MockedClass<typeof Resend>;
     const randomUuidSpy = vi.spyOn(globalThis.crypto, 'randomUUID')
-      .mockReturnValueOnce('reply-message-uuid')
-      .mockReturnValueOnce('reply-row-uuid');
+      .mockReturnValueOnce('reply-row-uuid')
+      .mockReturnValueOnce('reply-message-uuid');
     routeMocks.selectFirst.mockResolvedValueOnce({ thread_id: 'thread-123' });
     const sendSpy = vi.fn().mockResolvedValue({ data: { id: 'r1' }, error: null });
     MockedResend.mockImplementationOnce(() => ({ emails: { send: sendSpy } }) as unknown as Resend);
@@ -397,13 +486,14 @@ describe('POST /api/send', () => {
       expect(callArgs.headers?.['References']).toBe('<root@example.com> <msg-1@example.com>');
       expect(routeMocks.selectBind).toHaveBeenCalledWith('<msg-1@example.com>');
 
+      // Verify INSERT used resolved thread_id
       expect(routeMocks.insertBind).toHaveBeenCalledTimes(1);
       const { sql, boundValues } = getInsertCall();
-      expect(sql).toContain('1, 1, ?');
+      expect(sql).toContain("'pending_send'");
       expect(boundValues).toEqual([
         'reply-row-uuid',
-        'r1',
-        'thread-123',
+        'pending:reply-row-uuid',        // placeholder resend_id
+        'thread-123',                     // resolved from parent
         'mail@q3ik.com',
         'q3ik Mail',
         'a@b.com',
@@ -563,38 +653,7 @@ describe('POST /api/send', () => {
     expect(callArgs.headers?.['References']).toBe(expectedIds.join(' '));
   });
 
-  it('returns 500 with resend id when D1 persistence fails after send succeeds', async () => {
-    routeMocks.insertRun.mockRejectedValueOnce(new Error('db unavailable'));
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      const { POST } = await import('../route');
-      const req = new Request('http://localhost/api/send', {
-        method: 'POST',
-        body: JSON.stringify({ to: 'a@b.com', subject: 'Hi', content: 'Hello' }),
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      const res = await POST(req as unknown as NextRequest);
-      const MockedResend = Resend as MockedClass<typeof Resend>;
-      const sendSpy = MockedResend.mock.results[0]?.value.emails.send as ReturnType<typeof vi.fn>;
-
-      expect(res.status).toBe(500);
-      expect(await res.json()).toEqual({
-        error: { message: 'Email sent but failed to save — please refresh.' },
-        id: 'sent-id',
-      });
-      expect(sendSpy).toHaveBeenCalledTimes(1);
-      expect(errorSpy).toHaveBeenCalledWith(
-        '[api/send] Failed to persist sent email to D1:',
-        expect.any(Error)
-      );
-      expect(routeMocks.captureException).toHaveBeenCalledWith(expect.any(Error));
-    } finally {
-      errorSpy.mockRestore();
-    }
-  });
-
-  it('skips persistence when Resend returns success without an id', async () => {
+  it('handles Resend returning success without an id gracefully', async () => {
     const MockedResend = Resend as MockedClass<typeof Resend>;
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const sendSpy = vi.fn().mockResolvedValue({ data: {}, error: null });
@@ -611,10 +670,15 @@ describe('POST /api/send', () => {
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ id: null });
-      expect(routeMocks.insertBind).not.toHaveBeenCalled();
-      expect(routeMocks.captureException).not.toHaveBeenCalled();
+      // INSERT for pending_send should still have been called
+      expect(routeMocks.insertBind).toHaveBeenCalledTimes(1);
+      // UPDATE should mark as 'sent' even without a real resend_id
+      expect(routeMocks.updateBind).toHaveBeenCalledTimes(1);
+      const updates = getUpdateCalls();
+      expect(updates[0].sql).toContain("status = 'sent'");
+      expect(updates[0].sql).not.toContain('resend_id');
       expect(warnSpy).toHaveBeenCalledWith(
-        '[api/send] Resend returned success without an id; skipping sent-email persistence'
+        '[api/send] Resend returned success without an id; keeping placeholder resend_id'
       );
     } finally {
       warnSpy.mockRestore();
