@@ -305,6 +305,11 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter web exec playwright install chromium --with-deps
 
+      # Provide dev secrets for wrangler dev (Playwright's webServer).
+      # .dev.vars is git-ignored; wrangler reads it automatically.
+      - name: Create .dev.vars for E2E
+        run: echo 'THREAD_LIST_CURSOR_SECRET=e2e-cursor-secret' > apps/web/.dev.vars
+
       # Playwright's webServer block (playwright.config.ts) starts wrangler
       # pages dev and waits for a real HTTP 200 before running any test.
       # No manual background server or wait-on needed here.
@@ -383,6 +388,9 @@ jobs:
 
       - name: Install Playwright Chromium
         run: pnpm --filter web exec playwright install chromium --with-deps
+
+      - name: Create .dev.vars for E2E
+        run: echo 'THREAD_LIST_CURSOR_SECRET=e2e-cursor-secret' > apps/web/.dev.vars
 
       # Issue 6 fix: start the app via wrangler pages dev (same as the
       # existing e2e job) and wait for it to be ready before running the
