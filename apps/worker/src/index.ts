@@ -3,166 +3,10 @@ import { captureException, captureMessage, addBreadcrumb } from './lib/sentry';
 import { Webhook } from 'svix';
 import { Resend } from 'resend';
 import { ingestInboundEmail, resolveOrphanedThreads } from '@q3ik-mail/database';
-import { parseFrom } from './utils/parseFrom';
+import { resolveThreadId } from '@q3ik-mail/core';
+import { parseResendReceivedEmail, normalizeResendWebhook } from './adapters/resend';
+import type { ResendReceivedAttachment } from './adapters/resend';
 import { validateCfAccessJwt } from './middleware/cfAccess';
-
-// Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
-// Field names verified against https://resend.com/docs/api-reference/webhooks/email-received
-// When Resend ships official types, replace this interface with the proper SDK import.
-interface ResendReceivedEmail {
-  from?: string;
-  // Resend may return a single address string or an array; normalise downstream.
-  to?: string | string[];
-  subject?: string;
-  // `text` is nullable but not guaranteed present on every event (HTML-only senders
-  // may omit the key entirely). Treat as optional; normalise to null downstream.
-  text?: string | null;
-  html?: string | null;
-  attachments?: ResendReceivedAttachment[];
-  headers?: Array<{ name: string; value: string }>;
-}
-
-interface ResendReceivedAttachment {
-  id?: string;
-  filename?: string;
-  content?: string;
-  content_type?: string;
-  contentType?: string;
-  url?: string;
-  size?: number;
-  content_length?: number;
-}
-
-/**
- * Validates and narrows an unknown Resend receiving-API payload to
- * `ResendReceivedEmail`. Returns `null` plus the name of the offending field
- * when validation fails so callers can emit a diagnostic log entry.
- *
- * Key invariants:
- * - Only `object` payloads are accepted.
- * - `text` is optional (HTML-only emails may omit the key), but when present
- *   it must be `string | null`. Do NOT require its presence — that would cause
- *   a 502 for every HTML-only inbound message.
- * - All other fields are individually optional and type-checked when present.
- * - Inner collection types (headers array) use `Record<string, unknown>` to
- *   preserve exhaustiveness checking as the interface evolves.
- */
-function parseResendReceivedEmail(
-  payload: unknown,
-): { ok: true; email: ResendReceivedEmail } | { ok: false; field: string } {
-  if (!payload || typeof payload !== 'object') {
-    return { ok: false, field: '(root)' };
-  }
-
-  // Use `unknown` (not `any`) so the compiler enforces explicit narrowing on
-  // every property access and exhaustiveness checks remain intact.
-  const email = payload as Record<string, unknown>;
-
-  // `text` — optional; when present must be string | null
-  if ('text' in email && email.text !== null && typeof email.text !== 'string') {
-    return { ok: false, field: 'text' };
-  }
-
-  if (email.from !== undefined && typeof email.from !== 'string') {
-    return { ok: false, field: 'from' };
-  }
-
-  if (
-    email.to !== undefined &&
-    typeof email.to !== 'string' &&
-    !(
-      Array.isArray(email.to) &&
-      (email.to as unknown[]).every((item) => typeof item === 'string')
-    )
-  ) {
-    return { ok: false, field: 'to' };
-  }
-
-  if (email.subject !== undefined && typeof email.subject !== 'string') {
-    return { ok: false, field: 'subject' };
-  }
-
-  if (email.html !== undefined && email.html !== null && typeof email.html !== 'string') {
-    return { ok: false, field: 'html' };
-  }
-
-  if (email.headers !== undefined) {
-    if (!Array.isArray(email.headers)) {
-      return { ok: false, field: 'headers' };
-    }
-    for (const header of email.headers as unknown[]) {
-      if (!header || typeof header !== 'object') {
-        return { ok: false, field: 'headers[*]' };
-      }
-      const h = header as Record<string, unknown>;
-      if (typeof h.name !== 'string' || typeof h.value !== 'string') {
-        return { ok: false, field: 'headers[*].name/value' };
-      }
-    }
-  }
-
-  if (email.attachments !== undefined) {
-    if (!Array.isArray(email.attachments)) {
-      return { ok: false, field: 'attachments' };
-    }
-    for (const attachment of email.attachments as unknown[]) {
-      if (!attachment || typeof attachment !== 'object') {
-        return { ok: false, field: 'attachments[*]' };
-      }
-      const a = attachment as Record<string, unknown>;
-      if (a.id !== undefined && typeof a.id !== 'string') {
-        return { ok: false, field: 'attachments[*].id' };
-      }
-      if (a.filename !== undefined && typeof a.filename !== 'string') {
-        return { ok: false, field: 'attachments[*].filename' };
-      }
-      if (a.content !== undefined && typeof a.content !== 'string') {
-        return { ok: false, field: 'attachments[*].content' };
-      }
-      if (a.content_type !== undefined && typeof a.content_type !== 'string') {
-        return { ok: false, field: 'attachments[*].content_type' };
-      }
-      if (a.contentType !== undefined && typeof a.contentType !== 'string') {
-        return { ok: false, field: 'attachments[*].contentType' };
-      }
-      if (a.url !== undefined && typeof a.url !== 'string') {
-        return { ok: false, field: 'attachments[*].url' };
-      }
-      if (a.size !== undefined && typeof a.size !== 'number') {
-        return { ok: false, field: 'attachments[*].size' };
-      }
-      if (a.content_length !== undefined && typeof a.content_length !== 'number') {
-        return { ok: false, field: 'attachments[*].content_length' };
-      }
-    }
-  }
-
-  return {
-    ok: true,
-    email: {
-      from: typeof email.from === 'string' ? email.from : undefined,
-      to:
-        typeof email.to === 'string' || Array.isArray(email.to)
-          ? (email.to as string | string[])
-          : undefined,
-      subject: typeof email.subject === 'string' ? email.subject : undefined,
-      text:
-        typeof email.text === 'string' || email.text === null
-          ? (email.text as string | null)
-          : undefined,
-      html:
-        typeof email.html === 'string' || email.html === null
-          ? (email.html as string | null)
-          : undefined,
-      headers: Array.isArray(email.headers)
-        ? (email.headers as Array<{ name: string; value: string }>)
-        : undefined,
-      attachments: Array.isArray(email.attachments)
-        ? (email.attachments as ResendReceivedAttachment[])
-        : undefined,
-    },
-  };
-}
 
 function getBodyHtmlKey(emailInternalId: string): string {
   return `emails/${emailInternalId}/body.html`;
@@ -455,12 +299,15 @@ const handler: ExportedHandler<Env> = {
     const rawBody = await request.text();
 
     // --- Step 1: Verify webhook signature via svix directly ---
+    // Capture the svix-timestamp header before verification so we can pass it
+    // to normalizeResendWebhook as the authoritative receivedAt value.
+    const svixTimestamp = request.headers.get('svix-timestamp') ?? '';
     let event: { type: string; data: { email_id: string } };
     try {
       const wh = new Webhook(env.RESEND_WEBHOOK_SECRET);
       event = wh.verify(rawBody, {
         'svix-id': request.headers.get('svix-id') ?? '',
-        'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
+        'svix-timestamp': svixTimestamp,
         'svix-signature': request.headers.get('svix-signature') ?? '',
       }) as { type: string; data: { email_id: string } };
     } catch {
@@ -557,64 +404,13 @@ const handler: ExportedHandler<Env> = {
     }
     const receivedEmail = parseResult.email;
 
-    // --- Step 4: Threading logic ---
-    // Parse headers array for In-Reply-To and Message-ID
-    const emailHeaders: Array<{ name: string; value: string }> = receivedEmail.headers ?? [];
-
-    const inReplyTo = emailHeaders.find(
-      (h) => h.name.toLowerCase() === 'in-reply-to'
-    )?.value ?? null;
-
-    const messageId = emailHeaders.find(
-      (h) => h.name.toLowerCase() === 'message-id'
-    )?.value ?? null;
-
-    const referencesHeader = (emailHeaders.find(
-      (h) => h.name.toLowerCase() === 'references'
-    )?.value ?? null)
-      // Normalise folded whitespace (CRLF + WSP) into single spaces so
-      // downstream consumers receive a clean space-separated Message-ID chain.
-      ?.replace(/\s+/g, ' ').trim() ?? null;
-
-    // Fix: Look up the parent email's thread_id from D1 using the In-Reply-To
-    // Message-ID. This ensures multi-level reply chains all share the same
-    // root thread_id, rather than each reply forking into its own thread.
-    //
-    // Strategy:
-    //   1. If inReplyTo is set, query emails WHERE message_id = inReplyTo
-    //   2. If a parent row is found, reuse its thread_id (may itself be a reply)
-    //   3. If no parent found (out-of-order delivery), use inReplyTo as thread_id
-    //      and flag for re-threading once the parent arrives
-    //   4. New messages (no inReplyTo) start a new thread keyed on messageId ?? emailId
-    let threadId: string;
-    let needsRethreading: 0 | 1 = 0;
-    if (inReplyTo) {
-      const parentRow = await env.DB
-        .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
-        .bind(inReplyTo)
-        .first<{ thread_id: string }>();
-      if (parentRow) {
-        // Parent found -- join existing thread
-        threadId = parentRow.thread_id;
-      } else {
-        // Parent not yet received -- use In-Reply-To value as thread_id for now
-        // and flag for re-threading once the parent arrives
-        threadId = inReplyTo;
-        needsRethreading = 1;
-        console.warn(`[threading] Parent not found for In-Reply-To: ${inReplyTo}. Flagged for re-threading.`);
-      }
-    } else {
-      // Root message -- start a new thread
-      threadId = messageId ?? emailId;
-    }
-
-    // --- Step 5: Parse from_name and from_address ---
-    // Resend returns from as "Display Name <email@example.com>" or just "email@example.com"
-    const { name: fromName, address: fromAddress } = parseFrom(receivedEmail.from ?? '');
+    // --- Step 4: Normalize the Resend payload into a provider-agnostic envelope
+    // and resolve the thread_id via a pure function. ---
+    const envelope = normalizeResendWebhook(receivedEmail, svixTimestamp);
 
     // Guard: a missing or unparseable from field must not silently write an empty
     // string into the NOT NULL from_address column -- reject the webhook instead.
-    if (!fromAddress) {
+    if (!envelope.fromAddress) {
       console.warn('[worker] Received email with missing or unparseable from address; rejecting.', { emailId });
       captureMessage('Received email with missing or unparseable from address', {
         level: 'warning',
@@ -624,16 +420,32 @@ const handler: ExportedHandler<Env> = {
       return new Response('Missing from address', { status: 400 });
     }
 
-    // Normalise `to` to a string regardless of whether the API returns a bare
-    // string or an array -- both branches are now handled explicitly.
-    const toRaw = receivedEmail.to;
-    const toAddress = Array.isArray(toRaw)
-      ? toRaw.join(', ')
-      : (typeof toRaw === 'string' ? toRaw : '');
-    const normalizedToAddress = toAddress.trim();
-    if (!normalizedToAddress) {
+    if (!envelope.toAddress) {
       console.warn('[worker] Missing or empty to_address; rejecting.', { emailId });
       return new Response('Missing to address', { status: 400 });
+    }
+
+    // Build parentLookup for thread resolution: query D1 only when inReplyTo is
+    // set, then delegate the threading decision to the pure resolveThreadId function.
+    const parentLookup = new Map<string, { thread_id: string }>();
+    if (envelope.inReplyTo) {
+      const parentRow = await env.DB
+        .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
+        .bind(envelope.inReplyTo)
+        .first<{ thread_id: string }>();
+      if (parentRow) {
+        parentLookup.set(envelope.inReplyTo, parentRow);
+      }
+    }
+
+    const { threadId, needsRethreading: rethreadNeeded } = resolveThreadId(
+      envelope,
+      parentLookup,
+      emailId,
+    );
+    const needsRethreading: 0 | 1 = rethreadNeeded ? 1 : 0;
+    if (rethreadNeeded) {
+      console.warn(`[threading] Parent not found for In-Reply-To: ${envelope.inReplyTo}. Flagged for re-threading.`);
     }
 
     const internalEmailId = resumeExistingId ?? crypto.randomUUID();
@@ -651,36 +463,32 @@ const handler: ExportedHandler<Env> = {
 
     const r2Bucket = env.EMAIL_BODIES;
     if (r2Bucket) {
-      if (receivedEmail.text !== null && receivedEmail.text !== undefined) {
+      if (envelope.bodyText !== null) {
         pendingBodyContent.push({
           type: 'text',
           key: getBodyTextKey(internalEmailId),
-          content: receivedEmail.text,
+          content: envelope.bodyText,
           contentType: 'text/plain; charset=utf-8',
         });
         // Issue H1 fix: Store in D1 for FTS5 searchability
-        pendingBodyTextForD1 = receivedEmail.text;
+        pendingBodyTextForD1 = envelope.bodyText;
       }
 
-      if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
+      if (envelope.bodyHtml !== null) {
         pendingBodyContent.push({
           type: 'html',
           key: getBodyHtmlKey(internalEmailId),
-          content: receivedEmail.html,
+          content: envelope.bodyHtml,
           contentType: 'text/html; charset=utf-8',
         });
         // Issue H1 fix: Store in D1 for FTS5 searchability
-        pendingBodyHtmlForD1 = receivedEmail.html;
+        pendingBodyHtmlForD1 = envelope.bodyHtml;
       }
     } else {
       console.warn('[worker] EMAIL_BODIES R2 bucket not bound; bodies will not be stored in R2', { emailId });
       // Fallback: still write to D1 when R2 is not available
-      if (receivedEmail.text !== null && receivedEmail.text !== undefined) {
-        pendingBodyTextForD1 = receivedEmail.text;
-      }
-      if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
-        pendingBodyHtmlForD1 = receivedEmail.html;
-      }
+      pendingBodyTextForD1 = envelope.bodyText;
+      pendingBodyHtmlForD1 = envelope.bodyHtml;
     }
 
     // --- Step 7: Build attachment descriptor list (download content from Resend) ---
@@ -777,15 +585,15 @@ const handler: ExportedHandler<Env> = {
           id: internalEmailId,
           resendId: emailId,
           threadId,
-          fromAddress,
-          fromName,
-          toAddress: normalizedToAddress,
-          subject: receivedEmail.subject ?? null,
+          fromAddress: envelope.fromAddress,
+          fromName: envelope.fromName,
+          toAddress: envelope.toAddress,
+          subject: envelope.subject,
           bodyText: pendingBodyTextForD1,
           bodyHtml: pendingBodyHtmlForD1,
-          messageId,
-          inReplyTo,
-          references: referencesHeader,
+          messageId: envelope.messageId,
+          inReplyTo: envelope.inReplyTo,
+          references: envelope.references,
           isRead: 0,
           isSent: 0,
           needsRethreading,

@@ -1,4 +1,5 @@
 import type { Email, EmailSummary } from './types';
+import { resolveOrphanThreadId } from '@q3ik-mail/core';
 
 export type { Email, EmailSummary, NewEmail } from './types';
 
@@ -801,13 +802,7 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     }
   }
 
-  const referenceMap = new Map<
-    string,
-    {
-      id: string;
-      thread_id: string;
-    }
-  >();
+  const referenceMap = new Map<string, { thread_id: string }>();
 
   if (allReferenceIds.size > 0) {
     const referenceIds = [...allReferenceIds];
@@ -830,26 +825,23 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
     }
   }
 
+  // Merge parentMap and referenceMap into a single lookup for the pure
+  // resolveOrphanThreadId function. parentMap (from in_reply_to) takes
+  // precedence over referenceMap because it represents the direct reply
+  // relationship and is more authoritative for immediate threading.
+  const combinedLookup = new Map<string, { thread_id: string }>(referenceMap);
+  for (const [key, value] of parentMap) {
+    combinedLookup.set(key, value);
+  }
+
   const updates: D1PreparedStatement[] = [];
 
   for (const orphan of orphans) {
-    let parent:
-      | {
-          id: string;
-          thread_id: string;
-        }
-      | null = parentMap.get(orphan.in_reply_to) ?? null;
-
-    if (!parent && orphan.references) {
-      const refs = orphan.references.trim().split(/\s+/).reverse();
-      for (const ref of refs) {
-        const ancestor = referenceMap.get(ref) ?? parentMap.get(ref);
-        if (ancestor) {
-          parent = ancestor;
-          break;
-        }
-      }
-    }
+    const parent = resolveOrphanThreadId(
+      orphan.in_reply_to,
+      orphan.references,
+      combinedLookup,
+    );
 
     if (!parent) continue; // Parent still hasn't arrived
 

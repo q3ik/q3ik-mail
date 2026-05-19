@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@q3ik-mail/core": "workspace:*",
     "@q3ik-mail/database": "workspace:*",
     "@sentry/cloudflare": "^10.52.0",
     "resend": "^4.8.0",
