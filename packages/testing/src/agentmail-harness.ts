@@ -96,19 +96,19 @@ export class AgentMailClient {
   }
 
   async createMailbox(): Promise<AgentMailMailbox> {
-    const inbox = await this.request<{ inbox_id: string; email: string }>('/inboxes', { method: 'POST' });
+    const inbox = await this.request<{ inbox_id: string; email: string }>('/inboxes', { method: 'POST' }, { expectJson: true });
     // Normalise the AgentMail response shape to match AgentMailMailbox.
     return { id: inbox.inbox_id, email: inbox.email };
   }
 
   async listMessages(mailboxId: string): Promise<AgentMailMessage[]> {
-    const data = await this.request<AgentMailMessagesResponse>(`/inboxes/${mailboxId}/messages`);
+    const data = await this.request<AgentMailMessagesResponse>('/inboxes/' + encodeURIComponent(mailboxId) + '/messages', undefined, { expectJson: true });
     return data.messages;
   }
 
   async deleteMailbox(mailboxId: string): Promise<void> {
     await this.request(
-      `/inboxes/${mailboxId}`,
+      '/inboxes/' + encodeURIComponent(mailboxId),
       { method: 'DELETE' },
       { allowStatuses: [404], expectJson: false }
     );
