@@ -32,8 +32,17 @@ simple = { limit = 60, period = 60 }
 [observability]
 enabled = true
 
+[observability.traces]
+enabled = true
+# Destination name must match the one configured in the CF dashboard
+# (Workers & Pages > Observability > Destinations)
+destinations = ["sentry-traces"]
+
 [observability.logs]
+enabled = true
 invocation_logs = true
+# Destination name must match the one configured in the CF dashboard
+destinations = ["sentry-logs"]
 
 [vars]
 ENVIRONMENT = "production"
