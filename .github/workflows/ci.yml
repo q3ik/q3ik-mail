@@ -281,7 +281,9 @@ jobs:
       # Build for Cloudflare Workers via OpenNext — outputs to .open-next/
       - name: Build web app
         run: pnpm --filter web run build:cf
-
+        env:
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_WEB }}
+          
       # Apply all numbered migrations against the local D1 instance.
       # Uses the canonical migration workflow (000_init.sql, 001_*, …) rather
       # than the legacy schema.sql one-shot, so CI matches the production
@@ -378,7 +380,9 @@ jobs:
       
       - name: Build web app
         run: pnpm --filter web run build:cf
-
+        env:
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_WEB }}
+          
       - name: Apply D1 migrations (local)
         run: >
           npx wrangler d1 migrations apply q3ik-mail-db
@@ -530,7 +534,9 @@ jobs:
 
       - name: Build web app
         run: pnpm --filter web run build:cf
-
+        env:
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_WEB }}
+          
       - name: Deploy web app
         run: npx wrangler deploy
         working-directory: apps/web
