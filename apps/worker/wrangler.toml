@@ -29,7 +29,7 @@ type = "ratelimit"
 namespace_id = "1"
 simple = { limit = 60, period = 60 }
 
-# Sentry logs/traces integration
+# Sentry log/trace integration
 [observability]
 enabled = true
 
