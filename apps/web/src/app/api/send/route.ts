@@ -207,7 +207,7 @@ export async function POST(req: NextRequest) {
         try { await captureException(updateErr); } catch { /* best-effort */ }
       }
 
-      return Response.json({ error: 'Failed to send email' }, { status: 500 });
+      return Response.json({ error: { message: 'Failed to send email' } }, { status: 500 });
     }
 
     // ── Step 4: Finalise — update status to 'sent' + real resend_id ──────
@@ -240,6 +240,6 @@ export async function POST(req: NextRequest) {
     return Response.json({ id: resendId ?? null }, { status: 200 });
   } catch (error) {
     console.error('Failed to send email:', error);
-    return Response.json({ error: 'Failed to send email' }, { status: 500 });
+    return Response.json({ error: { message: 'Failed to send email' } }, { status: 500 });
   }
 }
