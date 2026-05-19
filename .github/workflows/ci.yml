@@ -67,6 +67,7 @@ jobs:
       - name: Check wrangler.toml database_id placeholder
         env:
           D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          KV_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_KV_NAMESPACE_ID }}
         run: |
           # Fail fast and explicitly if the secret is missing or empty.
           # This distinguishes "secret not configured" from any other failure mode.
@@ -87,6 +88,18 @@ jobs:
             echo "Ensure the CLOUDFLARE_D1_DATABASE_ID secret is set in repo Settings → Secrets."
             exit 1
           fi
+          echo "✓ database_id injected into apps/web/wrangler.toml"
+          
+          if [ -z "$KV_NAMESPACE_ID" ]; then
+            echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
+            exit 1
+          fi
+          sed -i "s|REPLACE_WITH_KV_NAMESPACE_ID|${KV_NAMESPACE_ID}|" apps/web/wrangler.toml
+          if grep -q "REPLACE_WITH_KV_NAMESPACE_ID" apps/web/wrangler.toml; then
+            echo "::error::Failed to replace KV namespace_id placeholder"
+            exit 1
+          fi
+          echo "✓ KV namespace_id injected into apps/web/wrangler.toml"
 
   typecheck:
     name: TypeScript
@@ -270,6 +283,7 @@ jobs:
       - name: Inject D1 database_id
         env:
           D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          KV_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_KV_NAMESPACE_ID }}
         run: |
           if [ -z "$D1_DATABASE_ID" ]; then
             echo "::error::CLOUDFLARE_D1_DATABASE_ID secret is empty or not set."
@@ -277,6 +291,13 @@ jobs:
           fi
           sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/worker/wrangler.toml apps/web/wrangler.toml
           echo "✓ database_id injected into apps/worker and apps/web wrangler.toml"
+
+          if [ -z "$KV_NAMESPACE_ID" ]; then
+            echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
+            exit 1
+          fi
+          sed -i "s|REPLACE_WITH_KV_NAMESPACE_ID|${KV_NAMESPACE_ID}|" apps/web/wrangler.toml
+          echo "✓ KV namespace_id injected into apps/web/wrangler.toml"
           
       # Build for Cloudflare Workers via OpenNext — outputs to .open-next/
       - name: Build web app
@@ -370,6 +391,7 @@ jobs:
       - name: Inject D1 database_id
         env:
           D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          KV_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_KV_NAMESPACE_ID }}
         run: |
           if [ -z "$D1_DATABASE_ID" ]; then
             echo "::error::CLOUDFLARE_D1_DATABASE_ID secret is empty or not set."
@@ -377,6 +399,13 @@ jobs:
           fi
           sed -i "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" apps/worker/wrangler.toml apps/web/wrangler.toml
           echo "✓ database_id injected into apps/worker and apps/web wrangler.toml"
+
+          if [ -z "$KV_NAMESPACE_ID" ]; then
+            echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
+            exit 1
+          fi
+          sed -i "s|REPLACE_WITH_KV_NAMESPACE_ID|${KV_NAMESPACE_ID}|" apps/web/wrangler.toml
+          echo "✓ KV namespace_id injected into apps/web/wrangler.toml"
       
       - name: Build web app
         run: pnpm --filter web run build:cf
@@ -500,6 +529,7 @@ jobs:
       - name: Inject D1 database ID
         env:
           D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          KV_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_KV_NAMESPACE_ID }}
         run: |
           if [ -z "$D1_DATABASE_ID" ]; then
             echo "::error::CLOUDFLARE_D1_DATABASE_ID secret is not set"
@@ -511,7 +541,14 @@ jobs:
             exit 1
           fi
           echo "✓ database_id injected into apps/web/wrangler.toml"
-
+          
+          if [ -z "$KV_NAMESPACE_ID" ]; then
+            echo "::error::CLOUDFLARE_KV_NAMESPACE_ID secret is not set"
+            exit 1
+          fi
+          sed -i "s|REPLACE_WITH_KV_NAMESPACE_ID|${KV_NAMESPACE_ID}|" apps/web/wrangler.toml
+          echo "✓ KV namespace_id injected into apps/web/wrangler.toml"
+          
       - name: Build web app
         run: pnpm --filter web run build:cf
         env:

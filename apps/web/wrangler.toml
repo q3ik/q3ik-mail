@@ -20,6 +20,10 @@ database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
 binding = "EMAIL_BODIES"
 bucket_name = "q3ik-mail-bodies"
 
+[[kv_namespaces]]
+binding = "NEXT_INC_CACHE_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
 [vars]
 # Runtime secrets are set via `wrangler secret put <NAME>`:
 #   RESEND_API_KEY
