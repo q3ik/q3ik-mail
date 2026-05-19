@@ -29,6 +29,7 @@ type = "ratelimit"
 namespace_id = "1"
 simple = { limit = 60, period = 60 }
 
+# Sentry logs/traces integration
 [observability]
 enabled = true
 
@@ -36,13 +37,13 @@ enabled = true
 enabled = true
 # Destination name must match the one configured in the CF dashboard
 # (Workers & Pages > Observability > Destinations)
-destinations = ["sentry-traces"]
+destinations = ["sentry-traces-worker"]
 
 [observability.logs]
 enabled = true
 invocation_logs = true
 # Destination name must match the one configured in the CF dashboard
-destinations = ["sentry-logs"]
+destinations = ["sentry-logs-worker"]
 
 [vars]
 ENVIRONMENT = "production"
