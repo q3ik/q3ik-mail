@@ -16,10 +16,16 @@ const sentryIngestDomain = 'https://*.ingest.us.sentry.io';
  * - img-src restricts tracker pixels in the *parent* page context.
  * - frame-src 'none' is safe because email iframes use srcDoc (not src).
  * - unsafe-inline for style-src is required for Tailwind and email body CSS.
+ *
+ * NOTE: 'unsafe-inline' is required for script-src because Next.js App Router
+ * injects inline <script> tags for RSC flight data (self.__next_f.push(...)).
+ * Without it the browser blocks those scripts and hydration fails silently,
+ * triggering the global error boundary. A nonce-based CSP is the ideal
+ * replacement — see https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy
  */
 const cspHeader = [
   "default-src 'self'",
-  `script-src 'self'${isDev ? " 'unsafe-eval'" : ''}`,
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: cid:",
   "font-src 'self'",
