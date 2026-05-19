@@ -22,4 +22,6 @@ bucket_name = "q3ik-mail-bodies"
 
 [vars]
 # RESEND_API_KEY is set via: wrangler secret put RESEND_API_KEY
-# THREAD_LIST_CURSOR_SECRET is set via: wrangler secret put THREAD_LIST_CURSOR_SECRET
+# In production the real secret (set via `wrangler secret put`) overrides this
+# dev/CI fallback. The value here only applies to local `wrangler dev` and CI.
+THREAD_LIST_CURSOR_SECRET = "dev-cursor-secret"
