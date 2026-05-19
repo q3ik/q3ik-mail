@@ -24,6 +24,19 @@ bucket_name = "q3ik-mail-bodies"
 binding = "NEXT_INC_CACHE_KV"
 id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
+# Sentry log/trace integration
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true
+destinations = ["sentry-traces"]
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+destinations = ["sentry-logs"]
+
 [vars]
 # Runtime secrets are set via `wrangler secret put <NAME>`:
 #   RESEND_API_KEY
