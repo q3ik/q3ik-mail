@@ -538,7 +538,7 @@ jobs:
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_WEB }}
           
       - name: Deploy web app
-        run: npx wrangler deploy
+        run: pnpm exec wrangler deploy
         working-directory: apps/web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
