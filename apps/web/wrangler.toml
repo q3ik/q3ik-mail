@@ -21,7 +21,11 @@ binding = "EMAIL_BODIES"
 bucket_name = "q3ik-mail-bodies"
 
 [vars]
-# RESEND_API_KEY is set via: wrangler secret put RESEND_API_KEY
-# In production the real secret (set via `wrangler secret put`) overrides this
-# dev/CI fallback. The value here only applies to local `wrangler dev` and CI.
-THREAD_LIST_CURSOR_SECRET = "dev-cursor-secret"
+# Runtime secrets are set via `wrangler secret put <NAME>`:
+#   RESEND_API_KEY
+#   THREAD_LIST_CURSOR_SECRET
+#   CLOUDFLARE_ACCESS_AUD
+#   CLOUDFLARE_TEAM_DOMAIN
+#   SENTRY_DSN
+#
+# For local dev, copy .dev.vars.example to .dev.vars and fill in values.
