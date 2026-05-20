@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PlusIcon, BellIcon, SearchIcon } from 'lucide-react';
+import Link from 'next/link';
 import { MailList } from './mail-list';
 import { MailDisplay } from './mail-display';
 import { ComposeDialog, type ComposePayload } from './compose-dialog';
@@ -202,12 +203,12 @@ export function Mail({
       {/* ── Top Navigation Bar ── */}
       <div className="flex items-center justify-between border-b border-border bg-background px-6 h-[52px] shrink-0">
         <div className="flex items-center gap-4">
-          <a href="/" className="flex items-center gap-2.5">
+          <Link href="/" className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#c084fc] to-[#f472b6] flex items-center justify-center font-mono font-bold text-xs text-white tracking-tight">
               q3
             </div>
             <span className="text-[15px] font-semibold tracking-tight">q3ik mail</span>
-          </a>
+          </Link>
           <nav className="flex gap-0.5 ml-2">
             <button className="px-3.5 py-1.5 rounded-lg text-[13px] font-medium bg-secondary text-foreground transition-colors">
               Inbox
