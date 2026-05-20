@@ -7,8 +7,8 @@ compatibility_flags = ["nodejs_compat"]
 # Cron Trigger: re-thread orphaned emails every 5 minutes.
 # Replaces the former /api/rethread HTTP endpoint (issue #31).
 # To test locally: npx wrangler dev --test-scheduled
-[triggers]
-crons = ["*/5 * * * *"]
+#[triggers]
+#crons = ["*/5 * * * *"]
 
 # The D1 database binding
 [[d1_databases]]
