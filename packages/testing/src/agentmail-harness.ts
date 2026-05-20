@@ -75,8 +75,10 @@ export class AgentMailClient {
     const allowStatuses = options?.allowStatuses ?? [];
     if (!res.ok && !allowStatuses.includes(res.status)) {
       const errorBody = await res.text();
+      const displayBody = errorBody.trim();
+      const truncatedBody = displayBody.length > 1000 ? displayBody.slice(0, 1000) + "..." : displayBody;
       throw new Error(
-        `AgentMail API error ${res.status} on ${path}: ${errorBody || 'no response body'}`
+        "AgentMail API error " + res.status + " on " + path + ": " + (truncatedBody || "no response body")
       );
     }
 
