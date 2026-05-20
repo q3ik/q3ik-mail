@@ -12,7 +12,7 @@ test.describe('Inbox', () => {
       if (msg.type() === 'error') errors.push(msg.text());
     });
     await page.goto('/');
-    await expect(page).toHaveTitle(/q3ik-mail/i);
+    await expect(page).toHaveTitle(/q3ik.mail/i);
     // Filter out known Sentry no-DSN warning emitted when SENTRY_DSN is not
     // configured in CI — these are not application errors.
     const realErrors = errors.filter(
@@ -36,14 +36,14 @@ test.describe('Inbox', () => {
 
   test('compose button opens dialog', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: /compose/i }).click();
+    await page.getByRole('button', { name: /new/i }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByLabel(/to/i)).toBeVisible();
   });
 
   test('compose dialog closes on cancel', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: /compose/i }).click();
+    await page.getByRole('button', { name: /new/i }).click();
     await page.getByRole('button', { name: /cancel/i }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
