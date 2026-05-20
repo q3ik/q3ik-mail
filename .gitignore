@@ -42,6 +42,7 @@ out/
 # Build artifacts
 dist/
 .vercel/
+.open-next/
 
 # Test results (generated, uploaded as CI artifacts)
 **/test-results/

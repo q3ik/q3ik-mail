@@ -121,6 +121,10 @@ function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unkn
   const dedupBindSpy = vi.fn().mockReturnValue({
     first: async () => existingResendId,
   });
+  // Spy for UPDATE queries (e.g., body_text_key/body_html_key updates)
+  const updateBindSpy = vi.fn().mockReturnValue({
+    run: async () => ({ success: true, meta: { changes: 1 } }),
+  });
   const prepareSpy = vi.fn().mockImplementation((sql: string) => {
     // Route SELECTs to silent non-spy stubs so bindSpy only sees INSERT calls.
     if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
@@ -133,6 +137,10 @@ function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unkn
       return {
         bind: () => ({ first: async () => selectFirstResult }),
       };
+    }
+    // Route UPDATEs (body key updates) to updateBindSpy
+    if (sql.trimStart().toUpperCase().startsWith('UPDATE')) {
+      return { bind: updateBindSpy };
     }
     return { bind: bindSpy };
   });
@@ -147,7 +155,7 @@ function makeThreadEnv(selectFirstResult: unknown = null, existingResendId: unkn
     EMAIL_BODIES: { put: putSpy },
     DB: { prepare: prepareSpy },
   } as unknown as import('../index').Env;
-  return { env, prepareSpy, bindSpy, dedupBindSpy, putSpy, rateLimitSpy };
+  return { env, prepareSpy, bindSpy, dedupBindSpy, putSpy, rateLimitSpy, updateBindSpy };
 }
 
 /**
@@ -210,6 +218,24 @@ function getInsertArgs(
 // ---------------------------------------------------------------------------
 
 describe('webhook handler', () => {
+  it('warns when Sentry is not initialized in the worker runtime', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const sentryState = globalThis as typeof globalThis & { __sentryInitialized?: boolean };
+    const originalSentryInitialized = sentryState.__sentryInitialized;
+    delete sentryState.__sentryInitialized;
+    try {
+      const req = new Request('https://worker.example.com/', { method: 'GET' });
+      const res = await fetchWorker(req);
+      expect(res.status).toBe(405);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[worker] Sentry is not initialised — exceptions will not be captured',
+      );
+    } finally {
+      sentryState.__sentryInitialized = originalSentryInitialized;
+      warnSpy.mockRestore();
+    }
+  });
+
   it('returns 405 for non-POST requests', async () => {
     const req = new Request('https://worker.example.com/', { method: 'GET' });
     const res = await fetchWorker(req);
@@ -291,7 +317,7 @@ describe('webhook handler', () => {
 
   it('stores text body in R2 and persists the `body_text_key` in D1', async () => {
     const { Resend } = await import('resend');
-    const { env, prepareSpy, bindSpy, putSpy } = makeThreadEnv();
+    const { env, prepareSpy, bindSpy, putSpy, updateBindSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -301,9 +327,6 @@ describe('webhook handler', () => {
             to: ['you@q3ik.com'],
             subject: 'Body Mapping',
             text: 'Plain text from text field',
-            // A `body_text` key in the payload must NOT reach D1 body_text;
-            // the worker must always read from `text`, never from `body_text`.
-            body_text: 'legacy field should be ignored',
             html: null,
             headers: [{ name: 'Message-ID', value: '<body-map@example.com>' }],
           }),
@@ -318,21 +341,28 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
-    expect(values[columns.indexOf('body_text')]).toBeNull();
-    const bodyTextKey = values[columns.indexOf('body_text_key')];
-    expect(bodyTextKey).toMatch(/^emails\/.+\/body\.txt$/);
+    // Issue H1 fix: body_text is now stored in D1 for FTS5 searchability
+    expect(values[columns.indexOf('body_text')]).toBe('Plain text from text field');
+    expect(values[columns.indexOf('body_text_key')]).toBeNull();
+
+    // R2 put should happen
     expect(putSpy).toHaveBeenCalledWith(
-      bodyTextKey,
+      expect.any(String),
       'Plain text from text field',
       expect.objectContaining({
         httpMetadata: { contentType: 'text/plain; charset=utf-8' },
       })
     );
+    // Verify UPDATE was called with the body key
+    expect(updateBindSpy).toHaveBeenCalled();
+    const updateCall = updateBindSpy.mock.calls[0];
+    expect(updateCall[0]).toMatch(/^emails\/.+\/body\.txt$/); // body_text_key
+    expect(updateCall[1]).toBeNull(); // body_html_key (not provided)
   });
 
   it('accepts HTML-only email where `text` key is absent (no 502)', async () => {
     const { Resend } = await import('resend');
-    const { env, prepareSpy, bindSpy, putSpy } = makeThreadEnv();
+    const { env, prepareSpy, bindSpy, putSpy, updateBindSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -357,18 +387,25 @@ describe('webhook handler', () => {
     expect(res.status).toBe(200);
 
     const { columns, values } = getInsertArgs(prepareSpy, bindSpy);
-    expect(values[columns.indexOf('body_text')]).toBeNull();
-    expect(values[columns.indexOf('body_html')]).toBeNull();
+    // Issue H1 fix: body content is stored in D1 for FTS5 searchability
+    expect(values[columns.indexOf('body_text')]).toBeNull(); // text not provided
+    expect(values[columns.indexOf('body_html')]).toBe('<p>HTML body</p>'); // HTML is stored
     expect(values[columns.indexOf('body_text_key')]).toBeNull();
-    const bodyHtmlKey = values[columns.indexOf('body_html_key')];
-    expect(bodyHtmlKey).toMatch(/^emails\/.+\/body\.html$/);
+    expect(values[columns.indexOf('body_html_key')]).toBeNull();
+
+    // R2 put should happen
     expect(putSpy).toHaveBeenCalledWith(
-      bodyHtmlKey,
+      expect.any(String),
       '<p>HTML body</p>',
       expect.objectContaining({
         httpMetadata: { contentType: 'text/html; charset=utf-8' },
       })
     );
+    // Verify UPDATE was called with the body key
+    expect(updateBindSpy).toHaveBeenCalled();
+    const updateCall = updateBindSpy.mock.calls[0];
+    expect(updateCall[0]).toBeNull(); // body_text_key (not provided)
+    expect(updateCall[1]).toMatch(/^emails\/.+\/body\.html$/); // body_html_key
   });
 
   it('returns 502 when Resend payload has a non-string, non-null `text` field', async () => {
@@ -516,7 +553,7 @@ describe('webhook handler', () => {
 
   it('persists attachment metadata rows in D1 after storing attachments in R2', async () => {
     const { Resend } = await import('resend');
-    const { env, bindSpy } = makeThreadEnv();
+    const { env, bindSpy, prepareSpy } = makeThreadEnv();
 
     (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       emails: {
@@ -568,6 +605,11 @@ describe('webhook handler', () => {
     expect(attachmentContentType).toBe('application/pdf');
     expect(attachmentSizeBytes).toBe(5);
     expect(typeof attachmentCreatedAt).toBe('number');
+    expect(
+      prepareSpy.mock.calls.some(
+        (call) => typeof call[0] === 'string' && call[0].includes('INSERT OR IGNORE INTO attachments')
+      )
+    ).toBe(true);
   });
 
   it('decodes standard, URL-safe, and unpadded base64 attachment content', async () => {
@@ -898,12 +940,13 @@ describe('webhook handler', () => {
   });
   it('returns 200 and performs no R2/D1 writes when a duplicate resend_id is received', async () => {
     // `existingResendId` causes the resend_id SELECT stub to return an existing
-    // row, simulating a duplicate delivery. `dedupBindSpy` captures what value
-    // was passed to .bind() on the dedup SELECT, proving the correct emailId
-    // is used — not undefined or a hardcoded value.
+    // row, simulating a duplicate delivery. body_text_key is non-null so the worker
+    // treats it as fully ingested and returns 200 without any R2/D1 writes.
+    // `dedupBindSpy` captures what value was passed to .bind() on the dedup SELECT,
+    // proving the correct emailId is used — not undefined or a hardcoded value.
     const { env, prepareSpy, bindSpy, dedupBindSpy, putSpy } = makeThreadEnv(
       null,
-      { id: 'existing-email-id' },
+      { id: 'existing-email-id', body_text_key: 'emails/existing-email-id/body.txt', body_html_key: null },
     );
 
     const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
@@ -937,6 +980,60 @@ describe('webhook handler', () => {
 
     // bindSpy (INSERT path) must not have been called — the early-exit fired.
     expect(bindSpy).not.toHaveBeenCalled();
+  });
+
+  it('completes R2 write and UPDATE on retry when existing row has null body keys (partial ingestion resume)', async () => {
+    // Simulate a prior attempt that inserted the D1 row but failed the R2 write.
+    // The dedup SELECT returns a row with null body keys, triggering resume mode.
+    const { Resend } = await import('resend');
+    const { env, prepareSpy, bindSpy, putSpy, updateBindSpy } = makeThreadEnv(
+      null,
+      { id: 'partial-email-id', body_text_key: null, body_html_key: null },
+    );
+
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            to: ['you@q3ik.com'],
+            subject: 'Resume Test',
+            text: 'Body to retry',
+            html: null,
+            headers: [],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
+    const res = await fetchWorker(req, env);
+
+    // Must return 200 OK after completing the R2 write.
+    expect(res.status).toBe(200);
+
+    // No INSERT should be prepared — we resume with the existing row.
+    const insertCall = (prepareSpy.mock.calls as unknown[][]).find(
+      (args) => (args[0] as string).includes('INSERT OR IGNORE INTO emails'),
+    );
+    expect(insertCall).toBeUndefined();
+    expect(bindSpy).not.toHaveBeenCalled();
+
+    // R2 put must have been called with the body content using the existing record's ID.
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^emails\/partial-email-id\/body\.txt$/),
+      'Body to retry',
+      expect.objectContaining({ httpMetadata: { contentType: 'text/plain; charset=utf-8' } }),
+    );
+
+    // UPDATE must have been called to set the body key on the existing row.
+    expect(updateBindSpy).toHaveBeenCalled();
+    const updateCall = updateBindSpy.mock.calls[0];
+    expect(updateCall[0]).toMatch(/^emails\/partial-email-id\/body\.txt$/); // body_text_key
+    expect(updateCall[1]).toBeNull(); // body_html_key (not provided)
+    expect(updateCall[2]).toBe('partial-email-id'); // WHERE id = existing record's ID
   });
 });
 
@@ -1155,6 +1252,29 @@ describe('threading', () => {
       'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
     });
     // Guard fires before DB — mockEnv is sufficient, no spy needed
+    const res = await worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when to address is missing', async () => {
+    const { Resend } = await import('resend');
+    (Resend as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      emails: {
+        receiving: {
+          get: vi.fn().mockResolvedValue({
+            from: 'Alice <alice@example.com>',
+            subject: 'No recipient',
+            text: 'Hi',
+            html: '<p>Hi</p>',
+            headers: [],
+          }),
+        },
+      },
+    }));
+
+    const req = makeRequest(JSON.stringify({ type: 'email.received' }), {
+      'svix-id': 'test', 'svix-timestamp': '123', 'svix-signature': 'sig',
+    });
     const res = await worker.fetch!(req as WorkerRequest, mockEnv, mockCtx);
     expect(res.status).toBe(400);
   });

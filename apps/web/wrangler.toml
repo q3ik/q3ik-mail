@@ -1,11 +1,16 @@
 #:schema node_modules/wrangler/config-schema.json
 name = "q3ik-mail"
+main = ".open-next/worker.js"
 compatibility_flags = ["nodejs_compat"]
-compatibility_date = "2024-09-23"
-pages_build_output_dir = ".vercel/output/static"
+compatibility_date = "2025-08-16"
+
+# Static assets produced by @opennextjs/cloudflare
+# The binding name MUST be "ASSETS" for the cache to work.
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
 
 # D1 database binding
-# Run `npx wrangler d1 create q3ik-mail-db` and replace the placeholder below
 [[d1_databases]]
 binding = "DB"
 database_name = "q3ik-mail-db"
@@ -15,5 +20,29 @@ database_id = "${CLOUDFLARE_D1_DATABASE_ID}"
 binding = "EMAIL_BODIES"
 bucket_name = "q3ik-mail-bodies"
 
+[[kv_namespaces]]
+binding = "NEXT_INC_CACHE_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Sentry log/trace integration
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true
+destinations = ["sentry-traces"]
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+destinations = ["sentry-logs"]
+
 [vars]
-# RESEND_API_KEY is set via: wrangler secret put RESEND_API_KEY
+# Runtime secrets are set via `wrangler secret put <NAME>`:
+#   RESEND_API_KEY
+#   THREAD_LIST_CURSOR_SECRET
+#   CLOUDFLARE_ACCESS_AUD
+#   CLOUDFLARE_TEAM_DOMAIN
+#   SENTRY_DSN
+#
+# For local dev, copy .dev.vars.example to .dev.vars and fill in values.

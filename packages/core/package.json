@@ -1,22 +1,18 @@
 {
-  "name": "@q3ik-mail/database",
+  "name": "@q3ik-mail/core",
   "version": "0.0.1",
   "private": true,
-  "main": "./index.ts",
-  "types": "./index.ts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
-    ".": "./index.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "dependencies": {
-    "@q3ik-mail/core": "workspace:*"
-  },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250508.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.3"
   }

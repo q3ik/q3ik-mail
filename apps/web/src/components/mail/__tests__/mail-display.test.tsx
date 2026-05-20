@@ -63,6 +63,20 @@ const makeEmail = (overrides: Partial<Email> = {}): Email => ({
   ...overrides,
 });
 
+async function sanitizeWithAppConfig(MailDisplay: React.ComponentType<{ thread: Email[] }>, html: string) {
+  render(<MailDisplay thread={[makeEmail({ body_html: html })]} />);
+  await waitFor(() => expect(mockSanitize).toHaveBeenCalled());
+
+  const [, options] = mockSanitize.mock.calls[0] as [string, Record<string, unknown>];
+  const { default: realDOMPurify } =
+    await vi.importActual<typeof import('isomorphic-dompurify')>('isomorphic-dompurify');
+
+  return {
+    options,
+    sanitized: realDOMPurify.sanitize(html, options),
+  };
+}
+
 // ---------------------------------------------------------------------------
 
 describe('MailDisplay — sanitization (C-1 fix)', () => {
@@ -103,13 +117,33 @@ describe('MailDisplay — sanitization (C-1 fix)', () => {
   });
 
   it('does NOT pass FORBID_ATTR containing "style" (regression for C-1)', async () => {
-    const email = makeEmail({ body_html: '<p style="margin:0">Hi</p>' });
-    render(<MailDisplay thread={[email]} />);
-
-    await waitFor(() => expect(mockSanitize).toHaveBeenCalled());
-    const [, options] = mockSanitize.mock.calls[0] as [string, Record<string, unknown>];
+    const { options, sanitized } = await sanitizeWithAppConfig(
+      MailDisplay,
+      '<p style="margin:0" onmouseover="alert(1)">Hi</p>',
+    );
     const forbidAttr = options['FORBID_ATTR'] as string[] | undefined;
+
     expect(forbidAttr ?? []).not.toContain('style');
+    expect(sanitized).toContain('style="margin:0"');
+    expect(sanitized).not.toContain('onmouseover');
+  });
+
+  it('strips onclick while preserving safe style rules with the configured sanitize options', async () => {
+    const html = '<table><tr><td style="color:red;padding:8px" onclick="alert(1)">Hi</td></tr></table>';
+    const { sanitized } = await sanitizeWithAppConfig(MailDisplay, html);
+
+    expect(sanitized).toContain('style="color:red;padding:8px"');
+    expect(sanitized).not.toContain('onclick');
+  });
+
+  it('strips script tags with the configured sanitize options', async () => {
+    const html = '<p>Hello</p><script>alert(1)</script>';
+    const { options, sanitized } = await sanitizeWithAppConfig(MailDisplay, html);
+    const forbidTags = options['FORBID_TAGS'] as string[] | undefined;
+    expect(forbidTags ?? []).toEqual(expect.arrayContaining(['script', 'object', 'embed', 'form']));
+
+    expect(sanitized).toContain('<p>Hello</p>');
+    expect(sanitized).not.toContain('<script');
   });
 
   it('registers the afterSanitizeAttributes hook exactly once across multiple email renders', async () => {

@@ -23,13 +23,14 @@ export interface Email {
   is_read: 0 | 1;         // SQLite boolean
   is_sent: 0 | 1;         // 0 = inbound, 1 = outbound
   needs_rethreading: 0 | 1; // 1 if thread_id couldn't be resolved at ingest
+  status: 'received' | 'pending_send' | 'sent' | 'send_failed';
   created_at: string;     // ISO 8601 datetime string
 }
 
 /**
  * Lightweight projection for inbox list views.
  * Omits body_html and body_text to reduce payload size.
- * Used by getLatestEmails() and list rendering in apps/web.
+ * Used by thread list query results in apps/web.
  */
 export type EmailSummary = Omit<Email, 'body_html' | 'body_text' | 'body_html_key' | 'body_text_key'>;
 

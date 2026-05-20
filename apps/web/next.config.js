@@ -3,6 +3,11 @@
 const isDev = process.env.NODE_ENV === 'development';
 
 /**
+ * Sentry ingest domain for the CSP connect-src directive.
+ */
+const sentryIngestDomain = 'https://*.ingest.us.sentry.io';
+
+/**
  * Content-Security-Policy for the q3ik-mail web app.
  *
  * Threat model:
@@ -11,14 +16,21 @@ const isDev = process.env.NODE_ENV === 'development';
  * - img-src restricts tracker pixels in the *parent* page context.
  * - frame-src 'none' is safe because email iframes use srcDoc (not src).
  * - unsafe-inline for style-src is required for Tailwind and email body CSS.
+ *
+ * NOTE: 'unsafe-inline' is required for script-src because Next.js App Router
+ * injects inline <script> tags for RSC flight data (self.__next_f.push(...)).
+ * Without it the browser blocks those scripts and hydration fails silently,
+ * triggering the global error boundary. A nonce-based CSP is the ideal
+ * replacement — see https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy
  */
 const cspHeader = [
   "default-src 'self'",
-  `script-src 'self'${isDev ? " 'unsafe-eval'" : ''}`,
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: cid:",
   "font-src 'self'",
-  "connect-src 'self'",
+  `connect-src 'self' ${sentryIngestDomain}`,
+  "worker-src 'self' blob:",
   "frame-src 'none'",
   "object-src 'none'",
   "base-uri 'self'",
@@ -48,10 +60,20 @@ const nextConfig = {
 
 if (isDev) {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { setupDevPlatform } = require('@cloudflare/next-on-pages/next-dev');
-  (async () => {
-    await setupDevPlatform();
-  })();
+  const { initOpenNextCloudflareForDev } = require('@opennextjs/cloudflare');
+  initOpenNextCloudflareForDev();
 }
 
+/**
+ * `withSentryConfig` is not used here.
+ *
+ * Sentry works without it via the instrumentation hooks:
+ *   - Server-side: `src/instrumentation.ts` calls `Sentry.init()`
+ *   - Client-side: `instrumentation-client.ts` calls `Sentry.init()`
+ *   - Error helpers: `src/lib/sentry.ts` uses `@sentry/nextjs` directly
+ *   - CSP above allows `connect-src` to Sentry's ingest domain
+ *
+ * Source-map uploads can be added later via `sentry-cli` in CI once
+ * SENTRY_AUTH_TOKEN is configured, or by adding `withSentryConfig` here.
+ */
 module.exports = nextConfig;

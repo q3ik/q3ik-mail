@@ -2,14 +2,22 @@
 
 # ---- CLOUDFLARE ---- #
 CLOUDFLARE_TEAM_DOMAIN=your-team.cloudflareaccess.com
-CLOUDFLARE_ACCESS_AUD=your-aud-value
+CLOUDFLARE_ACCESS_AUD=your-access-app-audience-tag
 CLOUDFLARE_D1_DATABASE_ID=xxxxxxxxxxxxxxxxxx
 
 # ---- RESEND ---- #
 RESEND_API_KEY=re_xxxxxxxxx
-RESEND_WEBHOOK_SECRET=wxxxxxxxxx
+RESEND_WEBHOOK_SECRET=whsec_xxxxxxxxx
 
 # ---- SENTRY ---- #
-# (server/edge — not exposed to browser)
+
+SENTRY_TRACES_SAMPLE_RATE=1
+
+# ---- OPTIONAL ---- #
+# Optional - Sentry server/edge — not exposed to browser
 SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
 SENTRY_TRACES_SAMPLE_RATE=1
+
+# Optional - default overrides
+MAX_TOTAL_ATTACHMENT_BYTES=26214400
+MAX_SINGLE_ATTACHMENT_BYTES=20971520

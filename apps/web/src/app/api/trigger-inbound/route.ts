@@ -1,7 +1,7 @@
-import { getRequestContext } from '@cloudflare/next-on-pages';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
+import { ingestInboundEmail } from '@q3ik-mail/database';
 import { z } from 'zod';
 
-export const runtime = 'edge';
 
 const TriggerInboundSchema = z.object({
   from: z.string().trim().min(1),
@@ -27,13 +27,9 @@ function parseFrom(raw: string): { name: string | null; address: string } {
   return { name: null, address: raw.trim() };
 }
 
-// SCHEMA DRIFT RISK: ingestInboundEmail duplicates the INSERT logic from the real
-// inbound webhook handler. Any column added or renamed in the `emails` table must
-// be applied here too, or Scenario A will silently insert incomplete rows.
-// Follow-up: extract this into a shared src/lib/ingest-inbound.ts utility once
-// the real handler's INSERT is stable enough to factor out.
-async function ingestInboundEmail(
+async function ingestSyntheticInboundEmail(
   db: D1Database,
+  r2Bucket: R2Bucket | null,
   payload: { from: string; to: string; subject: string; text: string }
 ): Promise<void> {
   const resendId = `trigger-${crypto.randomUUID()}`;
@@ -43,27 +39,25 @@ async function ingestInboundEmail(
   const messageId = `<${crypto.randomUUID()}@q3ik-mail.test>`;
   const { name: fromName, address: fromAddress } = parseFrom(payload.from);
 
-  await db.prepare(`
-    INSERT OR IGNORE INTO emails
-      (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
-    VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
-  `)
-    .bind(
-      crypto.randomUUID(),
-      resendId,
-      threadId,
-      fromAddress,
-      fromName,
-      payload.to,
-      payload.subject,
-      payload.text,
-      null,
-      messageId,
-      null,
-      null
-    )
-    .run();
+  await ingestInboundEmail({
+    db,
+    r2Bucket,
+    id: crypto.randomUUID(),
+    resendId,
+    threadId,
+    fromAddress,
+    fromName,
+    toAddress: payload.to,
+    subject: payload.subject,
+    bodyText: payload.text,
+    bodyHtml: null,
+    messageId,
+    inReplyTo: null,
+    references: null,
+    isRead: 0,
+    isSent: 0,
+    needsRethreading: 0,
+  });
 }
 
 /**
@@ -131,9 +125,10 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Invalid from address' }, { status: 400 });
   }
 
-  const { env } = getRequestContext();
+  const { env } = await getCloudflareContext({ async: true });
   try {
-    await ingestInboundEmail(env.DB, parsed.data);
+    const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
+    await ingestSyntheticInboundEmail(env.DB, r2Bucket, parsed.data);
     return Response.json({ ok: true }, { status: 200 });
   } catch (error) {
     console.error('[api/trigger-inbound] Failed to persist synthetic inbound email:', error);

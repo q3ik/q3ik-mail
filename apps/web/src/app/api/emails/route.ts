@@ -1,7 +1,6 @@
-import { getRequestContext } from '@cloudflare/next-on-pages';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { getThreadListPage } from '@q3ik-mail/database';
 
-export const runtime = 'edge';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -18,10 +17,11 @@ export async function GET(req: Request) {
       : DEFAULT_LIMIT;
 
   const cursor = searchParams.get('cursor') ?? undefined;
-  const { env } = getRequestContext();
+  const { env } = await getCloudflareContext({ async: true });
+  const cursorSecret = env.THREAD_LIST_CURSOR_SECRET;
 
   try {
-    return Response.json(await getThreadListPage(env.DB, { limit, cursor }));
+    return Response.json(await getThreadListPage(env.DB, { limit, cursor, cursorSecret }));
   } catch (error) {
     console.error('[api/emails] failed to load emails:', error);
     return Response.json({ error: 'Failed to load emails' }, { status: 500 });

@@ -11,7 +11,6 @@ compatibility_flags = ["nodejs_compat"]
 crons = ["*/5 * * * *"]
 
 # The D1 database binding
-# Run `npx wrangler d1 create q3ik-mail-db` and replace the placeholder below
 [[d1_databases]]
 binding = "DB"
 database_name = "q3ik-mail-db"
@@ -29,6 +28,21 @@ name = "WEBHOOK_RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1"
 simple = { limit = 60, period = 60 }
+
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true
+# Destination name must match the one configured in the CF dashboard
+# (Workers & Pages > Observability > Destinations)
+destinations = ["sentry-traces"]
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+# Destination name must match the one configured in the CF dashboard
+destinations = ["sentry-logs"]
 
 [vars]
 ENVIRONMENT = "production"

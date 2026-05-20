@@ -2,15 +2,14 @@
 
 # ---- AUTH ---- #
 AUTH_SECRET=your-value
+THREAD_LIST_CURSOR_SECRET=a-long-random-secret
 
 # ---- RESEND ---- #
 RESEND_API_KEY=re_xxxxxxxxx
-RESEND_WEBHOOK_SECRET=wxxxxxxxxx
 
 # ---- CLOUDFLARE ---- #
 CLOUDFLARE_TEAM_DOMAIN=your-team.cloudflareaccess.com
-CLOUDFLARE_ACCESS_AUD=your-aud-value
-CLOUDFLARE_D1_DATABASE_ID=xxxxxxxxxxxxxxxxxx
+CLOUDFLARE_ACCESS_AUD=your-access-app-audience-tag
 
 # ---- SENTRY ---- #
 # (server/edge — not exposed to browser)
@@ -18,6 +17,11 @@ SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
 SENTRY_TRACES_SAMPLE_RATE=1
 
 # ---- SENTRY ---- #
-# (client — NEXT_PUBLIC_ prefix required for browser exposure)
+SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
+# Client — NEXT_PUBLIC_ prefix required for browser exposure
 NEXT_PUBLIC_SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
 NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=1
+
+# ---- OPTIONAL ---- #
+# Only used by /api/trigger-inbound in non-production environments
+E2E_TEST_SECRET=a-random-secret-for-e2e-tests-only

@@ -1,167 +1,12 @@
-import * as Sentry from '@sentry/cloudflare';
+import { withSentry } from '@sentry/cloudflare';
+import { captureException, captureMessage, addBreadcrumb } from './lib/sentry';
 import { Webhook } from 'svix';
 import { Resend } from 'resend';
-import { resolveOrphanedThreads } from '@q3ik-mail/database';
-import { parseFrom } from './utils/parseFrom';
+import { ingestInboundEmail, resolveOrphanedThreads } from '@q3ik-mail/database';
+import { resolveThreadId } from '@q3ik-mail/core';
+import { parseResendReceivedEmail, normalizeResendWebhook } from './adapters/resend';
+import type { ResendReceivedAttachment } from './adapters/resend';
 import { validateCfAccessJwt } from './middleware/cfAccess';
-
-// Shape of the Resend Receiving API response (resend v4 types omit this endpoint).
-// Field names verified against https://resend.com/docs/api-reference/webhooks/email-received
-// When Resend ships official types, replace this interface with the proper SDK import.
-interface ResendReceivedEmail {
-  from?: string;
-  // Resend may return a single address string or an array; normalise downstream.
-  to?: string | string[];
-  subject?: string;
-  // `text` is nullable but not guaranteed present on every event (HTML-only senders
-  // may omit the key entirely). Treat as optional; normalise to null downstream.
-  text?: string | null;
-  html?: string | null;
-  attachments?: ResendReceivedAttachment[];
-  headers?: Array<{ name: string; value: string }>;
-}
-
-interface ResendReceivedAttachment {
-  id?: string;
-  filename?: string;
-  content?: string;
-  content_type?: string;
-  contentType?: string;
-  url?: string;
-  size?: number;
-  content_length?: number;
-}
-
-/**
- * Validates and narrows an unknown Resend receiving-API payload to
- * `ResendReceivedEmail`. Returns `null` plus the name of the offending field
- * when validation fails so callers can emit a diagnostic log entry.
- *
- * Key invariants:
- * - Only `object` payloads are accepted.
- * - `text` is optional (HTML-only emails may omit the key), but when present
- *   it must be `string | null`. Do NOT require its presence — that would cause
- *   a 502 for every HTML-only inbound message.
- * - All other fields are individually optional and type-checked when present.
- * - Inner collection types (headers array) use `Record<string, unknown>` to
- *   preserve exhaustiveness checking as the interface evolves.
- */
-function parseResendReceivedEmail(
-  payload: unknown,
-): { ok: true; email: ResendReceivedEmail } | { ok: false; field: string } {
-  if (!payload || typeof payload !== 'object') {
-    return { ok: false, field: '(root)' };
-  }
-
-  // Use `unknown` (not `any`) so the compiler enforces explicit narrowing on
-  // every property access and exhaustiveness checks remain intact.
-  const email = payload as Record<string, unknown>;
-
-  // `text` — optional; when present must be string | null
-  if ('text' in email && email.text !== null && typeof email.text !== 'string') {
-    return { ok: false, field: 'text' };
-  }
-
-  if (email.from !== undefined && typeof email.from !== 'string') {
-    return { ok: false, field: 'from' };
-  }
-
-  if (
-    email.to !== undefined &&
-    typeof email.to !== 'string' &&
-    !(
-      Array.isArray(email.to) &&
-      (email.to as unknown[]).every((item) => typeof item === 'string')
-    )
-  ) {
-    return { ok: false, field: 'to' };
-  }
-
-  if (email.subject !== undefined && typeof email.subject !== 'string') {
-    return { ok: false, field: 'subject' };
-  }
-
-  if (email.html !== undefined && email.html !== null && typeof email.html !== 'string') {
-    return { ok: false, field: 'html' };
-  }
-
-  if (email.headers !== undefined) {
-    if (!Array.isArray(email.headers)) {
-      return { ok: false, field: 'headers' };
-    }
-    for (const header of email.headers as unknown[]) {
-      if (!header || typeof header !== 'object') {
-        return { ok: false, field: 'headers[*]' };
-      }
-      const h = header as Record<string, unknown>;
-      if (typeof h.name !== 'string' || typeof h.value !== 'string') {
-        return { ok: false, field: 'headers[*].name/value' };
-      }
-    }
-  }
-
-  if (email.attachments !== undefined) {
-    if (!Array.isArray(email.attachments)) {
-      return { ok: false, field: 'attachments' };
-    }
-    for (const attachment of email.attachments as unknown[]) {
-      if (!attachment || typeof attachment !== 'object') {
-        return { ok: false, field: 'attachments[*]' };
-      }
-      const a = attachment as Record<string, unknown>;
-      if (a.id !== undefined && typeof a.id !== 'string') {
-        return { ok: false, field: 'attachments[*].id' };
-      }
-      if (a.filename !== undefined && typeof a.filename !== 'string') {
-        return { ok: false, field: 'attachments[*].filename' };
-      }
-      if (a.content !== undefined && typeof a.content !== 'string') {
-        return { ok: false, field: 'attachments[*].content' };
-      }
-      if (a.content_type !== undefined && typeof a.content_type !== 'string') {
-        return { ok: false, field: 'attachments[*].content_type' };
-      }
-      if (a.contentType !== undefined && typeof a.contentType !== 'string') {
-        return { ok: false, field: 'attachments[*].contentType' };
-      }
-      if (a.url !== undefined && typeof a.url !== 'string') {
-        return { ok: false, field: 'attachments[*].url' };
-      }
-      if (a.size !== undefined && typeof a.size !== 'number') {
-        return { ok: false, field: 'attachments[*].size' };
-      }
-      if (a.content_length !== undefined && typeof a.content_length !== 'number') {
-        return { ok: false, field: 'attachments[*].content_length' };
-      }
-    }
-  }
-
-  return {
-    ok: true,
-    email: {
-      from: typeof email.from === 'string' ? email.from : undefined,
-      to:
-        typeof email.to === 'string' || Array.isArray(email.to)
-          ? (email.to as string | string[])
-          : undefined,
-      subject: typeof email.subject === 'string' ? email.subject : undefined,
-      text:
-        typeof email.text === 'string' || email.text === null
-          ? (email.text as string | null)
-          : undefined,
-      html:
-        typeof email.html === 'string' || email.html === null
-          ? (email.html as string | null)
-          : undefined,
-      headers: Array.isArray(email.headers)
-        ? (email.headers as Array<{ name: string; value: string }>)
-        : undefined,
-      attachments: Array.isArray(email.attachments)
-        ? (email.attachments as ResendReceivedAttachment[])
-        : undefined,
-    },
-  };
-}
 
 function getBodyHtmlKey(emailInternalId: string): string {
   return `emails/${emailInternalId}/body.html`;
@@ -356,29 +201,34 @@ export interface Env {
  */
 function captureR2PutError(
   err: unknown,
-  env: Env,
   ctx: { emailId: string; operation: string; objectKey: string | null },
 ): void {
   console.warn(
-    `[worker] failed to persist ${ctx.operation} to R2; proceeding with null key`,
+    `[worker] failed to persist ${ctx.operation} to R2`,
     { emailId: ctx.emailId, err },
   );
-  if (env.SENTRY_DSN) {
-    Sentry.captureException(err, {
-      tags: {
-        layer: 'worker',
-        operation: `r2.put.${ctx.operation}`,
-        storage_provider: 'r2',
-        ...(ctx.objectKey ? { r2_object_key: ctx.objectKey } : {}),
-      },
-      extra: { emailId: ctx.emailId },
-    });
-  }
+  captureException(err, {
+    tags: {
+      layer: 'worker',
+      operation: `r2.put.${ctx.operation}`,
+      storage_provider: 'r2',
+      ...(ctx.objectKey ? { r2_object_key: ctx.objectKey } : {}),
+    },
+    extra: { emailId: ctx.emailId },
+  });
 }
 
 // Issue 1 fix: TextEncoder is stateless; hoist to module scope to avoid
 // re-allocating it on every webhook invocation that processes attachments.
 const textEncoder = new TextEncoder();
+let hasWarnedMissingSentry = false;
+
+function warnIfSentryUnavailable(): void {
+  const sentryState = globalThis as typeof globalThis & { __sentryInitialized?: boolean };
+  if (sentryState.__sentryInitialized || hasWarnedMissingSentry) return;
+  hasWarnedMissingSentry = true;
+  console.warn('[worker] Sentry is not initialised — exceptions will not be captured');
+}
 
 const handler: ExportedHandler<Env> = {
   // --------------------------------------------------------------------------
@@ -387,25 +237,22 @@ const handler: ExportedHandler<Env> = {
   // Runs every 5 minutes; resolves emails flagged with needs_rethreading=1.
   // --------------------------------------------------------------------------
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    warnIfSentryUnavailable();
     ctx.waitUntil(
       resolveOrphanedThreads(env.DB)
         .then((resolved) => {
-          if (env.SENTRY_DSN) {
-            Sentry.addBreadcrumb({
-              category: 'cron.rethread',
-              level: 'info',
-              message: '[cron/rethread] resolveOrphanedThreads completed',
-              data: { resolvedCount: resolved },
-            });
-          }
+          addBreadcrumb({
+            category: 'cron.rethread',
+            level: 'info',
+            message: '[cron/rethread] resolveOrphanedThreads completed',
+            data: { resolvedCount: resolved },
+          });
         })
         .catch((err) => {
           console.error('[cron/rethread] resolveOrphanedThreads failed:', err);
-          if (env.SENTRY_DSN) {
-            Sentry.captureException(err, {
-              tags: { layer: 'worker', operation: 'cron.rethread' },
-            });
-          }
+          captureException(err, {
+            tags: { layer: 'worker', operation: 'cron.rethread' },
+          });
         })
     );
   },
@@ -414,6 +261,7 @@ const handler: ExportedHandler<Env> = {
   // Fetch handler: inbound email webhook from Resend
   // --------------------------------------------------------------------------
   async fetch(request: Request, env: Env): Promise<Response> {
+    warnIfSentryUnavailable();
     // Only accept POST requests
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });
@@ -426,6 +274,11 @@ const handler: ExportedHandler<Env> = {
     const accessResult = await validateCfAccessJwt(request, env);
     if (!accessResult.ok) {
       console.error('[worker] Cloudflare Access validation failed: ' + accessResult.error);
+      captureMessage('Cloudflare Access validation failed', {
+        level: 'warning',
+        tags: { layer: 'worker', operation: 'cf_access.validate' },
+        extra: { error: accessResult.error },
+      });
       return new Response('Unauthorized', { status: 401 });
     }
 
@@ -457,12 +310,15 @@ const handler: ExportedHandler<Env> = {
     const rawBody = await request.text();
 
     // --- Step 1: Verify webhook signature via svix directly ---
+    // Capture the svix-timestamp header before verification so we can pass it
+    // to normalizeResendWebhook as the authoritative receivedAt value.
+    const svixTimestamp = request.headers.get('svix-timestamp') ?? '';
     let event: { type: string; data: { email_id: string } };
     try {
       const wh = new Webhook(env.RESEND_WEBHOOK_SECRET);
       event = wh.verify(rawBody, {
         'svix-id': request.headers.get('svix-id') ?? '',
-        'svix-timestamp': request.headers.get('svix-timestamp') ?? '',
+        'svix-timestamp': svixTimestamp,
         'svix-signature': request.headers.get('svix-signature') ?? '',
       }) as { type: string; data: { email_id: string } };
     } catch {
@@ -501,11 +357,21 @@ const handler: ExportedHandler<Env> = {
     // pass this SELECT will both attempt the INSERT — the DB constraint ensures
     // exactly one succeeds and the other is silently discarded.
     const existing = await env.DB.prepare(
-      'SELECT id FROM emails WHERE resend_id = ? LIMIT 1'
-    ).bind(emailId).first();
+      'SELECT id, body_text_key, body_html_key FROM emails WHERE resend_id = ? LIMIT 1'
+    ).bind(emailId).first<{ id: string; body_text_key: string | null; body_html_key: string | null }>();
 
+    let resumeExistingId: string | null = null;
     if (existing) {
-      return new Response('Already ingested', { status: 200 });
+      // Fully ingested: either R2 is not bound (bodies never go to R2), or at least one
+      // body key was already written. Return 200 to suppress any further Resend retries.
+      const bodyAlreadyWritten = existing.body_text_key != null || existing.body_html_key != null;
+      if (!env.EMAIL_BODIES || bodyAlreadyWritten) {
+        return new Response('Already ingested', { status: 200 });
+      }
+      // Partial ingestion detected: the D1 row exists but the body R2 write failed on a
+      // prior attempt (worker returned 503). Fall through to complete the R2 write and
+      // UPDATE using the existing record's ID, so the retry finishes the ingestion.
+      resumeExistingId = existing.id;
     }
 
     const resend = new Resend(env.RESEND_API_KEY);
@@ -523,12 +389,10 @@ const handler: ExportedHandler<Env> = {
         }
       ).receiving.get(emailId);
     } catch (err) {
-      if (env.SENTRY_DSN) {
-        Sentry.captureException(err, {
-          tags: { layer: 'worker', operation: 'resend.receiving.get' },
-          extra: { emailId },
-        });
-      }
+      captureException(err, {
+        tags: { layer: 'worker', operation: 'resend.receiving.get' },
+        extra: { emailId },
+      });
       return new Response('Failed to fetch email payload', { status: 502 });
     }
 
@@ -542,116 +406,100 @@ const handler: ExportedHandler<Env> = {
         `[worker] Resend receiving API returned unexpected payload shape: field="${parseResult.field}"`,
         { emailId },
       );
+      captureMessage('Resend receiving API returned unexpected payload shape', {
+        level: 'error',
+        tags: { layer: 'worker', operation: 'resend.receiving.parse' },
+        extra: { emailId, field: parseResult.field },
+      });
       return new Response('Invalid email payload from upstream', { status: 502 });
     }
     const receivedEmail = parseResult.email;
 
-    // --- Step 4: Threading logic ---
-    // Parse headers array for In-Reply-To and Message-ID
-    const emailHeaders: Array<{ name: string; value: string }> = receivedEmail.headers ?? [];
-
-    const inReplyTo = emailHeaders.find(
-      (h) => h.name.toLowerCase() === 'in-reply-to'
-    )?.value ?? null;
-
-    const messageId = emailHeaders.find(
-      (h) => h.name.toLowerCase() === 'message-id'
-    )?.value ?? null;
-
-    const referencesHeader = (emailHeaders.find(
-      (h) => h.name.toLowerCase() === 'references'
-    )?.value ?? null)
-      // Normalise folded whitespace (CRLF + WSP) into single spaces so
-      // downstream consumers receive a clean space-separated Message-ID chain.
-      ?.replace(/\s+/g, ' ').trim() ?? null;
-
-    // Fix: Look up the parent email's thread_id from D1 using the In-Reply-To
-    // Message-ID. This ensures multi-level reply chains all share the same
-    // root thread_id, rather than each reply forking into its own thread.
-    //
-    // Strategy:
-    //   1. If inReplyTo is set, query emails WHERE message_id = inReplyTo
-    //   2. If a parent row is found, reuse its thread_id (may itself be a reply)
-    //   3. If no parent found (out-of-order delivery), use inReplyTo as thread_id
-    //      and flag for re-threading once the parent arrives
-    //   4. New messages (no inReplyTo) start a new thread keyed on messageId ?? emailId
-    let threadId: string;
-    let needsRethreading = 0;
-    if (inReplyTo) {
-      const parentRow = await env.DB
-        .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
-        .bind(inReplyTo)
-        .first<{ thread_id: string }>();
-      if (parentRow) {
-        // Parent found -- join existing thread
-        threadId = parentRow.thread_id;
-      } else {
-        // Parent not yet received -- use In-Reply-To value as thread_id for now
-        // and flag for re-threading once the parent arrives
-        threadId = inReplyTo;
-        needsRethreading = 1;
-        console.warn(`[threading] Parent not found for In-Reply-To: ${inReplyTo}. Flagged for re-threading.`);
-      }
-    } else {
-      // Root message -- start a new thread
-      threadId = messageId ?? emailId;
-    }
-
-    // --- Step 5: Parse from_name and from_address ---
-    // Resend returns from as "Display Name <email@example.com>" or just "email@example.com"
-    const { name: fromName, address: fromAddress } = parseFrom(receivedEmail.from ?? '');
+    // --- Step 4: Normalize the Resend payload into a provider-agnostic envelope
+    // and resolve the thread_id via a pure function. ---
+    const envelope = normalizeResendWebhook(receivedEmail, svixTimestamp);
 
     // Guard: a missing or unparseable from field must not silently write an empty
     // string into the NOT NULL from_address column -- reject the webhook instead.
-    if (!fromAddress) {
+    if (!envelope.fromAddress) {
       console.warn('[worker] Received email with missing or unparseable from address; rejecting.', { emailId });
+      captureMessage('Received email with missing or unparseable from address', {
+        level: 'warning',
+        tags: { layer: 'worker', operation: 'inbound.parse_from' },
+        extra: { emailId, rawFrom: receivedEmail.from },
+      });
       return new Response('Missing from address', { status: 400 });
     }
 
-    // Normalise `to` to a string regardless of whether the API returns a bare
-    // string or an array -- both branches are now handled explicitly.
-    const toRaw = receivedEmail.to;
-    const toAddress = Array.isArray(toRaw)
-      ? toRaw.join(', ')
-      : (typeof toRaw === 'string' ? toRaw : '');
+    if (!envelope.toAddress) {
+      console.warn('[worker] Missing or empty to_address; rejecting.', { emailId });
+      return new Response('Missing to address', { status: 400 });
+    }
 
-    const internalEmailId = crypto.randomUUID();
+    // Build parentLookup for thread resolution: query D1 only when inReplyTo is
+    // set, then delegate the threading decision to the pure resolveThreadId function.
+    const parentLookup = new Map<string, { thread_id: string }>();
+    if (envelope.inReplyTo) {
+      const parentRow = await env.DB
+        .prepare('SELECT thread_id FROM emails WHERE message_id = ? LIMIT 1')
+        .bind(envelope.inReplyTo)
+        .first<{ thread_id: string }>();
+      if (parentRow) {
+        parentLookup.set(envelope.inReplyTo, parentRow);
+      }
+    }
+
+    const { threadId, needsRethreading: rethreadNeeded } = resolveThreadId(
+      envelope,
+      parentLookup,
+      emailId,
+    );
+    const needsRethreading: 0 | 1 = rethreadNeeded ? 1 : 0;
+    if (rethreadNeeded) {
+      console.warn(`[threading] Parent not found for In-Reply-To: ${envelope.inReplyTo}. Flagged for re-threading.`);
+    }
+
+    const internalEmailId = resumeExistingId ?? crypto.randomUUID();
+
+    // --- Step 6: Collect body content for deferred R2 write ---
+    // Issue H2 fix: Body R2 writes are deferred until after D1 INSERT succeeds.
+    // This prevents orphaned R2 objects when D1 INSERT fails or gets dedup'd
+    // by a concurrent delivery. Body content is kept in memory until Step 8
+    // confirms the D1 row was inserted.
+    //
+    // Issue H1 fix (GitHub #126): Also store body content in D1 columns for FTS5 searchability.
+    const pendingBodyContent: Array<{ type: 'text' | 'html'; key: string; content: string; contentType: string }> = [];
+    let pendingBodyTextForD1: string | null = null;
+    let pendingBodyHtmlForD1: string | null = null;
+
     const r2Bucket = env.EMAIL_BODIES;
-
-    // --- Step 6: Store body content in R2 and persist key columns in D1 ---
-    // R2 write failures are NON-FATAL: we log+warn and proceed with null keys
-    // so the D1 INSERT always completes. This prevents the Resend retry
-    // contract from creating orphaned R2 objects: if a 500 were returned here,
-    // Resend would retry, INSERT OR IGNORE would skip the duplicate resend_id,
-    // and any already-written R2 objects would be permanently orphaned.
-    let bodyTextKey: string | null = null;
-    let bodyHtmlKey: string | null = null;
     if (r2Bucket) {
-      if (receivedEmail.text !== null && receivedEmail.text !== undefined) {
-        bodyTextKey = getBodyTextKey(internalEmailId);
-        try {
-          await r2Bucket.put(bodyTextKey, receivedEmail.text, {
-            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-          });
-        } catch (err) {
-          captureR2PutError(err, env, { emailId, operation: 'body_text', objectKey: bodyTextKey });
-          bodyTextKey = null;
-        }
+      if (envelope.bodyText !== null) {
+        pendingBodyContent.push({
+          type: 'text',
+          key: getBodyTextKey(internalEmailId),
+          content: envelope.bodyText,
+          contentType: 'text/plain; charset=utf-8',
+        });
+        // Issue H1 fix: Store in D1 for FTS5 searchability
+        pendingBodyTextForD1 = envelope.bodyText;
       }
 
-      if (receivedEmail.html !== null && receivedEmail.html !== undefined) {
-        bodyHtmlKey = getBodyHtmlKey(internalEmailId);
-        try {
-          await r2Bucket.put(bodyHtmlKey, receivedEmail.html, {
-            httpMetadata: { contentType: 'text/html; charset=utf-8' },
-          });
-        } catch (err) {
-          captureR2PutError(err, env, { emailId, operation: 'body_html', objectKey: bodyHtmlKey });
-          bodyHtmlKey = null;
-        }
+      if (envelope.bodyHtml !== null) {
+        pendingBodyContent.push({
+          type: 'html',
+          key: getBodyHtmlKey(internalEmailId),
+          content: envelope.bodyHtml,
+          contentType: 'text/html; charset=utf-8',
+        });
+        // Issue H1 fix: Store in D1 for FTS5 searchability
+        pendingBodyHtmlForD1 = envelope.bodyHtml;
       }
     } else {
       console.warn('[worker] EMAIL_BODIES R2 bucket not bound; bodies will not be stored in R2', { emailId });
+      // Fallback: still write to D1 when R2 is not available
+      pendingBodyTextForD1 = envelope.bodyText;
+      pendingBodyHtmlForD1 = envelope.bodyHtml;
     }
 
     // --- Step 7: Build attachment descriptor list (download content from Resend) ---
@@ -740,36 +588,64 @@ const handler: ExportedHandler<Env> = {
     //
     // Column order in the INSERT and .bind() are kept in sync.
     try {
-      const insertResult = await env.DB.prepare(`
-        INSERT OR IGNORE INTO emails
-          (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading)
-        VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
-      `)
-        .bind(
-          internalEmailId,            // id
-          emailId,                    // resend_id
-          threadId,                   // thread_id (looked up or new)
-          fromAddress,                // from_address
-          fromName,                   // from_name (nullable)
-          toAddress,                  // to_address
-          receivedEmail.subject ?? null,
-          null,                       // DEPRECATED: body_text now stored in R2
-          null,                       // DEPRECATED: body_html now stored in R2
-          bodyTextKey,                // body_text_key
-          bodyHtmlKey,                // body_html_key
-          messageId,                  // message_id (nullable)
-          inReplyTo,                  // in_reply_to (nullable)
-          referencesHeader,           // references (nullable)
-          needsRethreading,           // needs_rethreading (0 or 1)
-        )
-        .run();
+      // Skip INSERT when resuming a partial ingestion — the D1 row already exists.
+      let inserted = false;
+      if (resumeExistingId === null) {
+        const insertResult = await ingestInboundEmail({
+          db: env.DB,
+          id: internalEmailId,
+          resendId: emailId,
+          threadId,
+          fromAddress: envelope.fromAddress,
+          fromName: envelope.fromName,
+          toAddress: envelope.toAddress,
+          subject: envelope.subject,
+          bodyText: pendingBodyTextForD1,
+          bodyHtml: pendingBodyHtmlForD1,
+          messageId: envelope.messageId,
+          inReplyTo: envelope.inReplyTo,
+          references: envelope.references,
+          isRead: 0,
+          isSent: 0,
+          needsRethreading,
+          r2Bucket: null,
+        });
+        inserted = insertResult.inserted;
+      }
 
-      // Issue 3 fix: D1Result.meta is typed as always-present; remove the
-      // optional chain (?.) that was masking a potential stub misconfiguration
-      // where absent meta would silently be treated as a non-duplicate.
-      const inserted = (insertResult.meta.changes ?? 0) > 0;
-      if (inserted) {
+      // Run body R2 writes for both fresh inserts and resume mode.
+      // Resume mode: a prior attempt inserted the D1 row but the R2 write failed (503).
+      // Fresh insert: normal first-time ingestion path.
+      // Issue H2 fix: body writes occur after the D1 row exists, preventing orphaned R2 objects.
+      // Issue H3 fix: R2 write failures are FATAL — return 503 so Resend retries.
+      if (inserted || resumeExistingId !== null) {
+        const writtenBodyKeys: Array<{ type: 'text' | 'html'; r2Key: string }> = [];
+        for (const { type, key, content, contentType } of pendingBodyContent) {
+          try {
+            await r2Bucket!.put(key, content, {
+              httpMetadata: { contentType },
+            });
+            writtenBodyKeys.push({ type, r2Key: key });
+          } catch (err) {
+            captureR2PutError(err, { emailId, operation: 'body_write', objectKey: key });
+            // Issue H3 fix: Return 503 to trigger Resend retry instead of silently losing content
+            return new Response('Body storage failed', { status: 503 });
+          }
+        }
+
+        // If body keys were written, UPDATE the row with the R2 keys
+        if (writtenBodyKeys.length > 0) {
+          const bodyTextKeyUpdate = writtenBodyKeys.find((k) => k.type === 'text')?.r2Key ?? null;
+          const bodyHtmlKeyUpdate = writtenBodyKeys.find((k) => k.type === 'html')?.r2Key ?? null;
+          await env.DB.prepare(`
+            UPDATE emails SET body_text_key = ?, body_html_key = ? WHERE id = ?
+          `)
+            .bind(bodyTextKeyUpdate, bodyHtmlKeyUpdate, internalEmailId)
+            .run();
+        }
+      }
+
+      if (inserted || resumeExistingId !== null) {
         // Issue 2 fix: R2 attachment writes occur here, inside the inserted gate,
         // so duplicate deliveries never trigger redundant R2 puts.
         const persistedAttachments: Array<{
@@ -810,7 +686,7 @@ const handler: ExportedHandler<Env> = {
         await Promise.all(persistedAttachments.map(async (attachment) => {
           try {
             await env.DB.prepare(`
-              INSERT INTO attachments
+              INSERT OR IGNORE INTO attachments
                 (id, email_id, r2_key, filename, content_type, size_bytes, created_at)
               VALUES
                 (?, ?, ?, ?, ?, ?, ?)
@@ -835,12 +711,10 @@ const handler: ExportedHandler<Env> = {
         }));
       }
     } catch (err) {
-      if (env.SENTRY_DSN) {
-        Sentry.captureException(err, {
-          tags: { layer: 'worker', operation: 'db.insert' },
-          extra: { emailId },
-        });
-      }
+      captureException(err, {
+        tags: { layer: 'worker', operation: 'db.insert' },
+        extra: { emailId },
+      });
       return new Response('Database error', { status: 500 });
     }
 
@@ -848,8 +722,8 @@ const handler: ExportedHandler<Env> = {
   },
 } satisfies ExportedHandler<Env>;
 
-export default Sentry.withSentry(
-  (env: Env) => env.SENTRY_DSN
+export default withSentry<Env>(
+  (env) => env.SENTRY_DSN
     ? {
         dsn: env.SENTRY_DSN,
         tracesSampleRate: 0.2,

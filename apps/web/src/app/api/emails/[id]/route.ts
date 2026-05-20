@@ -1,9 +1,9 @@
-import { getRequestContext } from '@cloudflare/next-on-pages';
+//import { getRequestContext } from '@cloudflare/next-on-pages';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { getEmailById, markAsRead } from '@q3ik-mail/database';
 import { captureException } from '@/lib/sentry';
 import { UUID_RE } from '@/lib/validation';
 
-export const runtime = 'edge';
 
 export async function GET(
   _req: Request,
@@ -16,7 +16,9 @@ export async function GET(
       return Response.json({ error: 'Invalid email ID format' }, { status: 400 });
     }
 
-    const { env } = getRequestContext();
+    //const { env } = getRequestContext();
+    const { env } = await getCloudflareContext({ async: true });
+    
     const r2Bucket = 'EMAIL_BODIES' in env ? (env.EMAIL_BODIES as R2Bucket) : null;
     const email = await getEmailById(env.DB, id, r2Bucket);
     if (!email) return Response.json({ error: 'Not found' }, { status: 404 });
@@ -46,6 +48,7 @@ export async function GET(
       references: email.references,
       is_read: email.is_read,
       is_sent: email.is_sent,
+      status: email.status,
       created_at: email.created_at,
     });
   } catch (error) {

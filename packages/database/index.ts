@@ -1,4 +1,5 @@
 import type { Email, EmailSummary } from './types';
+import { resolveOrphanThreadId } from '@q3ik-mail/core';
 
 export type { Email, EmailSummary, NewEmail } from './types';
 
@@ -86,14 +87,159 @@ export interface ThreadListPage {
   nextCursor: string | null;
 }
 
+export interface IngestInboundEmailOptions {
+  db: D1Database;
+  id: string;
+  resendId: string;
+  threadId: string;
+  fromAddress: string;
+  fromName?: string | null;
+  toAddress: string;
+  subject?: string | null;
+  bodyText?: string | null;
+  bodyHtml?: string | null;
+  messageId?: string | null;
+  inReplyTo?: string | null;
+  references?: string | null;
+  isRead?: 0 | 1;
+  isSent?: 0 | 1;
+  needsRethreading?: 0 | 1;
+  r2Bucket?: R2Bucket | null;
+}
+
+export interface IngestInboundEmailResult {
+  inserted: boolean;
+  bodyTextKey: string | null;
+  bodyHtmlKey: string | null;
+}
+
+export async function ingestInboundEmail(
+  opts: IngestInboundEmailOptions
+): Promise<IngestInboundEmailResult> {
+  const bodyText = opts.bodyText ?? null;
+  const bodyHtml = opts.bodyHtml ?? null;
+  const isRead = opts.isRead ?? 0;
+  const isSent = opts.isSent ?? 0;
+  const needsRethreading = opts.needsRethreading ?? 0;
+  let bodyTextKey: string | null = null;
+  let bodyHtmlKey: string | null = null;
+
+  if (opts.r2Bucket) {
+    if (bodyText !== null) {
+      const key = `emails/${opts.id}/body.txt`;
+      try {
+        await opts.r2Bucket.put(key, bodyText, {
+          httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+        });
+        bodyTextKey = key;
+      } catch (err) {
+        console.warn('[database] Failed to persist inbound body_text to R2; falling back to inline D1 body', { err });
+      }
+    }
+
+    if (bodyHtml !== null) {
+      const key = `emails/${opts.id}/body.html`;
+      try {
+        await opts.r2Bucket.put(key, bodyHtml, {
+          httpMetadata: { contentType: 'text/html; charset=utf-8' },
+        });
+        bodyHtmlKey = key;
+      } catch (err) {
+        console.warn('[database] Failed to persist inbound body_html to R2; falling back to inline D1 body', { err });
+      }
+    }
+  }
+
+  const result = await opts.db.prepare(`
+    INSERT OR IGNORE INTO emails
+      (id, resend_id, thread_id, from_address, from_name, to_address, subject, body_text, body_html, body_text_key, body_html_key, message_id, in_reply_to, "references", is_read, is_sent, needs_rethreading, status)
+    VALUES
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+    .bind(
+      opts.id,
+      opts.resendId,
+      opts.threadId,
+      opts.fromAddress,
+      opts.fromName ?? null,
+      opts.toAddress,
+      opts.subject ?? null,
+      bodyText,
+      bodyHtml,
+      bodyTextKey,
+      bodyHtmlKey,
+      opts.messageId ?? null,
+      opts.inReplyTo ?? null,
+      opts.references ?? null,
+      isRead,
+      isSent,
+      needsRethreading,
+      'received'
+    )
+    .run();
+
+  return {
+    inserted: (result.meta?.changes ?? 0) > 0,
+    bodyTextKey,
+    bodyHtmlKey,
+  };
+}
+
 interface ThreadListCursorPayload {
   v: 2;
   createdAt: string;
   resendId: string;
 }
 
-function encodeThreadListCursor(cursor: ThreadListCursorPayload): string {
-  return btoa(JSON.stringify(cursor));
+interface SignedThreadListCursorEnvelope {
+  payload: string;
+  sig: string;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function base64ToArrayBuffer(value: string): ArrayBuffer {
+  const bytes = base64ToBytes(value);
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
+async function importHmacKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+}
+
+async function encodeThreadListCursor(
+  cursor: ThreadListCursorPayload,
+  secret: string
+): Promise<string> {
+  const payloadJson = JSON.stringify(cursor);
+  const key = await importHmacKey(secret);
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(payloadJson)
+  );
+  const envelope: SignedThreadListCursorEnvelope = {
+    payload: payloadJson,
+    sig: bytesToBase64(new Uint8Array(signature)),
+  };
+  return btoa(JSON.stringify(envelope));
 }
 
 class InvalidCursorError extends Error {
@@ -114,10 +260,38 @@ class StaleVersionError extends Error {
   }
 }
 
-function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
+async function decodeThreadListCursor(
+  cursor: string,
+  secret: string
+): Promise<ThreadListCursorPayload> {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(atob(cursor));
+  } catch {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  if (!decoded || typeof decoded !== 'object') {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  const p = decoded as Record<string, unknown>;
+  if (typeof p.createdAt === 'string' && typeof p.id === 'string' && !('resendId' in p)) {
+    throw new StaleVersionError();
+  }
+
+  if (typeof p.payload !== 'string' || typeof p.sig !== 'string') {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  const envelope: SignedThreadListCursorEnvelope = {
+    payload: p.payload,
+    sig: p.sig,
+  };
+
   let payload: unknown;
   try {
-    payload = JSON.parse(atob(cursor));
+    payload = JSON.parse(envelope.payload);
   } catch {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
@@ -126,19 +300,45 @@ function decodeThreadListCursor(cursor: string): ThreadListCursorPayload {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  const p = payload as Record<string, unknown>;
-
-  // Detect v1 shape: { createdAt, id } with no version field.
-  // These are in-flight cursors from before the resend_id tiebreaker migration.
-  if (typeof p.createdAt === 'string' && typeof p.id === 'string' && !('resendId' in p)) {
+  const payloadRecord = payload as Record<string, unknown>;
+  if (
+    typeof payloadRecord.createdAt === 'string' &&
+    typeof payloadRecord.id === 'string' &&
+    !('resendId' in payloadRecord)
+  ) {
     throw new StaleVersionError();
   }
 
-  if (p.v !== 2 || typeof p.createdAt !== 'string' || typeof p.resendId !== 'string') {
+  if (
+    payloadRecord.v !== 2 ||
+    typeof payloadRecord.createdAt !== 'string' ||
+    typeof payloadRecord.resendId !== 'string'
+  ) {
     throw new InvalidCursorError('Invalid thread list cursor');
   }
 
-  return { v: 2, createdAt: p.createdAt, resendId: p.resendId };
+  const key = await importHmacKey(secret);
+  let signature: ArrayBuffer;
+  try {
+    signature = base64ToArrayBuffer(envelope.sig);
+  } catch {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+  const verified = await crypto.subtle.verify(
+    'HMAC',
+    key,
+    signature,
+    new TextEncoder().encode(envelope.payload)
+  );
+  if (!verified) {
+    throw new InvalidCursorError('Invalid thread list cursor');
+  }
+
+  return {
+    v: 2,
+    createdAt: payloadRecord.createdAt,
+    resendId: payloadRecord.resendId,
+  };
 }
 
 /**
@@ -169,14 +369,15 @@ function buildThreadListQuery(opts: {
   const rankedSubquery = `SELECT
            id, resend_id, thread_id, from_address, from_name,
            to_address, subject, message_id, in_reply_to, "references",
-           is_read, is_sent, needs_rethreading, created_at,
+           is_read, is_sent, needs_rethreading, status, created_at,
            ROW_NUMBER() OVER (
              PARTITION BY thread_id
              -- resend_id breaks ties within a thread to pick the representative row;
              -- the outer ORDER BY also uses resend_id as the cursor tiebreaker.
              ORDER BY created_at DESC, resend_id ASC
            ) AS thread_rank
-         FROM emails`;
+         FROM emails
+         WHERE status != 'send_failed'`;
 
   const whereClause = opts.cursor
     ? `WHERE thread_rank = 1
@@ -189,7 +390,7 @@ function buildThreadListQuery(opts: {
   const sql = `SELECT
          id, resend_id, thread_id, from_address, from_name,
          to_address, subject, message_id, in_reply_to, "references",
-         is_read, is_sent, needs_rethreading, created_at
+         is_read, is_sent, needs_rethreading, status, created_at
        FROM (
          ${rankedSubquery}
        ) ranked_emails
@@ -205,32 +406,6 @@ function buildThreadListQuery(opts: {
 }
 
 const ORPHAN_RETHREAD_BATCH_SIZE = 100;
-
-/**
- * Fetch the N most recent emails ordered by created_at DESC.
- * Returns EmailSummary (no body fields) for efficient list rendering.
- *
- * @param db    - D1Database binding injected from the Cloudflare runtime env
- * @param limit - Max number of emails to return (default: 50)
- */
-export async function getLatestEmails(
-  db: D1Database,
-  limit: number = 50
-): Promise<EmailSummary[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT
-         id, resend_id, thread_id, from_address, from_name,
-         to_address, subject, message_id, in_reply_to, "references",
-         is_read, is_sent, needs_rethreading, created_at
-       FROM emails
-       ORDER BY created_at DESC, resend_id ASC
-       LIMIT ?`
-    )
-    .bind(limit)
-    .all<EmailSummary>();
-  return results;
-}
 
 /**
  * Fetch all emails in a thread, ordered chronologically (oldest first).
@@ -434,7 +609,7 @@ export async function searchEmails(
   query: string
 ): Promise<EmailSummary[]> {
   const trimmedQuery = query.trim();
-  if (query.length > 1000 || !trimmedQuery || trimmedQuery.length > 500) return [];
+  if (!trimmedQuery || trimmedQuery.length > 500) return [];
 
   const terms = trimmedQuery
     .split(/\s+/)
@@ -452,29 +627,31 @@ export async function searchEmails(
   // produces over-broad, low-quality results.
   const matchQuery = terms.map((term) => `"${term}"`).join(' ');
 
+  // bm25() in SQLite FTS5 returns negative values for more-relevant matches.
+  // Ordering ASC therefore yields most-relevant rows first.
   const { results } = await db
     .prepare(
       `SELECT
          id, resend_id, thread_id, from_address, from_name,
          to_address, subject, message_id, in_reply_to, "references",
-         is_read, is_sent, needs_rethreading, created_at
+         is_read, is_sent, needs_rethreading, status, created_at
        FROM (
          SELECT
            emails.id, emails.resend_id, emails.thread_id, emails.from_address, emails.from_name,
            emails.to_address, emails.subject, emails.message_id, emails.in_reply_to, emails."references",
-           emails.is_read, emails.is_sent, emails.needs_rethreading, emails.created_at,
-           ROW_NUMBER() OVER (
-             PARTITION BY emails.thread_id
-             ORDER BY bm25(emails_fts), emails.created_at DESC, emails.id ASC
-           ) AS thread_rank,
-           bm25(emails_fts) AS rank
-         FROM emails
+           emails.is_read, emails.is_sent, emails.needs_rethreading, emails.status, emails.created_at,
+            ROW_NUMBER() OVER (
+              PARTITION BY emails.thread_id
+              ORDER BY bm25(emails_fts), emails.created_at DESC, emails.resend_id ASC
+            ) AS thread_rank,
+            bm25(emails_fts) AS rank
+          FROM emails
          JOIN emails_fts ON emails.rowid = emails_fts.rowid
          WHERE emails_fts MATCH ?
-       ) ranked_results
-       WHERE thread_rank = 1
-       ORDER BY rank ASC, created_at DESC, id ASC
-       LIMIT 50`
+        ) ranked_results
+        WHERE thread_rank = 1
+        ORDER BY rank ASC, created_at DESC, resend_id ASC
+        LIMIT 50`
     )
     .bind(matchQuery)
     .all<EmailSummary>();
@@ -487,17 +664,22 @@ export async function getThreadListPage(
   {
     limit = 50,
     cursor,
+    cursorSecret,
   }: {
     limit?: number;
     cursor?: string;
+    cursorSecret?: string;
   } = {}
 ): Promise<ThreadListPage> {
+  if (!cursorSecret) {
+    throw new Error('THREAD_LIST_CURSOR_SECRET is required');
+  }
   const pageSize = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
   const fetchLimit = pageSize + 1;
   let decodedCursor: ThreadListCursorPayload | null = null;
   if (cursor) {
     try {
-      decodedCursor = decodeThreadListCursor(cursor);
+      decodedCursor = await decodeThreadListCursor(cursor, cursorSecret);
     } catch (err) {
       if (err instanceof InvalidCursorError) {
         return { threads: [], nextCursor: null };
@@ -524,11 +706,11 @@ export async function getThreadListPage(
   const lastThread = threads.at(-1);
   const nextCursor =
     results.length > pageSize && lastThread
-      ? encodeThreadListCursor({
+      ? await encodeThreadListCursor({
           v: 2,
           createdAt: lastThread.created_at,
           resendId: lastThread.resend_id,
-        })
+        }, cursorSecret)
       : null;
 
   return {
@@ -549,6 +731,8 @@ export async function getThreadListPage(
  * @returns number of emails successfully re-threaded
  */
 export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
+  const D1_SAFE_IN_BIND_LIMIT = 90;
+
   // Fetch a single bounded batch of orphaned emails and only resolve them via
   // RFC 2822 Message-ID lookup. If the parent still does not exist, leave the
   // orphan on its current thread_id so it is not silently merged by subject.
@@ -584,29 +768,56 @@ export async function resolveOrphanedThreads(db: D1Database): Promise<number> {
   const parentMap = new Map(
     parentCandidates.map((parent) => [parent.message_id, parent] as const
   ));
+  const allReferenceIds = new Set<string>();
+
+  for (const orphan of orphans) {
+    if (parentMap.has(orphan.in_reply_to) || !orphan.references) continue;
+
+    for (const ref of orphan.references.trim().split(/\s+/)) {
+      if (ref && !parentMap.has(ref)) allReferenceIds.add(ref);
+    }
+  }
+
+  const referenceMap = new Map<string, { thread_id: string }>();
+
+  if (allReferenceIds.size > 0) {
+    const referenceIds = [...allReferenceIds];
+
+    for (let start = 0; start < referenceIds.length; start += D1_SAFE_IN_BIND_LIMIT) {
+      const chunk = referenceIds.slice(start, start + D1_SAFE_IN_BIND_LIMIT);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const { results: referenceCandidates } = await db
+        .prepare(
+          `SELECT id, message_id, thread_id
+           FROM emails
+           WHERE message_id IN (${placeholders})`
+        )
+        .bind(...chunk)
+        .all<{ id: string; message_id: string; thread_id: string }>();
+
+      for (const referenceCandidate of referenceCandidates) {
+        referenceMap.set(referenceCandidate.message_id, referenceCandidate);
+      }
+    }
+  }
+
+  // Merge parentMap and referenceMap into a single lookup for the pure
+  // resolveOrphanThreadId function. parentMap (from in_reply_to) takes
+  // precedence over referenceMap because it represents the direct reply
+  // relationship and is more authoritative for immediate threading.
+  const combinedLookup = new Map<string, { thread_id: string }>(referenceMap);
+  for (const [key, value] of parentMap) {
+    combinedLookup.set(key, value);
+  }
+
   const updates: D1PreparedStatement[] = [];
 
   for (const orphan of orphans) {
-    let parent:
-      | {
-          id: string;
-          thread_id: string;
-        }
-      | null = parentMap.get(orphan.in_reply_to) ?? null;
-
-    if (!parent && orphan.references) {
-      const refs = orphan.references.trim().split(/\s+/).reverse();
-      for (const ref of refs) {
-        const ancestor = await db
-          .prepare('SELECT id, thread_id FROM emails WHERE message_id = ? LIMIT 1')
-          .bind(ref)
-          .first<{ id: string; thread_id: string }>();
-        if (ancestor) {
-          parent = ancestor;
-          break;
-        }
-      }
-    }
+    const parent = resolveOrphanThreadId(
+      orphan.in_reply_to,
+      orphan.references,
+      combinedLookup,
+    );
 
     if (!parent) continue; // Parent still hasn't arrived
 

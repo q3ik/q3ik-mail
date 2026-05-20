@@ -1,8 +1,7 @@
-import { getRequestContext } from '@cloudflare/next-on-pages';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { searchEmails } from '@q3ik-mail/database';
 import { captureException } from '@/lib/sentry';
 
-export const runtime = 'edge';
 
 async function handleSearchError(error: unknown): Promise<Response> {
   console.error('[api/search] failed to search emails:', error);
@@ -19,7 +18,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const { env } = getRequestContext();
+    const { env } = await getCloudflareContext({ async: true });
     if (!env?.DB) {
       throw new Error('Database binding (DB) is missing');
     }
