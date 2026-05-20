@@ -37,7 +37,12 @@ vi.mock('@/components/ui/button', () => ({
   ),
 }));
 
-vi.mock('lucide-react', () => ({ ReplyIcon: () => null }));
+vi.mock('lucide-react', () => ({
+  ReplyIcon: () => null,
+  ForwardIcon: () => null,
+  ArchiveIcon: () => null,
+  MoreHorizontalIcon: () => null,
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
