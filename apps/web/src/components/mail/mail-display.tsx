@@ -9,6 +9,7 @@ import {
   MoreHorizontalIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getAvatarGradient } from '@/lib/avatars';
 import { Button } from '@/components/ui/button';
 import { captureMessage } from '@/lib/sentry';
 import type { ComposePayload } from '@/components/mail/compose-dialog';
@@ -80,26 +81,6 @@ function loadDomPurify() {
   return DOMPurifyPromise;
 }
 
-/** Gradient pairs for email avatars — same palette as mail-list. */
-const AVATAR_GRADIENTS = [
-  'from-[#c084fc] to-[#818cf8]',
-  'from-[#34d399] to-[#3b82f6]',
-  'from-[#fb923c] to-[#f472b6]',
-  'from-[#60a5fa] to-[#818cf8]',
-  'from-[#a78bfa] to-[#c084fc]',
-  'from-[#f472b6] to-[#fb923c]',
-  'from-[#22d3ee] to-[#818cf8]',
-  'from-[#fbbf24] to-[#f472b6]',
-];
-
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
-
 interface MailDisplayProps {
   thread: Email[];
   onReply?: (payload: ComposePayload) => void;
@@ -126,16 +107,16 @@ export function MailDisplay({ thread, onReply }: MailDisplayProps) {
           {subject}
         </span>
         <div className="flex gap-0.5 shrink-0">
-          <button className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+          <button type="button" aria-label="Reply" className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
             <ReplyIcon className="w-[17px] h-[17px]" />
           </button>
-          <button className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+          <button type="button" aria-label="Forward" className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
             <ForwardIcon className="w-[17px] h-[17px]" />
           </button>
-          <button className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+          <button type="button" aria-label="Archive" className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
             <ArchiveIcon className="w-[17px] h-[17px]" />
           </button>
-          <button className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+          <button type="button" aria-label="More options" className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
             <MoreHorizontalIcon className="w-[17px] h-[17px]" />
           </button>
         </div>
@@ -167,8 +148,7 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
   // message_id is null we disable the button rather than silently sending
   // a malformed header that breaks threading in external mail clients.
   const canReply = Boolean(email.message_id);
-  const gradientIndex = hashString(senderName) % AVATAR_GRADIENTS.length;
-  const gradient = AVATAR_GRADIENTS[gradientIndex];
+  const gradient = getAvatarGradient(senderName);
 
   return (
     <div

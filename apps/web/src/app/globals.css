@@ -56,7 +56,12 @@ body {
   border-color: oklch(0.714 0.203 305);
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling — standard props for Firefox, webkit pseudo-elements for Chrome/Safari */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(1 0 0 / 6%) transparent;
+}
+
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: oklch(1 0 0 / 6%); border-radius: 3px; }

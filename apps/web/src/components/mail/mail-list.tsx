@@ -4,6 +4,7 @@ import { formatDistanceToNow, isToday, isYesterday, format } from 'date-fns';
 import type { EmailSummary } from '@q3ik-mail/database';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { getAvatarGradient } from '@/lib/avatars';
 
 interface MailListProps {
   threads: EmailSummary[];
@@ -12,27 +13,6 @@ interface MailListProps {
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
   isSearching?: boolean;
-}
-
-/** Gradient pairs for thread avatars — cycled via hash of sender string. */
-const AVATAR_GRADIENTS = [
-  'from-[#c084fc] to-[#818cf8]',  // purple → indigo
-  'from-[#34d399] to-[#3b82f6]',  // emerald → blue
-  'from-[#fb923c] to-[#f472b6]',  // orange → pink
-  'from-[#60a5fa] to-[#818cf8]',  // blue → indigo
-  'from-[#a78bfa] to-[#c084fc]',  // violet → purple
-  'from-[#f472b6] to-[#fb923c]',  // pink → orange
-  'from-[#22d3ee] to-[#818cf8]',  // cyan → indigo
-  'from-[#fbbf24] to-[#f472b6]',  // amber → pink
-];
-
-/** Simple hash to get a stable avatar gradient from a string. */
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
 }
 
 /** Get initials from sender name or email address. */
@@ -88,9 +68,11 @@ export function MailList({
     );
   }
 
-  // Group threads by date
+  // Group threads by date.
+  // currentLabel starts as null so the first thread always creates a group,
+  // even if getDateLabel returns '' (invalid date fallback).
   const groups: { label: string; threads: EmailSummary[] }[] = [];
-  let currentLabel = '';
+  let currentLabel: string | null = null;
   for (const thread of threads) {
     const label = getDateLabel(thread.created_at);
     if (label !== currentLabel) {
@@ -149,8 +131,7 @@ function ThreadRow({
   const senderName = thread.from_name ?? thread.from_address;
   const subject = thread.subject ?? '(no subject)';
   const relativeTime = getRelativeTime(thread.created_at);
-  const gradientIndex = hashString(senderName) % AVATAR_GRADIENTS.length;
-  const gradient = AVATAR_GRADIENTS[gradientIndex];
+  const gradient = getAvatarGradient(senderName);
 
   return (
     <button
