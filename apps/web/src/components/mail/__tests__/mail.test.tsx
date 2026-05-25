@@ -93,7 +93,11 @@ vi.mock('@/components/ui/button', () => ({
   ),
 }));
 
-vi.mock('lucide-react', () => ({ PenSquareIcon: () => null }));
+vi.mock('lucide-react', () => ({
+  PlusIcon: () => null,
+  BellIcon: () => null,
+  SearchIcon: () => null,
+}));
 
 // --- helpers ----------------------------------------------------------------
 

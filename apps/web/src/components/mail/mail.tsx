@@ -10,7 +10,8 @@ import {
 } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PenSquareIcon } from 'lucide-react';
+import { PlusIcon, BellIcon, SearchIcon } from 'lucide-react';
+import Link from 'next/link';
 import { MailList } from './mail-list';
 import { MailDisplay } from './mail-display';
 import { ComposeDialog, type ComposePayload } from './compose-dialog';
@@ -199,29 +200,77 @@ export function Mail({
 
   return (
     <>
-      <ResizablePanelGroup direction="horizontal" className="h-full">
+      {/* ── Top Navigation Bar ── */}
+      <div className="flex items-center justify-between border-b border-border bg-background px-6 h-[52px] shrink-0">
+        <div className="flex items-center gap-4">
+          <Link href="/" className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#c084fc] to-[#f472b6] flex items-center justify-center font-mono font-bold text-xs text-white tracking-tight">
+              q3
+            </div>
+            <span className="text-[15px] font-semibold tracking-tight">q3ik mail</span>
+          </Link>
+          <nav className="flex gap-0.5 ml-2">
+            <button className="px-3.5 py-1.5 rounded-lg text-[13px] font-medium bg-secondary text-foreground transition-colors">
+              Inbox
+            </button>
+            <button className="px-3.5 py-1.5 rounded-lg text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+              Sent
+            </button>
+            <button className="px-3.5 py-1.5 rounded-lg text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+              Drafts
+            </button>
+          </nav>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+            <BellIcon className="w-[17px] h-[17px]" />
+          </button>
+          <div className="w-[30px] h-[30px] rounded-full bg-gradient-to-br from-[#f472b6] to-[#c084fc] flex items-center justify-center font-semibold text-xs text-white cursor-pointer">
+            J
+          </div>
+        </div>
+      </div>
+
+      {/* ── Main Content ── */}
+      <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
         <ResizablePanel defaultSize={30} minSize={20}>
-          <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between p-3 border-b">
-              <span className="text-sm font-semibold">Inbox</span>
-              <Button variant="outline" size="sm" onClick={() => openCompose()}>
-                <PenSquareIcon className="h-4 w-4 mr-1.5" />
-                Compose
+          <div className="flex flex-col h-full bg-card">
+            {/* Panel Header */}
+            <div className="flex items-center justify-between p-4">
+              <span className="text-lg font-bold tracking-tight">Inbox</span>
+              <Button
+                size="sm"
+                onClick={() => openCompose()}
+                className="bg-primary text-primary-foreground glow-primary glow-primary-hover rounded-[10px] font-semibold text-[13px] px-3.5 gap-1.5 transition-all"
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+                New
               </Button>
             </div>
-            <form className="border-b p-3" onSubmit={handleSearch}>
-              <div className="flex gap-2">
+
+            {/* Search */}
+            <form className="px-4 pb-3.5" onSubmit={handleSearch}>
+              <div className="relative">
+                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                 <Input
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Search"
+                  placeholder="Search conversations…"
                   aria-label="Search emails"
+                  className="pl-9 rounded-[10px] bg-background border-border focus-glow transition-all h-9"
                 />
-                <Button type="submit" variant="outline" size="sm" disabled={isSearching}>
+                <button
+                  type="submit"
+                  disabled={isSearching}
+                  className="sr-only"
+                  aria-label={isSearching ? 'Searching…' : 'Search'}
+                >
                   {isSearching ? 'Searching…' : 'Search'}
-                </Button>
+                </button>
               </div>
             </form>
+
+            {/* Thread List */}
             <MailList
               threads={threads}
               selectedThreadId={selectedThreadId}
@@ -232,9 +281,9 @@ export function Mail({
             />
           </div>
         </ResizablePanel>
-        <ResizableHandle withHandle />
+        <ResizableHandle className="w-px bg-border hover:bg-primary/20 transition-colors" />
         <ResizablePanel defaultSize={70} minSize={30}>
-          <div className={isPending ? 'opacity-60 transition-opacity' : ''}>
+          <div className={isPending ? 'opacity-60 transition-opacity h-full' : 'h-full'}>
             <MailDisplay
               thread={currentThread}
               onReply={(payload) => openCompose(payload)}

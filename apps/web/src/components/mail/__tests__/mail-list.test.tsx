@@ -12,6 +12,9 @@ vi.mock('@/components/ui/scroll-area', () => ({
 // Mock date-fns
 vi.mock('date-fns', () => ({
   formatDistanceToNow: vi.fn(() => '10 minutes ago'),
+  isToday: vi.fn(() => false),
+  isYesterday: vi.fn(() => false),
+  format: vi.fn(() => 'Jan 1'),
 }));
 
 const mockThreads: EmailSummary[] = [

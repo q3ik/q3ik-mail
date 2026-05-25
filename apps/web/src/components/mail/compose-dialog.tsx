@@ -78,7 +78,7 @@ export function ComposeDialog({ open, onOpenChange, initial }: ComposeDialogProp
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[560px]">
+      <DialogContent className="sm:max-w-[560px] rounded-[14px]">
         <DialogHeader>
           <DialogTitle>
             {initial?.replyToId ? 'Reply' : 'New Message'}
@@ -96,6 +96,7 @@ export function ComposeDialog({ open, onOpenChange, initial }: ComposeDialogProp
               onChange={(e) => setTo(e.target.value)}
               required
               disabled={isPending}
+              className="rounded-[10px] focus-glow"
             />
           </div>
 
@@ -108,6 +109,7 @@ export function ComposeDialog({ open, onOpenChange, initial }: ComposeDialogProp
               onChange={(e) => setSubject(e.target.value)}
               required
               disabled={isPending}
+              className="rounded-[10px] focus-glow"
             />
           </div>
 
@@ -120,6 +122,7 @@ export function ComposeDialog({ open, onOpenChange, initial }: ComposeDialogProp
               onChange={(e) => setContent(e.target.value)}
               required
               disabled={isPending}
+              className="rounded-[10px] focus-glow min-h-[120px]"
             />
           </div>
 
@@ -133,10 +136,15 @@ export function ComposeDialog({ open, onOpenChange, initial }: ComposeDialogProp
               variant="ghost"
               onClick={() => onOpenChange(false)}
               disabled={isPending}
+              className="rounded-[10px]"
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isPending}>
+            <Button
+              type="submit"
+              disabled={isPending}
+              className="rounded-[10px] glow-primary glow-primary-hover transition-all"
+            >
               {isPending ? 'Sending…' : 'Send'}
             </Button>
           </DialogFooter>

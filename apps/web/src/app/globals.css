@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
@@ -6,55 +7,62 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 }
 
+/* Always-dark palette — "Warmth" theme (purple/pink accent) */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.985 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-  }
+  --radius: 0.75rem;
+  --background: oklch(0.13 0.006 285);
+  --foreground: oklch(0.95 0.01 300);
+  --card: oklch(0.18 0.008 285);
+  --card-foreground: oklch(0.95 0.01 300);
+  --popover: oklch(0.18 0.008 285);
+  --popover-foreground: oklch(0.95 0.01 300);
+  --primary: oklch(0.714 0.203 305);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.22 0.012 285);
+  --secondary-foreground: oklch(0.95 0.01 300);
+  --muted: oklch(0.22 0.012 285);
+  --muted-foreground: oklch(0.58 0.035 290);
+  --accent: oklch(0.25 0.025 285);
+  --accent-foreground: oklch(0.95 0.01 300);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0.01 285 / 7%);
+  --input: oklch(1 0.01 285 / 10%);
+  --ring: oklch(0.714 0.203 305);
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
+
+/* Custom utility classes for the Warmth theme */
+.glow-primary {
+  box-shadow: 0 0 20px oklch(0.714 0.203 305 / 20%);
+}
+
+.glow-primary-hover:hover {
+  box-shadow: 0 0 28px oklch(0.714 0.203 305 / 30%);
+  transform: translateY(-1px);
+}
+
+.focus-glow:focus {
+  box-shadow: 0 0 0 3px oklch(0.714 0.203 305 / 8%);
+  border-color: oklch(0.714 0.203 305);
+}
+
+/* Scrollbar styling — standard props for Firefox, webkit pseudo-elements for Chrome/Safari */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(1 0 0 / 6%) transparent;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: oklch(1 0 0 / 6%); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: oklch(1 0 0 / 10%); }

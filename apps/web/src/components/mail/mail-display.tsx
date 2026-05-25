@@ -2,8 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Email } from '@q3ik-mail/database';
-import { ReplyIcon } from 'lucide-react';
+import {
+  ReplyIcon,
+  ForwardIcon,
+  ArchiveIcon,
+  MoreHorizontalIcon,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getAvatarGradient } from '@/lib/avatars';
 import { Button } from '@/components/ui/button';
 import { captureMessage } from '@/lib/sentry';
 import type { ComposePayload } from '@/components/mail/compose-dialog';
@@ -89,17 +95,47 @@ export function MailDisplay({ thread, onReply }: MailDisplayProps) {
     );
   }
 
+  const firstEmail = thread[0];
   const lastEmailId = thread[thread.length - 1].id;
+  const subject = firstEmail.subject ?? '(no subject)';
 
   return (
-    <div data-testid="mail-display" className="flex flex-col gap-4 p-4 overflow-auto h-full">
-      {thread.map((email) => (
-        <EmailCard
-          key={email.id}
-          email={email}
-          onReply={email.id === lastEmailId ? onReply : undefined}
-        />
-      ))}
+    <div data-testid="mail-display" className="flex flex-col h-full">
+      {/* ── Toolbar ── */}
+      <div className="flex items-center justify-between px-7 py-3 border-b border-border shrink-0">
+        <span className="text-sm font-semibold tracking-tight truncate">
+          {subject}
+        </span>
+        <div className="flex gap-0.5 shrink-0">
+          <button type="button" aria-label="Reply" className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+            <ReplyIcon className="w-[17px] h-[17px]" />
+          </button>
+          <button type="button" aria-label="Forward" className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+            <ForwardIcon className="w-[17px] h-[17px]" />
+          </button>
+          <button type="button" aria-label="Archive" className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+            <ArchiveIcon className="w-[17px] h-[17px]" />
+          </button>
+          <button type="button" aria-label="More options" className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors">
+            <MoreHorizontalIcon className="w-[17px] h-[17px]" />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Email Thread ── */}
+      <div className="flex-1 overflow-auto px-8 py-7">
+        <h1 className="text-[22px] font-bold tracking-tight leading-tight mb-6">
+          {subject}
+        </h1>
+
+        {thread.map((email) => (
+          <EmailCard
+            key={email.id}
+            email={email}
+            onReply={email.id === lastEmailId ? onReply : undefined}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -112,23 +148,39 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
   // message_id is null we disable the button rather than silently sending
   // a malformed header that breaks threading in external mail clients.
   const canReply = Boolean(email.message_id);
+  const gradient = getAvatarGradient(senderName);
 
   return (
     <div
       className={cn(
-        'rounded-lg border bg-card p-4 shadow-sm',
+        'rounded-[14px] border border-border bg-card p-5 mb-5',
         email.is_read === 0 && 'border-primary/30'
       )}
     >
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div className="flex flex-col">
-          <span className={cn('text-sm font-medium', email.is_read === 0 && 'font-bold')}>
-            {senderName}
-          </span>
-          <span className="text-xs text-muted-foreground">{email.from_address}</span>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4 pb-3.5 border-b border-border">
+        <div className="flex items-center gap-3">
+          <div
+            className={cn(
+              'w-[38px] h-[38px] rounded-[10px] bg-gradient-to-br flex items-center justify-center text-white font-semibold text-sm shrink-0',
+              gradient
+            )}
+          >
+            {senderName.charAt(0).toUpperCase()}
+          </div>
+          <div className="flex flex-col">
+            <span className={cn('text-sm font-semibold', email.is_read === 0 && 'font-bold')}>
+              {senderName}
+            </span>
+            <span className="text-xs text-muted-foreground font-mono">
+              {email.from_address}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
+          <span className="shrink-0 text-xs text-muted-foreground font-mono text-right leading-relaxed">
+            {date}
+          </span>
           {onReply && (
             <span
               tabIndex={canReply ? undefined : 0}
@@ -137,7 +189,7 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
               <Button
                 variant="ghost"
                 size="sm"
-                className="shrink-0"
+                className="shrink-0 rounded-lg"
                 disabled={!canReply}
                 aria-disabled={!canReply}
                 onClick={() =>
@@ -160,10 +212,7 @@ function EmailCard({ email, onReply }: { email: Email; onReply?: (payload: Compo
         </div>
       </div>
 
-      {email.subject && (
-        <h2 className="mb-3 text-base font-semibold">{email.subject}</h2>
-      )}
-
+      {/* Body */}
       <EmailBody email={email} />
     </div>
   );
@@ -296,7 +345,7 @@ function EmailBody({ email }: { email: Email }) {
 
   if (body.body_text) {
     return (
-      <pre className="whitespace-pre-wrap text-sm text-foreground font-sans break-words">
+      <pre className="whitespace-pre-wrap text-sm text-foreground font-sans break-words leading-relaxed">
         {body.body_text}
       </pre>
     );

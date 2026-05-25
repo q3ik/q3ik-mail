@@ -10,7 +10,7 @@ export default async function InboxPage() {
   const initialThread = firstThreadId ? await fetchThread(firstThreadId) : [];
 
   return (
-    <main className="h-screen overflow-hidden">
+    <main className="h-screen overflow-hidden flex flex-col">
       <Mail
         threads={threads}
         selectedThread={initialThread}
