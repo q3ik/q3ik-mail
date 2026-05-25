@@ -48,7 +48,17 @@ test.describe('agentmail delivery', () => {
       return;
     }
     client = new AgentMailClient(agentmailApiKey);
-    mailbox = await client.createMailbox();
+
+    try {
+      mailbox = await client.createMailbox();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      test.skip(
+        message.includes('403'),
+        `AgentMail mailbox provisioning is not authorized in CI: ${message}`
+      );
+      throw error;
+    }
     if (!mailbox) throw new Error('AgentMail createMailbox() returned null — cannot proceed with suite');
   });
 

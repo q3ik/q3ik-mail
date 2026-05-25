@@ -75,8 +75,11 @@ export class AgentMailClient {
     const allowStatuses = options?.allowStatuses ?? [];
     if (!res.ok && !allowStatuses.includes(res.status)) {
       const errorBody = await res.text();
-      if (process.env.DEBUG) console.debug('AgentMail error body:', errorBody);
-      throw new Error(`AgentMail API error ${res.status} on ${path}`);
+      const displayBody = errorBody.trim();
+      const truncatedBody = displayBody.length > 1000 ? displayBody.slice(0, 1000) + "..." : displayBody;
+      throw new Error(
+        "AgentMail API error " + res.status + " on " + path + ": " + (truncatedBody || "no response body")
+      );
     }
 
     // Caller explicitly opted out of JSON parsing — return without reading body.
@@ -91,7 +94,7 @@ export class AgentMailClient {
       }
       return undefined as unknown as T;
     }
-
+  
     return res.json() as Promise<T>;
   }
 
